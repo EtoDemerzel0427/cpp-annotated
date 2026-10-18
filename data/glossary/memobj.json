@@ -1,0 +1,226 @@
+[
+ {
+  "id": "byte",
+  "en": "byte",
+  "zh": "字节",
+  "def": "C++ 内存模型的基本存储单位，由实现定义数目（`CHAR_BIT`，至少 8）的连续位组成；每个字节有唯一地址。",
+  "ref": "intro.memory#1"
+ },
+ {
+  "id": "memory-location",
+  "en": "memory location",
+  "zh": "内存位置",
+  "def": "一个非位域标量对象，或一串极大的相邻非零宽位域所占的存储。不同内存位置可被不同线程无干扰地访问；它是数据竞争（[[intro.races]]）的最小粒度。",
+  "ref": "intro.memory#3"
+ },
+ {
+  "id": "subobject",
+  "en": "subobject",
+  "zh": "子对象",
+  "def": "包含在另一个对象中的对象：成员子对象、基类子对象或数组元素。由 placement new 放进字节数组的对象不是子对象。",
+  "ref": "intro.object#2"
+ },
+ {
+  "id": "complete-object",
+  "en": "complete object",
+  "zh": "完整对象",
+  "def": "不是任何其他对象的子对象的对象。对象 x 的完整对象是沿子对象关系一路向上得到的那个完整对象。",
+  "ref": "intro.object#2"
+ },
+ {
+  "id": "corresponding-direct-subobjects",
+  "en": "corresponding direct subobjects",
+  "zh": "对应的直接子对象",
+  "def": "在子对象 e 的存储上恰好重新创建的同类型对象（e 不是潜在重叠子对象、外层对象在生命周期内）成为外层对象的子对象，二者称为对应的直接子对象；用于定义[[g:transparently-replaceable]]。",
+  "ref": "intro.object#2"
+ },
+ {
+  "id": "provides-storage",
+  "en": "provides storage",
+  "zh": "提供存储",
+  "def": "`unsigned char[N]` 或 `std::byte[N]` 数组在其中创建的完整对象完全落在数组内时，称数组为该对象提供存储；此时复用存储不结束数组的生命周期。",
+  "ref": "intro.object#3"
+ },
+ {
+  "id": "nested-within",
+  "en": "nested within",
+  "zh": "嵌套于",
+  "def": "a 嵌套于 b：a 是 b 的子对象，或 b 为 a 提供存储，或经由中间对象传递地成立。",
+  "ref": "intro.object#4"
+ },
+ {
+  "id": "most-derived-object",
+  "en": "most derived object",
+  "zh": "最派生对象",
+  "def": "类型为最派生类的对象或非类类型的对象——即除基类子对象之外的所有对象。其类型是 glvalue 的动态类型。",
+  "ref": "intro.object#6"
+ },
+ {
+  "id": "potentially-overlapping-subobject",
+  "en": "potentially-overlapping subobject",
+  "zh": "潜在重叠子对象",
+  "def": "基类子对象，或声明了 `[[no_unique_address]]` 的非静态数据成员；其存储可与其他子对象重叠，可能大小为零。",
+  "ref": "intro.object#7"
+ },
+ {
+  "id": "potentially-non-unique-object",
+  "en": "potentially non-unique object",
+  "zh": "潜在非唯一对象",
+  "def": "字符串字面量对象、初始化列表的后备数组、数组类型的模板参数对象及其子对象；两个这样的对象可以有相同地址。",
+  "ref": "intro.object#9"
+ },
+ {
+  "id": "constituent-values",
+  "en": "constituent values",
+  "zh": "组成值",
+  "def": "标量对象的值，或对象除非活跃联合体元素子对象外所有直接子对象的组成值；常量表达式据此检查结果是否已完全初始化。",
+  "ref": "intro.object#12"
+ },
+ {
+  "id": "implicitly-create-objects",
+  "en": "implicitly creating objects",
+  "zh": "隐式创建对象",
+  "def": "`malloc`、`memcpy`、`operator new`、字节数组生命周期开始等操作，会在指定存储中创建并开始那些能使程序具有定义行为的隐式生存期类型对象；不存在这样的集合则 UB。",
+  "ref": "intro.object#13"
+ },
+ {
+  "id": "suitable-created-object",
+  "en": "suitable created object",
+  "zh": "合适的已创建对象",
+  "def": "隐式创建对象后，某些操作（如 `operator new`、`malloc`）返回的指针所指向的那个对象：地址位于区域起始、且使程序有定义行为的已创建对象。",
+  "ref": "intro.object#14"
+ },
+ {
+  "id": "alignment",
+  "en": "alignment",
+  "zh": "对齐",
+  "def": "实现定义的整数（必为 2 的幂），表示某类型对象可被分配的相邻地址间隔；在不满足对齐的存储中创建对象是 UB。",
+  "ref": "basic.align#1"
+ },
+ {
+  "id": "fundamental-alignment",
+  "en": "fundamental alignment",
+  "zh": "基本对齐",
+  "def": "不超过 `alignof(std::max_align_t)` 的对齐，在所有上下文中都受支持。",
+  "ref": "basic.align#2"
+ },
+ {
+  "id": "extended-alignment",
+  "en": "extended alignment",
+  "zh": "扩展对齐",
+  "def": "大于 `alignof(std::max_align_t)` 的对齐；是否支持由实现定义。具有扩展对齐要求的类型称为 over-aligned 类型。",
+  "ref": "basic.align#3"
+ },
+ {
+  "id": "new-extended-alignment",
+  "en": "new-extended alignment",
+  "zh": "new 扩展对齐",
+  "def": "大于 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 的对齐；此时 new-expression 改用带 `std::align_val_t` 的分配函数。",
+  "ref": "basic.align#3"
+ },
+ {
+  "id": "lifetime",
+  "en": "lifetime",
+  "zh": "生命周期",
+  "def": "对象或引用的运行期属性：从存储就绪且初始化完成开始，到析构开始（类类型）、被销毁（非类类型）或存储被释放/复用为止。",
+  "ref": "basic.life#2"
+ },
+ {
+  "id": "vacuous-initialization",
+  "en": "vacuous initialization",
+  "zh": "空初始化",
+  "def": "变量被默认初始化、未进行其他初始化，且（类类型时）选中的是平凡构造函数；例如 `int x;`。",
+  "ref": "basic.life#2"
+ },
+ {
+  "id": "transparently-replaceable",
+  "en": "transparently replaceable",
+  "zh": "透明可替换",
+  "def": "新对象恰好在旧对象原位置创建、类型相同、旧对象（或其完整对象）不是 const 等条件满足时，指向旧对象的指针、引用和名字自动指向新对象；否则需 `std::launder`。",
+  "ref": "basic.life#9"
+ },
+ {
+  "id": "indeterminate-value",
+  "en": "indeterminate value",
+  "zh": "不确定值",
+  "def": "动态存储期对象或标记 `[[indeterminate]]` 的变量未初始化字节的值；除 `unsigned char`/`std::byte` 的搬运例外外，产生它即 UB。",
+  "ref": "basic.indet#1"
+ },
+ {
+  "id": "erroneous-value",
+  "en": "erroneous value",
+  "zh": "错误值",
+  "def": "C++26 中自动存储期变量未初始化字节的值，由实现决定且与程序状态无关；产生它是错误行为而非 UB。",
+  "ref": "basic.indet#1"
+ },
+ {
+  "id": "storage-duration",
+  "en": "storage duration",
+  "zh": "存储期",
+  "def": "对象的属性，规定包含它的存储的最短潜在生命期：静态、线程、自动或动态，由创建对象的构造决定。",
+  "ref": "basic.stc.general#1"
+ },
+ {
+  "id": "static-storage-duration",
+  "en": "static storage duration",
+  "zh": "静态存储期",
+  "def": "命名空间作用域变量及以 `static`/`extern` 首次声明的变量（非 `thread_local`）的存储期，持续整个程序。",
+  "ref": "basic.stc.static#1"
+ },
+ {
+  "id": "thread-storage-duration",
+  "en": "thread storage duration",
+  "zh": "线程存储期",
+  "def": "`thread_local` 变量的存储期；每个线程一个独立对象，持续到该线程结束。",
+  "ref": "basic.stc.thread#1"
+ },
+ {
+  "id": "automatic-storage-duration",
+  "en": "automatic storage duration",
+  "zh": "自动存储期",
+  "def": "块作用域变量（非 `static`/`thread_local`/`extern`）和函数参数的存储期，持续到块退出（参数：其销毁之后）。",
+  "ref": "basic.stc.auto#1"
+ },
+ {
+  "id": "dynamic-storage-duration",
+  "en": "dynamic storage duration",
+  "zh": "动态存储期",
+  "def": "由 new-expression 创建或隐式创建的对象的存储期，持续到存储被释放。",
+  "ref": "basic.stc.dynamic.general#1"
+ },
+ {
+  "id": "allocation-function",
+  "en": "allocation function",
+  "zh": "分配函数",
+  "def": "名为 `operator new` / `operator new[]` 的函数：返回 `void*`，首参为 `std::size_t`；成功返回足够大且对齐的存储，失败抛 `std::bad_alloc`（`noexcept` 版本返回空）。",
+  "ref": "basic.stc.dynamic.allocation#1"
+ },
+ {
+  "id": "destroying-operator-delete",
+  "en": "destroying operator delete",
+  "zh": "销毁型 operator delete",
+  "def": "第二个参数为 `std::destroying_delete_t` 的类成员 `operator delete`；delete-expression 不再调用析构函数，由它自行负责析构与释放（C++20）。",
+  "ref": "basic.stc.dynamic.deallocation#2"
+ },
+ {
+  "id": "usual-deallocation-function",
+  "en": "usual deallocation function",
+  "zh": "常规释放函数",
+  "def": "首参之后依次只有可选的 `std::destroying_delete_t`、`std::size_t`、`std::align_val_t` 参数的非模板释放函数；delete-expression 只调用这类函数。",
+  "ref": "basic.stc.dynamic.deallocation#3"
+ },
+ {
+  "id": "temporary-object",
+  "en": "temporary object",
+  "zh": "临时对象",
+  "def": "在 prvalue 被物化（临时物化转换）时，或实现为在寄存器中传参/返回平凡可复制对象时创建的对象；通常在完整表达式末尾销毁。",
+  "ref": "class.temporary#1"
+ },
+ {
+  "id": "lifetime-extension",
+  "en": "lifetime extension",
+  "zh": "生命周期延长",
+  "def": "引用经由临时物化、成员访问、下标、内置强转、条件/逗号表达式等直接绑定到临时对象（或其子对象）时，临时对象持续到引用的生命周期结束；经函数调用不延长。",
+  "ref": "class.temporary#6"
+ }
+]
