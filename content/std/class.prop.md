@@ -304,7 +304,7 @@ int main() { }
 
 ## 隐式生存期类（¶8）
 
-¶8：类 `S` 是**隐式生存期类**（implicit-lifetime class），若：
+¶8：类 `S` 是**隐式生存期类**（implicit-lifetime class，[[g:implicit-lifetime-class]]），若：
 
 - ¶8.1 它是一个**析构函数不是用户提供的聚合**；或
 - ¶8.2 它**至少有一个平凡的合格构造函数**，并且有一个**平凡的、未弃置的析构函数**。

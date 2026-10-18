@@ -142,7 +142,7 @@ int main() { }
 
 ## 合格的特殊成员函数（¶6）
 
-¶6：**合格的特殊成员函数**（eligible special member function）满足：
+¶6：**合格的特殊成员函数**（eligible special member function，[[g:eligible-special-member-function]]）满足：
 
 - ¶6.1 未被弃置；
 - ¶6.2 关联约束（若有）得到满足；
@@ -179,7 +179,7 @@ int main() { Holder<std::string> h{"x"}; (void)h; }
 
 ## 潜在构造的子对象（¶7）
 
-¶7：一个类的**直接非静态数据成员**、**非虚直接基类**，以及（若类**不是抽象类**）**虚基类**，统称为它的**潜在构造的子对象**（potentially constructed subobjects）。
+¶7：一个类的**直接非静态数据成员**、**非虚直接基类**，以及（若类**不是抽象类**）**虚基类**，统称为它的**潜在构造的子对象**（potentially constructed subobjects，[[g:potentially-constructed-subobjects]]）。
 
 这个术语在"预置的 X 何时被定义为弃置"的规则中反复出现（[[class.default.ctor#2]]、[[class.copy.ctor#10]]、[[class.dtor#7]]）：只有当某个潜在构造的子对象"构造不了/析构不了"时，预置的特殊成员函数才被删除。
 

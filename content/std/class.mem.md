@@ -175,7 +175,7 @@ int S::m;                // error: 不能在类外重声明非静态数据成员
 
 这是本节最重要、也最常被问到的规则。
 
-¶10：类（模板）的**完整类上下文**（complete-class context）是其 *member-specification* 中的：
+¶10：类（模板）的**完整类上下文**（complete-class context，[[g:complete-class-context]]）是其 *member-specification* 中的：
 
 - ¶10.1 函数体；
 - ¶10.2 默认实参；
@@ -348,7 +348,7 @@ struct T4 { void T4(); };           // error: ¶25.2（这不是构造函数：�
 
 ### 公共初始序列（¶27）
 
-两个**标准布局 struct**（[[class.prop#4]]）类型的**公共初始序列**（common initial sequence），是从各自第一个非静态数据成员（含位域）开始、按声明顺序的最长一段成员序列，使得对应的成员：
+两个**标准布局 struct**（[[class.prop#4]]）类型的**公共初始序列**（common initial sequence，[[g:common-initial-sequence]]），是从各自第一个非静态数据成员（含位域）开始、按声明顺序的最长一段成员序列，使得对应的成员：
 
 - ¶27.1 类型**布局兼容**（[[basic.types.general]]）；
 - ¶27.2 对齐要求相同；
