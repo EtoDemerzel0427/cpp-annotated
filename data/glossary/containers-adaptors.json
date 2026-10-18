@@ -1,0 +1,23 @@
+[
+ {
+  "id": "container-adaptor",
+  "en": "container adaptor",
+  "zh": "容器适配器",
+  "def": "持有一个或多个底层容器（模板参数 `Container`/`KeyContainer`/`MappedContainer`）并只暴露收窄接口的类模板：`stack`、`queue`、`priority_queue` 以及 `flat_map`、`flat_multimap`、`flat_set`、`flat_multiset`。复杂度、异常与迭代器失效规则委托给底层容器。",
+  "ref": "container.adaptors.general#2"
+ },
+ {
+  "id": "flat-container",
+  "en": "flat container",
+  "zh": "扁平容器",
+  "def": "`flat_map`、`flat_multimap`、`flat_set`、`flat_multiset` 的统称：在有序的随机访问序列容器（默认 `vector`）上实现关联容器接口。查找为二分、遍历连续；单元素插入/删除为线性，不满足关联容器的失效与节点句柄要求，也不是 allocator-aware 容器。",
+  "ref": "flat.map.overview#2"
+ },
+ {
+  "id": "sorted-unique",
+  "en": "sorted_unique / sorted_equivalent",
+  "zh": "有序标签",
+  "def": "标签类型 `sorted_unique_t`、`sorted_equivalent_t` 及其常量 `std::sorted_unique`、`std::sorted_equivalent`。传给扁平容器的构造函数或 `insert` 即向库承诺数据已按 `key_comp()` 有序（前者还要求无相等元素），从而跳过排序；承诺不成立时行为未定义。",
+  "ref": "flat.map.overview#10"
+ }
+]
