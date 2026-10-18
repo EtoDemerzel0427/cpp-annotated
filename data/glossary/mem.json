@@ -1,0 +1,72 @@
+[
+ {
+  "id": "uses-allocator-construction",
+  "en": "uses-allocator construction",
+  "zh": "uses-allocator 构造",
+  "def": "以分配器 alloc 与实参 args... 构造 T：若 T 使用与 alloc 兼容的分配器，就按前置约定 T(allocator_arg, alloc, args...) 或后置约定 T(args..., alloc) 把分配器传入，否则忽略它；pair 被逐成员递归处理。polymorphic_allocator 与 scoped_allocator_adaptor 的 construct 执行它。",
+  "ref": "allocator.uses.construction#1"
+ },
+ {
+  "id": "valueless",
+  "en": "valueless",
+  "zh": "无值（indirect / polymorphic）",
+  "def": "indirect 或 polymorphic 对象没有被拥有对象时的状态；只可能在被移动之后出现，可用 valueless_after_move() 查询。对无值对象解引用违反前置条件。",
+  "ref": "indirect.general#1"
+ },
+ {
+  "id": "deleter",
+  "en": "deleter",
+  "zh": "删除器",
+  "def": "unique_ptr 所拥有对象的处置机制：一个函数对象（或函数/函数对象的左值引用），以存储的指针调用它即恰当地处置该对象，默认是调用 delete 的 default_delete。",
+  "ref": "unique.ptr.general#2"
+ },
+ {
+  "id": "unique-pointer",
+  "en": "unique pointer",
+  "zh": "唯一指针",
+  "def": "存储指向另一对象 p 的指针、并在自身销毁时经由关联删除器处置 p 的对象；此时称它拥有 p。unique_ptr 的每个特化都具有这种严格所有权语义，可移动而不可复制。",
+  "ref": "unique.ptr.general#1"
+ },
+ {
+  "id": "empty-shared-ptr",
+  "en": "empty (shared_ptr)",
+  "zh": "空的 shared_ptr",
+  "def": "不拥有任何指针的 shared_ptr，use_count() 为 0。\"空\"与 get() == nullptr 相互独立：别名构造可得到空但存储指针非空的 shared_ptr，带删除器构造 nullptr 可得到非空但存储空指针的 shared_ptr。",
+  "ref": "util.smartptr.shared.general#1"
+ },
+ {
+  "id": "compatible-pointer-type",
+  "en": "compatible with (pointer types)",
+  "zh": "（指针类型）兼容",
+  "def": "在智能指针条款中，Y* 与 T* 兼容指 Y* 可转换为 T*，或 Y 是 U[N] 而 T 是 cv U[]。shared_ptr/weak_ptr 的转换构造与赋值以此为约束。",
+  "ref": "util.smartptr.shared.general#6"
+ },
+ {
+  "id": "enables-shared-from-this",
+  "en": "enables shared_from_this",
+  "zh": "启用 shared_from_this",
+  "def": "shared_ptr 构造函数的一个步骤：若 Y 有无歧义且可访问的 enable_shared_from_this 特化基类，且其 weak-this 已过期，就令 weak-this 与新建的 shared_ptr 共享所有权。私有继承时不会发生。",
+  "ref": "util.smartptr.shared.const#1"
+ },
+ {
+  "id": "default-memory-resource-pointer",
+  "en": "default memory resource pointer",
+  "zh": "默认内存资源指针",
+  "def": "接口未显式提供内存资源时某些设施（如默认构造的 polymorphic_allocator）使用的全局指针，初值为 new_delete_resource()；由 set_default_resource/get_default_resource 读写，不引发数据竞争。",
+  "ref": "mem.res.global#3"
+ },
+ {
+  "id": "pool-resource-classes",
+  "en": "pool resource classes",
+  "zh": "池资源类",
+  "def": "synchronized_pool_resource 与 unsynchronized_pool_resource 的统称：按块大小分档的池，每个池由几何增长的 chunk 补充，超大请求直通上游，析构时归还全部内存。",
+  "ref": "mem.res.pool.overview#1"
+ },
+ {
+  "id": "fancy-pointer",
+  "en": "fancy pointer",
+  "zh": "花式指针",
+  "def": "业界对分配器 pointer 类型不是裸指针（而是类类型，如共享内存中的偏移指针）这一情形的通称；标准中没有这个术语，相关接口由 pointer_traits 与 allocator_traits 描述，可经 std::to_address 转回裸指针。",
+  "ref": "pointer.traits.general#1"
+ }
+]
