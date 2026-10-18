@@ -1,0 +1,21 @@
+[
+ {"id": "active-member", "en": "active member (of a union)", "zh": "活跃成员", "def": "联合体中名字指代的对象正处于生命周期内的那个非静态数据成员；任一时刻至多一个。读非活跃成员是 UB。", "ref": "class.union.general#2"},
+ {"id": "anonymous-union", "en": "anonymous union", "zh": "匿名联合体", "def": "形如 `union { ... };` 的联合体，同时定义无名类型及其唯一的无名对象；成员名字绑定在外层作用域，只能有 public 非静态数据成员。", "ref": "class.union.anon#1"},
+ {"id": "union-like-class", "en": "union-like class", "zh": "类联合类", "def": "联合体，或以匿名联合体为直接成员的类。", "ref": "class.union.anon#4"},
+ {"id": "variant-member", "en": "variant member", "zh": "变体成员", "def": "联合体的（非匿名联合体）非静态数据成员，以及作为类成员的匿名联合体的非静态数据成员；它们可能不活跃，构造/析构规则对其特殊处理。", "ref": "class.union.anon#4"},
+ {"id": "local-class", "en": "local class", "zh": "局部类", "def": "在函数定义内声明的类；不能 odr-use 外层自动变量，成员函数须在类内定义，不能有静态数据成员与成员模板。", "ref": "class.local#1"},
+ {"id": "direct-base-class", "en": "direct base class", "zh": "直接基类", "def": "类定义的 *base-specifier* 中直接写出的类；基类的基类是间接基类。", "ref": "class.derived.general#2"},
+ {"id": "base-class-subobject", "en": "base class subobject", "zh": "基类子对象", "def": "派生类对象中对应某个基类的子对象；其在最派生对象中的分配顺序未指定，可以为零大小。", "ref": "class.derived.general#3"},
+ {"id": "virtual-base-class", "en": "virtual base class", "zh": "虚基类", "def": "以 `virtual` 指定的基类；无论在类格中出现多少次，最派生对象中只有一个该类型的子对象，由最派生类初始化。", "ref": "class.mi#4"},
+ {"id": "virtual-function", "en": "virtual function", "zh": "虚函数", "def": "首次声明带 `virtual`、或覆盖了基类虚函数的非静态成员函数；经指针/引用调用时按动态类型调用其最终覆盖者。", "ref": "class.virtual#1"},
+ {"id": "polymorphic-class", "en": "polymorphic class", "zh": "多态类", "def": "声明或继承了虚函数的类；`dynamic_cast` 向下转换与 `typeid` 的动态行为只适用于多态类。", "ref": "class.virtual#1"},
+ {"id": "override", "en": "override (a virtual function)", "zh": "覆盖", "def": "派生类中与基类虚函数 F 的声明对应（同名、同非对象形参列表、同 cv/引用限定，忽略 requires 子句）的成员函数 G 覆盖 F；不考虑访问权，也不要求 F 可见。", "ref": "class.virtual#2"},
+ {"id": "final-overrider", "en": "final overrider", "zh": "最终覆盖者", "def": "对某个子对象的虚函数而言，最派生类中最派生的那个覆盖者；虚函数调用即调用它。每个子对象的每个虚函数必须有唯一的最终覆盖者。", "ref": "class.virtual#2"},
+ {"id": "covariant-return-type", "en": "covariant return type", "zh": "协变返回类型", "def": "覆盖函数返回指向派生类的指针/引用，而被覆盖函数返回指向其可访问、无二义基类的同类指针/引用（cv 不增加）；调用结果被转换为静态选中函数的返回类型。", "ref": "class.virtual#8"},
+ {"id": "pure-virtual-function", "en": "pure virtual function", "zh": "纯虚函数", "def": "以 `= 0` 声明的虚函数；只有经限定名调用（或作为析构函数被隐式调用）时才需要定义。", "ref": "class.abstract#2"},
+ {"id": "abstract-class", "en": "abstract class", "zh": "抽象类", "def": "至少有一个纯虚函数、且其最终覆盖者仍为纯虚的类；不能创建其完整对象，只能作为基类子对象存在。", "ref": "class.abstract#4"},
+ {"id": "accessible-base-class", "en": "accessible base class", "zh": "可访问基类", "def": "在某程序点处，假想的基类 public 成员在派生类中可被访问的基类（可传递）；派生到基类的隐式转换要求基类可访问。", "ref": "class.access.base#4"},
+ {"id": "designating-class", "en": "designating class", "zh": "指名类", "def": "访问检查的参照类：名字查找在其作用域中找到成员的类（如 `p->T::m` 中的 `T`）；splice 指名时为成员直接所属的类。", "ref": "class.access.base#5"},
+ {"id": "friend", "en": "friend", "zh": "友元", "def": "被类授权、可以指名其 private 与 protected 成员的函数或类；不是该类的成员，友元关系不继承、不传递。", "ref": "class.friend#1"},
+ {"id": "hidden-friend", "en": "hidden friend", "zh": "隐藏友元", "def": "非正式术语：只在类内友元声明中声明（并定义）的函数。友元声明不绑定名字，因此它只能经 ADL 找到。", "ref": "class.friend#10"}
+]
