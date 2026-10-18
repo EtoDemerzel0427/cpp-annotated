@@ -50,7 +50,12 @@ def main():
         except subprocess.CalledProcessError:
             print(f"{path}: not in {base}, skipped")
             continue
-        new = open(path, encoding="utf-8").read()
+        try:
+            new = open(path, encoding="utf-8").read()
+        except UnicodeDecodeError as ex:
+            print(f"{path}: NOT VALID UTF-8 ({ex}) — restore with `git checkout HEAD -- {path}` and redo the edit")
+            bad += 1
+            continue
         a, b = extract(old), extract(new)
         problems = []
         for key in a:
