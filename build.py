@@ -788,7 +788,7 @@ def std_index(clauses, by_id, ctx, toc_meta):
     groups = {"lang": ("核心语言", "Core language · 第 1–15 章"), "lib": ("标准库", "Library · 第 16–33 章"),
               "annex": ("附录", "Annexes A–G")}
     out = [f'<header class="page-head"><h1>标准逐节</h1><div class="page-en">ISO/IEC 14882 working draft, section by section</div>'
-           f'<p class="page-summary">按标准自身的章节结构组织。蓝色条目已有笔记，灰色条目直接链接到 eel.is 原文。'
+           f'<p class="page-summary">按标准自身的章节结构组织。加粗条目已有笔记，灰色条目（↗）直接链接到 eel.is 原文。'
            f'草案版本：{esc(toc_meta.get("generated") or "")}（<a href="https://github.com/Eelis/draft/commit/{esc(toc_meta.get("draft_commit") or "")}" target="_blank" rel="noopener">{esc((toc_meta.get("draft_commit") or "")[:10])}</a>）。</p></header>']
     for g, (name, sub) in groups.items():
         cards = []
