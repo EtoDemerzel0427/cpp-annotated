@@ -1,0 +1,107 @@
+[
+ {
+  "id": "numeric-type",
+  "en": "numeric type",
+  "zh": "数值类型",
+  "def": "满足 Cpp17DefaultConstructible、Cpp17CopyConstructible、Cpp17CopyAssignable、Cpp17Destructible 的 cv 非限定对象类型；complex 与 valarray 只能用数值类型实例化，且这些类型上的操作抛异常时行为未定义。",
+  "ref": "numeric.requirements#1"
+ },
+ {
+  "id": "floating-point-environment",
+  "en": "floating-point environment",
+  "zh": "浮点环境",
+  "def": "浮点状态标志（除以零、不精确、无效、上溢、下溢）与浮点控制模式（如舍入方向）的总称，由 <cfenv> 读写。它具有线程存储期，新线程继承创建者在构造 thread/jthread 时的环境；FENV_ACCESS 是否支持由实现定义。",
+  "ref": "cfenv.thread#1"
+ },
+ {
+  "id": "seed-sequence",
+  "en": "seed sequence",
+  "zh": "种子序列",
+  "def": "消耗一串整数数据、按请求产生任意个 [0, 2^32) 内无符号整数的对象，用于给随机数引擎提供初始状态；其 generate 可以依赖之前的调用历史。std::seed_seq 是标准提供的种子序列。",
+  "ref": "rand.req.seedseq#1"
+ },
+ {
+  "id": "uniform-random-bit-generator",
+  "en": "uniform random bit generator",
+  "zh": "均匀随机比特生成器（URBG）",
+  "def": "返回无符号整数的函数对象，其值域 [G::min(), G::max()] 内各值（理想情况下）等概率；min/max 必须是静态的常量表达式且 min < max。C++20 起由概念 uniform_random_bit_generator 表达，具名要求另需嵌套 result_type。",
+  "ref": "rand.req.urng#1"
+ },
+ {
+  "id": "random-number-engine",
+  "en": "random number engine",
+  "zh": "随机数引擎",
+  "def": "额外满足播种、相等比较与流式输入输出要求的确定性 URBG。其规范给出状态大小、转移算法 TA 与生成算法 GA；两个引擎相等当且仅当它们将来产生的无限序列相同。",
+  "ref": "rand.req.eng#1"
+ },
+ {
+  "id": "random-number-engine-adaptor",
+  "en": "random number engine adaptor",
+  "zh": "随机数引擎适配器",
+  "def": "取另一个引擎（基引擎）的输出并施加算法、以得到不同随机性质的引擎，如 discard_block_engine、independent_bits_engine、shuffle_order_engine；其状态包含基引擎状态，base() 返回基引擎。",
+  "ref": "rand.req.adapt#1"
+ },
+ {
+  "id": "random-number-distribution",
+  "en": "random number distribution",
+  "zh": "随机数分布",
+  "def": "以 URBG 为实参调用、返回值服从某个概率密度函数或离散概率函数的函数对象；可以有内部状态（reset 清除），参数打包为 param_type。产生各分布的算法由实现定义，因此结果跨实现不可复现。",
+  "ref": "rand.req.dist#1"
+ },
+ {
+  "id": "transition-algorithm",
+  "en": "transition algorithm",
+  "zh": "转移算法",
+  "def": "随机数引擎把状态 e_i 推进到后继状态 e_{i+1} 的算法 TA；与生成算法 GA 一起完全确定引擎的输出序列。e() 推进到 TA(e_i) 并返回 GA(e_i)。",
+  "ref": "rand.req.eng#3"
+ },
+ {
+  "id": "linear-algebra-value-type",
+  "en": "linear algebra value type",
+  "zh": "线性代数值类型",
+  "def": "<linalg> 中输入/输出 mdspan 的 value_type 以及 Scalar 模板形参；必须建模 semiregular 等构成的 scalar 概念，值初始化的对象必须充当加法单位元。",
+  "ref": "linalg.reqs.val#1"
+ },
+ {
+  "id": "mdspan-overlap",
+  "en": "overlap (of mdspan objects)",
+  "zh": "（mdspan 的）重叠",
+  "def": "两个 mdspan 存在各自的多维下标使元素引用同一对象时称它们重叠；同 extents 且逐下标引用同一元素时称为别名（alias），是重叠的特例。<linalg> 的输出参数除明确允许外不得与其他 mdspan 参数重叠。",
+  "ref": "linalg.general#8"
+ },
+ {
+  "id": "vectorizable-type",
+  "en": "vectorizable type",
+  "zh": "可向量化类型",
+  "def": "可以作为 std::simd 数据并行类型元素的类型：全部标准整数类型、字符类型、float 与 double，已定义的 float16_t/float32_t/float64_t，以及以可向量化浮点类型为分量的 complex。",
+  "ref": "simd.general#2"
+ },
+ {
+  "id": "data-parallel-type",
+  "en": "data-parallel type",
+  "zh": "数据并行类型",
+  "def": "basic_vec 与 basic_mask 的所有启用的特化；由若干个相同元素类型的元素组成，元素个数（宽度）对每个类型是常量。逐元素运算的各次应用彼此无序。",
+  "ref": "simd.general#3"
+ },
+ {
+  "id": "simd-abi-tag",
+  "en": "ABI tag (simd)",
+  "zh": "ABI 标签（simd）",
+  "def": "指示数据并行对象的大小与二进制表示的类型；与元素类型一起决定宽度。native-abi<T> 是实现定义的、对目标平台最高效的标签，deduce-abi-t<T, N> 给出宽度为 N 的标签。",
+  "ref": "simd.expos.abi#1"
+ },
+ {
+  "id": "value-preserving-conversion",
+  "en": "value-preserving conversion",
+  "zh": "保值转换",
+  "def": "std::simd 中的术语：从算术类型 U 到可向量化类型 T 的转换，当 U 的所有可能值都能用 T 表示时称为保值的。广播构造与加载默认只接受保值转换，否则需要显式转换或 flag_convert。",
+  "ref": "simd.general#8"
+ },
+ {
+  "id": "checked-integer-operation",
+  "en": "checked integer operation",
+  "zh": "检查整数运算",
+  "def": "C23 <stdckdint.h> 的 ckd_add、ckd_sub、ckd_mul：按无限精度计算 a op b，把结果按模写入 *result，并返回数学结果是否无法用 *result 的类型表示（即是否溢出）。C++ 中要求三个类型都是有符号或无符号整数类型。",
+  "ref": "numerics.c.ckdint#1"
+ }
+]
