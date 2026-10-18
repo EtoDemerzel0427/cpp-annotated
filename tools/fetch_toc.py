@@ -27,7 +27,8 @@ def main():
         num = html.unescape(num).replace(" ", " ").replace(" ", " ").strip()
         num = re.sub(r"^Annex\s+([A-Z])\s*$", r"\1", num)
         title = html.unescape(re.sub("<[^>]+>", "", title)).strip()
-        entries.append({"id": sid, "num": num, "level": int(lvl) - 1, "title": title})
+        # eel.is renders every heading below depth 3 as <h4>, so derive depth from the section number
+        entries.append({"id": sid, "num": num, "level": num.count(".") + 1, "title": title})
     out = {
         "source": URL,
         "draft_commit": commit.group(1) if commit else None,
