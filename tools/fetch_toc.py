@@ -6,6 +6,7 @@ Usage: python3 tools/fetch_toc.py
 import html
 import json
 import re
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -14,19 +15,23 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main():
-    req = urllib.request.Request(URL, headers={"User-Agent": "cpp-std-notes toc fetcher"})
-    s = urllib.request.urlopen(req).read().decode("utf-8")
+    if len(sys.argv) > 2 and sys.argv[1] == "--from":
+        s = Path(sys.argv[2]).read_text(encoding="utf-8")  # a saved copy of the eel.is contents page
+    else:
+        req = urllib.request.Request(URL, headers={"User-Agent": "cpp-std-notes toc fetcher"})
+        s = urllib.request.urlopen(req).read().decode("utf-8")
     commit = re.search(r"Eelis/draft/commit/([0-9a-f]+)", s)
     generated = re.search(r"Generated on (\d{4}-\d{2}-\d{2})", s)
     pat = re.compile(
-        r"<div id='([^']+)'><h([2-6]) ><a class='secnum'[^>]*>([^<]*)</a>\s*(.*?)<a class='(?:folded_)?abbr_ref'"
+        r"<div id='([^']+)'><h([2-6]) ><a class='secnum'[^>]*>([^<]*)</a>\s*(.*?)<a class='(?:folded_)?abbr_ref'",
+        re.S,  # some titles contain line breaks
     )
     entries = []
     for m in pat.finditer(s):
         sid, lvl, num, title = m.groups()
         num = html.unescape(num).replace(" ", " ").replace(" ", " ").strip()
         num = re.sub(r"^Annex\s+([A-Z])\s*$", r"\1", num)
-        title = html.unescape(re.sub("<[^>]+>", "", title)).strip()
+        title = re.sub(r"\s+", " ", html.unescape(re.sub("<[^>]+>", "", title))).strip()
         # eel.is renders every heading below depth 3 as <h4>, so derive depth from the section number
         entries.append({"id": sid, "num": num, "level": num.count(".") + 1, "title": title})
     out = {

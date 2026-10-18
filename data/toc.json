@@ -9307,7 +9307,7 @@
 "id": "iterator.synopsis",
 "num": "24.2",
 "level": 2,
-"title": "Header <iterator> synopsis"
+"title": "Header <iterator> synopsis"
 },
 {
 "id": "iterator.requirements",
@@ -18610,6 +18610,12 @@
 "title": "Specialization for pointers"
 },
 {
+"id": "atomics.ref.memop",
+"num": "32.5.7.6",
+"level": 4,
+"title": "Member operators common to integers and pointers to objects"
+},
+{
 "id": "atomics.types.generic",
 "num": "32.5.8",
 "level": 3,
@@ -20462,6 +20468,12 @@
 "num": "C.7.7",
 "level": 3,
 "title": "Clause [library]: library introduction"
+},
+{
+"id": "diff.cpp03.language.support",
+"num": "C.7.8",
+"level": 3,
+"title": "Clause [support]: language support library"
 },
 {
 "id": "diff.cpp03.diagnostics",
