@@ -265,6 +265,8 @@ void X::r() { }              // error: r 不能用限定名声明——¶3.4 要
 
 这就是"块作用域函数声明"的语义：它声明的是命名空间成员，但只在块内可见。
 
+（截至写作时，Clang 23 接受最后一行的 `void X::r() { }`，没有诊断出 ¶3.4 的违反；标准例 3 明确它非良构。）
+
 ## 说明符作用于每个 declarator-id（¶4）
 
 ¶4 `static`、`thread_local`、`extern`、`mutable`、`friend`、`inline`、`virtual`、`constexpr`、`consteval`、`constinit`、`typedef` 以及 *explicit-specifier* **直接作用于每一个** *declarator-id*；每个 *declarator-id* 的类型则同时取决于说明符序列和它自己的声明符。

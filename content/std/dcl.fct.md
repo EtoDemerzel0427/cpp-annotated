@@ -214,7 +214,7 @@ int main() { f(1); }
 
 带显式对象参数的 *member-declarator* 不能有 *ref-qualifier* 或 *cv-qualifier-seq*，也不能声明为 `static` 或 `virtual`。
 
-¶8 以显式对象参数声明的形参称为**显式对象参数**（explicit object parameter），它不能是函数形参包。有显式对象参数的非静态成员函数称为**显式对象成员函数**（explicit object member function）；没有的称为**隐式对象成员函数**（implicit object member function）。
+¶8 以显式对象参数声明的形参称为**显式对象参数**（[[g:explicit-object-parameter|explicit object parameter]]），它不能是函数形参包。有显式对象参数的非静态成员函数称为**显式对象成员函数**（explicit object member function）；没有的称为**隐式对象成员函数**（implicit object member function）。
 
 ¶9 非静态成员函数的**对象参数**（object parameter）是显式对象参数或隐式对象参数（[[over.match.funcs]]）。
 

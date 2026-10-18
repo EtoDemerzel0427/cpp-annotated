@@ -194,7 +194,7 @@ int main() {
 
 ## 引用折叠（¶7）
 
-¶7 直接写 `int& &` 非良构，但通过 *typedef-name*、模板类型形参或 *decltype-specifier* 间接形成"引用的引用"是允许的，并按以下规则**折叠**（reference collapsing）：
+¶7 直接写 `int& &` 非良构，但通过 *typedef-name*、模板类型形参或 *decltype-specifier* 间接形成"引用的引用"是允许的，并按以下规则**折叠**（[[g:reference-collapsing|reference collapsing]]）：
 
 设 `TR` 是指向 `T` 的引用（`T&` 或 `T&&`）：
 
