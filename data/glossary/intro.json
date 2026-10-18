@@ -1,0 +1,240 @@
+[
+ {
+  "id": "diagnosable-rule",
+  "en": "diagnosable rule",
+  "zh": "可诊断规则",
+  "def": "标准中除注明“no diagnostic is required”或导致未定义行为者之外的全部语法与语义规则。违反它时，实现必须发出至少一条诊断信息。",
+  "ref": "intro.compliance.general#1"
+ },
+ {
+  "id": "diagnostic-message",
+  "en": "diagnostic message",
+  "zh": "诊断信息",
+  "def": "实现输出信息中由实现定义的某个子集里的信息。标准不区分错误与警告：一条警告也可以满足诊断义务。",
+  "ref": "defns.diagnostic"
+ },
+ {
+  "id": "well-formed-program",
+  "en": "well-formed program",
+  "zh": "良构程序",
+  "def": "按照语法规则和语义规则（包括不要求诊断的规则）构造的 C++ 程序。良构是静态属性，良构程序在某些输入下仍可能有 UB。",
+  "ref": "defns.well.formed"
+ },
+ {
+  "id": "ill-formed-program",
+  "en": "ill-formed program",
+  "zh": "非良构程序",
+  "def": "不是良构的程序。分为必须诊断的（违反可诊断规则）和 IFNDR 两类。",
+  "ref": "defns.ill.formed"
+ },
+ {
+  "id": "ifndr",
+  "en": "ill-formed, no diagnostic required",
+  "zh": "非良构且不要求诊断（IFNDR）",
+  "def": "程序违反了注明“no diagnostic is required”的规则：程序非良构，但实现不必诊断，且标准对该程序不施加任何要求（[[intro.compliance]] ¶2.2）。典型例子是 ODR 违规。",
+  "ref": "intro.compliance.general#2"
+ },
+ {
+  "id": "undefined-behavior",
+  "en": "undefined behavior",
+  "zh": "未定义行为（UB）",
+  "def": "本文档对其不施加任何要求的行为。编译器可以假设它不发生；常量求值中不会出现核心语言的显式 UB。",
+  "ref": "defns.undefined"
+ },
+ {
+  "id": "unspecified-behavior",
+  "en": "unspecified behavior",
+  "zh": "未指定行为",
+  "def": "对良构构造和正确数据而言取决于实现的行为，通常在标准给出的一组可能结果中任选其一，实现无须文档化，也无须每次一致。如函数实参的求值顺序。",
+  "ref": "defns.unspecified"
+ },
+ {
+  "id": "implementation-defined-behavior",
+  "en": "implementation-defined behavior",
+  "zh": "实现定义行为",
+  "def": "对良构构造和正确数据而言取决于实现、且每个实现都必须写入文档的行为，如 `sizeof(int)`、`char` 的符号性。它们构成抽象机的参数。",
+  "ref": "defns.impl.defined"
+ },
+ {
+  "id": "property-of-the-implementation",
+  "en": "property of the implementation",
+  "zh": "实现的性质",
+  "def": "对良构构造和正确数据而言取决于实现、但无须写入文档的行为，如类类型中的填充。",
+  "ref": "defns.impl.prop"
+ },
+ {
+  "id": "locale-specific-behavior",
+  "en": "locale-specific behavior",
+  "zh": "特定于区域设置的行为",
+  "def": "取决于国籍、文化和语言的本地约定、且每个实现都须写入文档的行为。",
+  "ref": "defns.locale.specific"
+ },
+ {
+  "id": "conditionally-supported",
+  "en": "conditionally-supported",
+  "zh": "有条件支持的",
+  "def": "实现不必支持的程序构造；不支持时，使用它的程序必须得到诊断，且实现须在文档中列出它不支持的此类构造。如 `asm` 声明、函数指针与对象指针间的转换。",
+  "ref": "defns.cond.supp"
+ },
+ {
+  "id": "erroneous-behavior",
+  "en": "erroneous behavior",
+  "zh": "错误行为（EB）",
+  "def": "C++26 引入：行为有明确定义、但属于程序错误、建议实现诊断的行为。实现可以诊断并终止程序，但不能假设它不发生。目前的来源是读取未初始化自动变量的错误值。",
+  "ref": "defns.erroneous"
+ },
+ {
+  "id": "runtime-undefined-behavior",
+  "en": "runtime-undefined behavior",
+  "zh": "运行时未定义行为",
+  "def": "除在常量求值期间外都是未定义的行为；常量求值中它是否使表达式成为非常量由实现定义。用于 `[[assume]]` 假设不成立的情形。",
+  "ref": "defns.undefined.runtime"
+ },
+ {
+  "id": "implementation-limit",
+  "en": "implementation limit",
+  "zh": "实现限制",
+  "def": "实现施加于程序的限制（嵌套深度、模板实例化深度等）。超出限制时实现可以拒绝本应正确执行的程序；Annex B 给出建议的最小值。",
+  "ref": "defns.impl.limits"
+ },
+ {
+  "id": "static-type",
+  "en": "static type",
+  "zh": "静态类型",
+  "def": "不考虑执行语义、仅分析程序得到的表达式类型；在执行期间不会改变。",
+  "ref": "defns.static.type"
+ },
+ {
+  "id": "dynamic-type",
+  "en": "dynamic type",
+  "zh": "动态类型",
+  "def": "对 glvalue 而言，是其所指代的最派生对象的类型；对 prvalue 而言，就是其静态类型。",
+  "ref": "defns.dynamic.type"
+ },
+ {
+  "id": "access",
+  "en": "access",
+  "zh": "访问",
+  "def": "（执行期动作）读取或修改对象的值。只有标量类型的 glvalue 才能访问对象；对类对象的复制是调用构造函数或赋值运算符，其本身不算访问。",
+  "ref": "defns.access"
+ },
+ {
+  "id": "signature",
+  "en": "signature",
+  "zh": "签名",
+  "def": "标识函数（或函数模板、特化等）所用的信息，是名字修饰与链接的基础。普通函数的签名是名字、形参类型列表和所在命名空间，不含返回类型；函数模板的签名包含返回类型和 *template-head*。",
+  "ref": "defns.signature"
+ },
+ {
+  "id": "referenceable-type",
+  "en": "referenceable type",
+  "zh": "可引用类型",
+  "def": "对象类型、不带 cv 限定符和 *ref-qualifier* 的函数类型，或引用类型；即可以为之形成引用的类型。`void` 和 `int() const` 不是。",
+  "ref": "defns.referenceable"
+ },
+ {
+  "id": "valid-but-unspecified-state",
+  "en": "valid but unspecified state",
+  "zh": "有效但未指定的状态",
+  "def": "（库）对象的值未指定，但其不变式成立，对它的操作按其类型的规定工作。被移动后的库对象通常处于这种状态。",
+  "ref": "defns.valid"
+ },
+ {
+  "id": "expression-equivalent",
+  "en": "expression-equivalent",
+  "zh": "表达式等价",
+  "def": "（库）若干表达式具有相同效果，且在是否可能抛出、是否为常量子表达式上一致。用于规定 `ranges::begin` 等定制点对象。",
+  "ref": "defns.expression.equivalent"
+ },
+ {
+  "id": "constant-subexpression",
+  "en": "constant subexpression",
+  "zh": "常量子表达式",
+  "def": "作为某条件表达式 CE 的子表达式求值时，不会阻止 CE 成为核心常量表达式的表达式。",
+  "ref": "defns.const.subexpr"
+ },
+ {
+  "id": "replacement-function",
+  "en": "replacement function",
+  "zh": "替换函数",
+  "def": "（库）非保留的、其定义由 C++ 程序提供的函数，如全局 `operator new`；程序提供的定义须满足 required behavior，否则行为未定义。",
+  "ref": "defns.replacement"
+ },
+ {
+  "id": "reserved-function",
+  "en": "reserved function",
+  "zh": "保留函数",
+  "def": "（库）作为标准库的一部分、由实现定义的函数；程序为其提供定义则结果未定义。",
+  "ref": "defns.reserved.function"
+ },
+ {
+  "id": "program-defined-type",
+  "en": "program-defined type",
+  "zh": "程序定义类型",
+  "def": "（库）不属于标准库也不由实现定义的非闭包类类型或枚举类型、程序中 lambda 的闭包类型，或程序定义特化的实例化。决定了程序可以在 `std` 中特化哪些模板。",
+  "ref": "defns.prog.def.type"
+ },
+ {
+  "id": "stable-algorithm",
+  "en": "stable algorithm",
+  "zh": "稳定算法",
+  "def": "（库）按具体算法而言适当地保持元素顺序的算法，例如 `stable_sort` 保持等价元素的相对顺序。",
+  "ref": "defns.stable"
+ },
+ {
+  "id": "abstract-machine",
+  "en": "abstract machine",
+  "zh": "抽象机",
+  "def": "标准语义描述所定义的参数化、非确定的机器。实现定义行为是其参数，未指定行为带来非确定性；实现只需复现其可观察行为。",
+  "ref": "intro.abstract#1"
+ },
+ {
+  "id": "as-if-rule",
+  "en": "as-if rule",
+  "zh": "as-if 规则",
+  "def": "只要可观察行为与抽象机的某条可能执行一致，实现可以无视标准的任何要求（[intro.abstract] 脚注）。几乎所有编译器优化都以此为依据。",
+  "ref": "intro.abstract#1"
+ },
+ {
+  "id": "observable-behavior",
+  "en": "observable behavior",
+  "zh": "可观察行为",
+  "def": "实现必须复现的程序行为：通过 volatile glvalue 的访问、交付给宿主环境以写入文件的数据、交互式设备上提示先于等待输入。",
+  "ref": "intro.abstract#8"
+ },
+ {
+  "id": "observable-checkpoint",
+  "en": "observable checkpoint",
+  "zh": "可观察检查点",
+  "def": "C++26 引入：执行中的某些事件（如调用 `std::observable_checkpoint`、把数据交付给宿主环境的 stdio 调用返回）。它把之前的可观察行为与之后的 UB 隔开，使前者不受 UB 影响。",
+  "ref": "intro.abstract#5"
+ },
+ {
+  "id": "defined-prefix",
+  "en": "defined prefix",
+  "zh": "定义前缀",
+  "def": "C++26 引入：一次执行中，对每个未定义操作都能被某个可观察检查点与之隔开的那些操作。实现必须产生定义前缀的可观察行为。",
+  "ref": "intro.abstract#6"
+ },
+ {
+  "id": "hosted-implementation",
+  "en": "hosted implementation",
+  "zh": "宿主实现",
+  "def": "支持标准描述的全部设施（完整语言与完整库）的实现。`__STDC_HOSTED__` 为 1。",
+  "ref": "intro.compliance.general#7"
+ },
+ {
+  "id": "freestanding-implementation",
+  "en": "freestanding implementation",
+  "zh": "独立实现",
+  "def": "执行时可以没有操作系统支持的实现：支持完整的语言，但只需提供 [[compliance]] 规定的库子集。`__STDC_HOSTED__` 为 0。",
+  "ref": "intro.compliance.general#7"
+ },
+ {
+  "id": "hardened-implementation",
+  "en": "hardened implementation",
+  "zh": "加固实现",
+  "def": "C++26 引入：是否为加固实现由实现定义。在加固实现中，违反库函数的加固前置条件（如 `span::operator[]` 越界）导致契约违反并终止，而非未定义行为。",
+  "ref": "intro.compliance.general#8"
+ }
+]
