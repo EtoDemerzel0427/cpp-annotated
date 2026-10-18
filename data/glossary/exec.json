@@ -1,0 +1,254 @@
+[
+ {
+  "id": "constituent-expression",
+  "en": "constituent expression",
+  "zh": "构成表达式",
+  "def": "把表达式、转换、花括号列表、`=` 初始化器展开成实际被求值的那些表达式；如 `B b = {5, {1+1}};` 的构成表达式是 `5` 和 `1+1`。",
+  "ref": "intro.execution#2"
+ },
+ {
+  "id": "immediate-subexpression",
+  "en": "immediate subexpression",
+  "zh": "直接子表达式",
+  "def": "表达式 E 的操作数的构成表达式、E 隐式调用的函数、所用的默认实参与默认成员初始化器等；其传递闭包是子表达式。lambda 体内的表达式不是 lambda-expression 的子表达式。",
+  "ref": "intro.execution#3"
+ },
+ {
+  "id": "full-expression",
+  "en": "full-expression",
+  "zh": "完整表达式",
+  "def": "不是其他表达式子表达式的表达式，以及不求值操作数、常量表达式、立即调用、init-declarator、隐式析构调用、契约谓词等。相邻完整表达式严格有序，临时对象通常在完整表达式末尾销毁。",
+  "ref": "intro.execution#5"
+ },
+ {
+  "id": "side-effect",
+  "en": "side effect",
+  "zh": "副作用",
+  "def": "执行或翻译环境状态的改变：读 volatile glvalue、修改对象、产生注入声明、调用库 I/O 函数，或调用做这些事的函数。",
+  "ref": "intro.execution#7"
+ },
+ {
+  "id": "value-computation",
+  "en": "value computation",
+  "zh": "值计算",
+  "def": "求值中\"算出结果\"的部分：对 glvalue 确定其指代的对象，对 prvalue 取得值。与副作用的发起分开描述，是顺序规则的基础。",
+  "ref": "intro.execution#7"
+ },
+ {
+  "id": "sequenced-before",
+  "en": "sequenced before",
+  "zh": "先序于",
+  "def": "同一线程内求值之间的非对称、传递的偏序关系；A sequenced before B 则 A 必须先于 B 执行。分号分隔的完整表达式、`&&` `||` `,` 的左操作数等都建立此关系。",
+  "ref": "intro.execution#8"
+ },
+ {
+  "id": "unsequenced",
+  "en": "unsequenced",
+  "zh": "无序",
+  "def": "两个求值之间任一方向都没有 sequenced before 关系，可以交叠执行。对同一内存位置的无序冲突访问（且不潜在并发）是 UB。",
+  "ref": "intro.execution#8"
+ },
+ {
+  "id": "indeterminately-sequenced",
+  "en": "indeterminately sequenced",
+  "zh": "不定序",
+  "def": "两个求值必有一个先于另一个，但未指定是哪个；它们不会交叠。函数调用与调用外的求值、各形参的初始化之间是这种关系。",
+  "ref": "intro.execution#8"
+ },
+ {
+  "id": "thread-of-execution",
+  "en": "thread of execution",
+  "zh": "执行线程",
+  "def": "程序中的单一控制流，从某个顶层函数的初始调用开始，递归包括其后执行的所有函数调用。",
+  "ref": "intro.multithread.general#1"
+ },
+ {
+  "id": "conflict",
+  "en": "conflict",
+  "zh": "冲突",
+  "def": "两个求值访问同一内存位置，且至少一个是修改（或开始/结束对象生命周期）。即使修改不改变任何位也算冲突。",
+  "ref": "intro.races#2"
+ },
+ {
+  "id": "modification-order",
+  "en": "modification order",
+  "zh": "修改顺序",
+  "def": "每个原子对象上所有修改构成的全序；不同对象的修改顺序不必能合并成单一全序。",
+  "ref": "intro.races#4"
+ },
+ {
+  "id": "release-sequence",
+  "en": "release sequence",
+  "zh": "release 序列",
+  "def": "原子对象修改顺序中以某个 release 操作开头、其后全为原子读-改-写操作的极大连续子序列。acquire 读到其中任何值都与该 release 同步。",
+  "ref": "intro.races#5"
+ },
+ {
+  "id": "synchronizes-with",
+  "en": "synchronizes with",
+  "zh": "同步于",
+  "def": "库操作之间建立的跨线程顺序边，如 release store 与读到其值（或其 release 序列中的值）的 acquire load、mutex 的 unlock 与随后的 lock。",
+  "ref": "intro.races#6"
+ },
+ {
+  "id": "happens-before",
+  "en": "happens before",
+  "zh": "发生于…之前",
+  "def": "sequenced before 与 synchronizes with 的并集的传递闭包。决定非原子读能看到哪个写，以及是否构成数据竞争。",
+  "ref": "intro.races#7"
+ },
+ {
+  "id": "strongly-happens-before",
+  "en": "strongly happens before",
+  "zh": "强发生于…之前",
+  "def": "happens before 中能被 seq_cst 全序 S 尊重的部分：同步边只有两端都是 seq_cst 操作时才直接计入。也用于描述初始化与析构的顺序。",
+  "ref": "intro.races#8"
+ },
+ {
+  "id": "visible-side-effect",
+  "en": "visible side effect",
+  "zh": "可见副作用",
+  "def": "相对某次读取 B，happens before B 且中间没有另一个写插入的那个写 A；非原子标量的读取得到 A 存入的值。",
+  "ref": "intro.races#9"
+ },
+ {
+  "id": "potentially-concurrent",
+  "en": "potentially concurrent",
+  "zh": "潜在并发",
+  "def": "两个动作由不同线程执行，或无序且至少一个在信号处理函数中（且不属于同一次处理函数调用）。",
+  "ref": "intro.races#17"
+ },
+ {
+  "id": "data-race",
+  "en": "data race",
+  "zh": "数据竞争",
+  "def": "两个潜在并发的冲突动作，至少一个非原子，且彼此之间没有 happens before。任何数据竞争都导致未定义行为。",
+  "ref": "intro.races#17"
+ },
+ {
+  "id": "trivial-infinite-loop",
+  "en": "trivial infinite loop",
+  "zh": "平凡无限循环",
+  "def": "循环体为空、控制表达式作为常量表达式求值为 `true` 的迭代语句，如 `while (true);`、`for (;;) {}`。C++26 起其语句视为调用 `std::this_thread::yield`，不再是 UB。",
+  "ref": "stmt.iter.general#3"
+ },
+ {
+  "id": "execution-step",
+  "en": "execution step",
+  "zh": "执行步骤",
+  "def": "线程终止、volatile 访问、库 I/O 调用完成、原子或同步操作（modify-write 除外）完成。线程取得进展即发生执行步骤。",
+  "ref": "intro.progress#3"
+ },
+ {
+  "id": "lock-free-execution",
+  "en": "lock-free execution",
+  "zh": "无锁执行",
+  "def": "定义为或指示为无锁的原子函数的执行。只剩一个未阻塞线程时必须完成（obstruction-free），并发时应当至少一个完成。",
+  "ref": "intro.progress#2"
+ },
+ {
+  "id": "concurrent-forward-progress",
+  "en": "concurrent forward progress guarantee",
+  "zh": "并发前进保证",
+  "def": "只要线程未终止，实现保证它终将取得进展。通用实现应让 `std::thread` 提供此保证。",
+  "ref": "intro.progress#6"
+ },
+ {
+  "id": "parallel-forward-progress",
+  "en": "parallel forward progress guarantee",
+  "zh": "并行前进保证",
+  "def": "线程执行第一个执行步骤之前不保证进展，之后提供并发前进保证；典型如线程池任务、`execution::par`。",
+  "ref": "intro.progress#8"
+ },
+ {
+  "id": "weakly-parallel-forward-progress",
+  "en": "weakly parallel forward progress guarantee",
+  "zh": "弱并行前进保证",
+  "def": "实现不保证线程终将取得进展；典型如 `execution::par_unseq` 下库创建的线程。",
+  "ref": "intro.progress#10"
+ },
+ {
+  "id": "forward-progress-delegation",
+  "en": "block with forward progress guarantee delegation",
+  "zh": "带前进保证委托的阻塞",
+  "def": "线程 P 阻塞等待线程集合 S 时，实现须使 S 中至少一个线程的前进保证不弱于 P 的保证；`sync_wait` 与并行算法都这样阻塞。",
+  "ref": "intro.progress#13"
+ },
+ {
+  "id": "static-initialization",
+  "en": "static initialization",
+  "zh": "静态初始化",
+  "def": "静态/线程存储期变量的零初始化与常量初始化的合称；strongly happens before 任何动态初始化，实践中由加载器完成，无顺序问题。",
+  "ref": "basic.start.static#2"
+ },
+ {
+  "id": "dynamic-initialization",
+  "en": "dynamic initialization",
+  "zh": "动态初始化",
+  "def": "静态初始化之外的一切初始化。非块变量的动态初始化分为有序、部分有序、无序三类，跨 TU 的有序变量之间不定序。",
+  "ref": "basic.start.static#2"
+ },
+ {
+  "id": "appearance-ordered",
+  "en": "appearance-ordered",
+  "zh": "出现顺序先于",
+  "def": "声明 D 在同一 TU 中先于 E，或 E 所在 TU 对 D 所在 TU 有接口依赖且 D 在先；用于确定动态初始化顺序。",
+  "ref": "basic.start.dynamic#2"
+ },
+ {
+  "id": "non-initialization-odr-use",
+  "en": "non-initialization odr-use",
+  "zh": "非初始化 odr 使用",
+  "def": "不是由非块静态/线程存储期变量的初始化直接或间接引起的 odr 使用；延迟的动态初始化必须先于此类使用。",
+  "ref": "basic.start.dynamic#4"
+ },
+ {
+  "id": "static-initialization-order-fiasco",
+  "en": "static initialization order fiasco",
+  "zh": "静态初始化顺序问题",
+  "def": "不同 TU 中有序初始化的全局变量之间初始化顺序不定，一个的初始化使用另一个时可能读到未构造的对象。对策：`constinit`、函数局部静态、nifty counter、模块。",
+  "ref": "basic.start.dynamic#3"
+ },
+ {
+  "id": "contract-assertion",
+  "en": "contract assertion",
+  "zh": "契约断言",
+  "def": "由 `pre`、`post` 或 `contract_assert` 引入、描述程序在某点应满足的性质的断言；谓词是 `bool` 完整表达式，其中外部变量隐式为 const。",
+  "ref": "basic.contract.general#1"
+ },
+ {
+  "id": "evaluation-semantic",
+  "en": "evaluation semantic",
+  "zh": "求值语义",
+  "def": "契约断言的一次求值采用的方式：ignore、observe、enforce 或 quick-enforce，由实现定义。后三者为检查语义，enforce 与 quick-enforce 为终止语义。",
+  "ref": "basic.contract.eval#1"
+ },
+ {
+  "id": "contract-violation",
+  "en": "contract violation",
+  "zh": "契约违反",
+  "def": "检查语义下谓词为假、谓词求值抛出异常，或在显然常量求值中谓词不是核心常量表达式。",
+  "ref": "basic.contract.eval#7"
+ },
+ {
+  "id": "contract-terminated",
+  "en": "contract-terminated",
+  "zh": "契约终止",
+  "def": "因契约违反而终止程序：调用 `std::terminate`、`std::abort` 或直接终止执行，具体由实现定义。",
+  "ref": "basic.contract.eval#9"
+ },
+ {
+  "id": "contract-violation-handler",
+  "en": "contract-violation handler",
+  "zh": "契约违反处理函数",
+  "def": "名为 `::handle_contract_violation`、参数为 `const std::contracts::contract_violation&` 的函数，observe/enforce 语义下违反时被调用；是否可替换由实现定义。",
+  "ref": "basic.contract.handler#1"
+ },
+ {
+  "id": "evaluate-in-sequence",
+  "en": "evaluate in sequence",
+  "zh": "按序求值",
+  "def": "依次求值一组契约断言，允许每个断言被重复实现定义次数，但各断言的首次出现保持原顺序。",
+  "ref": "basic.contract.eval#18"
+ }
+]

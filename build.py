@@ -163,6 +163,21 @@ class Ctx:
         self.std_pages = {p["id"]: p for p in pages.values() if p["kind"] == "std"}
         self.glossary = glossary    # slug -> entry
         self.zh = zh
+        # stable names that have no page of their own but are covered by another page (`covers:`)
+        self.covered = {}
+        for p in self.std_pages.values():
+            for c in p["covers"]:
+                if c == "*":
+                    stack = list(by_id[p["id"]]["children"]) if p["id"] in by_id else []
+                    while stack:
+                        cid = stack.pop()
+                        self.covered.setdefault(cid, p)
+                        stack.extend(by_id[cid]["children"])
+                else:
+                    self.covered.setdefault(c, p)
+        for sid in list(self.covered):
+            if sid in self.std_pages:
+                del self.covered[sid]
 
 
 def godbolt_url(code, lang, opts):
@@ -299,6 +314,10 @@ def xref_html(target, text, ctx, page_key):
         href = "{ROOT}" + p["url"] + (f"#p{para}" if para and para.isdigit() else (f"#{para}" if para else ""))
         tip = title + (" — " + p.get("summary", "") if p.get("summary") else "")
         return f'<a class="xref std local" href="{href}" data-tip="{html.escape(tip)}">{html.escape(label)}</a>'
+    if sid in ctx.covered:
+        p = ctx.covered[sid]
+        tip = title + f" — 见本站 [{p['id']}] {p['title']}"
+        return f'<a class="xref std local" href="{{ROOT}}{p["url"]}" data-tip="{html.escape(tip)}">{html.escape(label)}</a>'
     if not entry:
         # stable names deeper than the TOC are fine; just point at eel.is
         if not re.match(r"^[a-z][a-z0-9_.]*$", sid):
@@ -483,6 +502,9 @@ def entry_link(e, root, ctx, show_num=True):
         p = ctx.std_pages[e["id"]]
         return (f'<a class="sec has-page" href="{root}{p["url"]}">{num}<span class="t">{label}</span>{sn}'
                 f'{status_badge(p.get("status", "draft"))}</a>')
+    if e["id"] in ctx.covered:
+        p = ctx.covered[e["id"]]
+        return (f'<a class="sec has-page covered" href="{root}{p["url"]}" title="在 [{esc(p["id"])}] 页中讲解">{num}<span class="t">{label}</span>{sn}</a>')
     return (f'<a class="sec no-page" href="{EEL}{e["id"]}" target="_blank" rel="noopener">{num}'
             f'<span class="t">{label}</span>{sn}<span class="ext-mark">↗</span></a>')
 
@@ -711,6 +733,9 @@ def nav_node(e, by_id, ctx):
         n["z"] = ctx.zh[e["id"]]
     if e["id"] in ctx.std_pages:
         n["p"] = ctx.std_pages[e["id"]]["status"]
+    elif e["id"] in ctx.covered:
+        n["p"] = "cov"
+        n["u"] = ctx.covered[e["id"]]["url"]
     if e["children"]:
         n["c"] = [nav_node(by_id[c], by_id, ctx) for c in e["children"]]
     return n

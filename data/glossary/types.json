@@ -1,0 +1,282 @@
+[
+ {
+  "id": "object-representation",
+  "en": "object representation",
+  "zh": "对象表示",
+  "def": "完整对象类型 `T` 的一个非位域完整对象所占据的 `sizeof(T)` 个 `unsigned char` 对象的序列；位域的对象表示是它占据的若干位。",
+  "ref": "basic.types.general#2"
+ },
+ {
+  "id": "value-representation",
+  "en": "value representation",
+  "zh": "值表示",
+  "def": "对象表示中实际参与表示该类型的值的那些位的集合。",
+  "ref": "basic.types.general#2"
+ },
+ {
+  "id": "padding-bits",
+  "en": "padding bits",
+  "zh": "填充位",
+  "def": "在对象表示中、但不属于值表示的位。整数类型的填充位只构成同一值的替代表示，不会造成陷阱。",
+  "ref": "basic.types.general#2"
+ },
+ {
+  "id": "incompletely-defined-object-type",
+  "en": "incompletely-defined object type",
+  "zh": "不完全定义的对象类型",
+  "def": "已声明未定义的类、某些上下文中的枚举、未知边界数组或元素类型不完整的数组。其大小和布局未知。",
+  "ref": "basic.types.general#3"
+ },
+ {
+  "id": "incomplete-type",
+  "en": "incomplete type",
+  "zh": "不完整类型",
+  "def": "不完全定义的对象类型与 cv `void` 的统称；不能用来定义对象、求 `sizeof` 等。类可以在定义后变完整，`void` 与 `T[]` 永远不完整。",
+  "ref": "basic.types.general#3"
+ },
+ {
+  "id": "object-type",
+  "en": "object type",
+  "zh": "对象类型",
+  "def": "（可能 cv 限定的）既非函数类型、也非引用类型、也非 cv `void` 的类型；包括不完整的类与数组类型。",
+  "ref": "basic.types.general#6"
+ },
+ {
+  "id": "scalar-type",
+  "en": "scalar type",
+  "zh": "标量类型",
+  "def": "算术类型、枚举类型、指针类型、成员指针类型、`std::meta::info`、`std::nullptr_t` 及其 cv 版本。",
+  "ref": "basic.types.general#7"
+ },
+ {
+  "id": "trivially-copyable-type",
+  "en": "trivially copyable type",
+  "zh": "平凡可复制类型",
+  "def": "标量类型、平凡可复制类类型、这些类型的数组及 cv 版本；其对象可通过复制底层字节（如 `memcpy`）来复制值，见 [[basic.types.trivial]]。",
+  "ref": "basic.types.general#7"
+ },
+ {
+  "id": "standard-layout-type",
+  "en": "standard-layout type",
+  "zh": "标准布局类型",
+  "def": "标量类型、标准布局类类型、这些类型的数组及 cv 版本；布局与 C 兼容，首个成员与对象指针可互转。",
+  "ref": "basic.types.general#7"
+ },
+ {
+  "id": "implicit-lifetime-type",
+  "en": "implicit-lifetime type",
+  "zh": "隐式生存期类型",
+  "def": "标量类型、隐式生存期类类型、**任意**数组类型及 cv 版本；`malloc`、`memcpy` 等操作可以在存储中隐式创建这类对象（[[intro.object]]）。",
+  "ref": "basic.types.general#7"
+ },
+ {
+  "id": "literal-type",
+  "en": "literal type",
+  "zh": "字面量类型",
+  "def": "cv `void`、标量、引用、字面量类型的数组，或具有 `constexpr` 析构函数且满足 [[basic.types.general#8]] 条件的类类型；表示\"可能\"在常量表达式中创建其对象。",
+  "ref": "basic.types.general#8"
+ },
+ {
+  "id": "layout-compatible-types",
+  "en": "layout-compatible types",
+  "zh": "布局兼容类型",
+  "def": "忽略 cv 后为同一类型、布局兼容的枚举，或布局兼容的标准布局类类型。不同的标量类型（如 `int` 与 `unsigned`）从不布局兼容。",
+  "ref": "basic.types.general#9"
+ },
+ {
+  "id": "acquire-value-representation",
+  "en": "acquire a value representation",
+  "zh": "获得值表示",
+  "def": "对平凡可复制类型的对象，其值被替换为该值表示所对应的值子集中、能使程序有定义行为的一个未指定的值（天使式选择）。由 `memcpy` 往返、`bit_cast` 等操作引起。",
+  "ref": "basic.types.trivial#1"
+ },
+ {
+  "id": "fundamental-type",
+  "en": "fundamental type",
+  "zh": "基础类型",
+  "def": "[[basic.fundamental]] 描述的类型：整数、字符、`bool`、浮点、`void`、`std::nullptr_t`、`std::meta::info`。",
+  "ref": "basic.fundamental#19"
+ },
+ {
+  "id": "compound-type",
+  "en": "compound type",
+  "zh": "复合类型",
+  "def": "由其他类型构造的类型：数组、函数、指针、引用、类、联合、枚举、成员指针。",
+  "ref": "basic.compound#1"
+ },
+ {
+  "id": "signed-integer-type",
+  "en": "signed integer type",
+  "zh": "有符号整数类型",
+  "def": "五个标准有符号整数类型（`signed char`、`short`、`int`、`long`、`long long`）与实现定义的扩展有符号整数类型；不包括 `char`。",
+  "ref": "basic.fundamental#1"
+ },
+ {
+  "id": "unsigned-integer-type",
+  "en": "unsigned integer type",
+  "zh": "无符号整数类型",
+  "def": "与每个有符号整数类型对应的无符号类型，宽度相同，算术按模 2^N 进行。",
+  "ref": "basic.fundamental#2"
+ },
+ {
+  "id": "integer-width",
+  "en": "width",
+  "zh": "宽度",
+  "def": "整数类型值表示的位数 N；有符号类型范围为 −2^(N−1)..2^(N−1)−1，无符号为 0..2^N−1。",
+  "ref": "basic.fundamental#1"
+ },
+ {
+  "id": "extended-integer-type",
+  "en": "extended integer type",
+  "zh": "扩展整数类型",
+  "def": "实现定义的额外有符号整数类型及其对应的无符号类型；与之相对的是标准整数类型。",
+  "ref": "basic.fundamental#5"
+ },
+ {
+  "id": "ordinary-character-type",
+  "en": "ordinary character type",
+  "zh": "普通字符类型",
+  "def": "`char`、`signed char`、`unsigned char` 的统称。",
+  "ref": "basic.fundamental#7"
+ },
+ {
+  "id": "narrow-character-type",
+  "en": "narrow character type",
+  "zh": "窄字符类型",
+  "def": "普通字符类型加上 `char8_t`；其对象表示的每种比特模式都表示一个不同的值。",
+  "ref": "basic.fundamental#7"
+ },
+ {
+  "id": "character-type",
+  "en": "character type",
+  "zh": "字符类型",
+  "def": "`char`、`wchar_t`、`char8_t`、`char16_t`、`char32_t` 的统称；不包括 `signed char`、`unsigned char`。",
+  "ref": "basic.fundamental#11"
+ },
+ {
+  "id": "integral-type",
+  "en": "integral type",
+  "zh": "整型",
+  "def": "字符类型、`bool`、有符号与无符号整数类型及其 cv 版本；同义词为整数类型（integer type）。枚举不是整型。",
+  "ref": "basic.fundamental#11"
+ },
+ {
+  "id": "floating-point-type",
+  "en": "floating-point type",
+  "zh": "浮点类型",
+  "def": "标准浮点类型（`float`、`double`、`long double`）与实现定义为扩展浮点类型的类型的统称。",
+  "ref": "basic.fundamental#12"
+ },
+ {
+  "id": "extended-floating-point-type",
+  "en": "extended floating-point type",
+  "zh": "扩展浮点类型",
+  "def": "实现提供并定义为浮点类型的额外类型，如 `std::float16_t`、`std::bfloat16_t`（C++23）；与同格式的标准浮点类型是不同类型。",
+  "ref": "basic.fundamental#12"
+ },
+ {
+  "id": "arithmetic-type",
+  "en": "arithmetic type",
+  "zh": "算术类型",
+  "def": "整型与浮点类型的统称。",
+  "ref": "basic.fundamental#14"
+ },
+ {
+  "id": "reflection",
+  "en": "reflection",
+  "zh": "反射",
+  "def": "`std::meta::info` 类型的值（C++26）；除空反射外，每个反射表示一个值、对象、变量、类型、命名空间等构造。",
+  "ref": "basic.fundamental#17"
+ },
+ {
+  "id": "object-pointer-type",
+  "en": "object pointer type",
+  "zh": "对象指针类型",
+  "def": "指向 cv `void` 或指向对象类型的指针的类型；`void*` 是对象指针类型但不是\"指向对象类型的指针\"。",
+  "ref": "basic.compound#3"
+ },
+ {
+  "id": "pointer-past-the-end",
+  "en": "pointer past the end",
+  "zh": "尾后指针",
+  "def": "表示对象存储之后第一个字节地址的指针值；不指向恰好位于该地址的无关对象，不能解引用。",
+  "ref": "basic.compound#3"
+ },
+ {
+  "id": "invalid-pointer-value",
+  "en": "invalid pointer value",
+  "zh": "无效指针值",
+  "def": "指针值的四种状态之一（另三种为指向对象/函数、尾后、空指针值）；例如某些整数到指针转换可能产生它。",
+  "ref": "basic.compound#3"
+ },
+ {
+  "id": "valid-in-the-context-of",
+  "en": "valid in the context of",
+  "zh": "在某求值的上下文中有效",
+  "def": "函数指针与空指针值总是有效；指向或越过对象 O 的指针值，在 O 的存储存续期内发生的求值中有效。无效时间接为 UB，布尔转换与比较为实现定义（C++26）。",
+  "ref": "basic.compound#6"
+ },
+ {
+  "id": "pointer-interconvertible",
+  "en": "pointer-interconvertible",
+  "zh": "指针可互转",
+  "def": "同一对象、联合与其成员、标准布局类对象与其首个非静态数据成员或基类子对象，及其传递闭包；这样的对象地址相同，可经 `reinterpret_cast` 互相取得指针。",
+  "ref": "basic.compound#7"
+ },
+ {
+  "id": "reachable-through",
+  "en": "reachable through",
+  "zh": "可经由指针到达",
+  "def": "经由指向 x 的指针可到达与 x 指针可互转的对象所占的字节（若为数组元素则为整个外围数组）；界定 `std::launder` 的前置条件。",
+  "ref": "basic.compound#8"
+ },
+ {
+  "id": "const-object",
+  "en": "const object",
+  "zh": "const 对象",
+  "def": "类型为 `const T` 的对象，或 const 对象的非 mutable 子对象；修改它是 UB。",
+  "ref": "basic.type.qualifier#1"
+ },
+ {
+  "id": "volatile-object",
+  "en": "volatile object",
+  "zh": "volatile 对象",
+  "def": "类型为 `volatile T` 的对象，或 volatile 对象的任何子对象。",
+  "ref": "basic.type.qualifier#1"
+ },
+ {
+  "id": "more-cv-qualified",
+  "en": "more cv-qualified",
+  "zh": "更多 cv 限定",
+  "def": "cv 限定符集合上的偏序：无 cv < const、volatile < const volatile；const 与 volatile 不可比较。",
+  "ref": "basic.type.qualifier#5"
+ },
+ {
+  "id": "top-level-cv-qualifiers",
+  "en": "top-level cv-qualifiers",
+  "zh": "顶层 cv 限定符",
+  "def": "类型 cv `T` 中 cv 所表示的限定符，即作用于类型本身而非其成分的限定。`const int&` 无顶层 cv；`int* const` 的顶层 cv 为 const。",
+  "ref": "basic.type.qualifier#6"
+ },
+ {
+  "id": "integer-conversion-rank",
+  "en": "integer conversion rank",
+  "zh": "整数转换等级",
+  "def": "整数类型间的序：`long long > long > int > short > signed char`，无符号与对应有符号同级，字符类型与底层类型同级，`bool` 最低；用于整数提升与常用算术转换。",
+  "ref": "conv.rank#1"
+ },
+ {
+  "id": "floating-point-conversion-rank",
+  "en": "floating-point conversion rank",
+  "zh": "浮点转换等级",
+  "def": "浮点类型间的偏序（C++23），由值集包含关系决定；值集互不包含时无序，混合运算非良构。",
+  "ref": "conv.rank#2"
+ },
+ {
+  "id": "floating-point-conversion-subrank",
+  "en": "floating-point conversion subrank",
+  "zh": "浮点转换子等级",
+  "def": "等级相同的浮点类型之间的全序；`std::floatN_t` 高于等级相同的标准浮点类型。",
+  "ref": "conv.rank#3"
+ }
+]

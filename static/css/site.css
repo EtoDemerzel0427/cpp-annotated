@@ -227,6 +227,8 @@ li:not(.open) > ul { display: none; }
 .sb-link.has-page { color: var(--ink); font-weight: 560; }
 .sb-link.has-page::after { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin: 7px 0 0 auto; }
 .sb-link.has-page.st-stub::after { background: var(--ink-3); }
+.sb-link.has-page.st-cov { font-weight: 450; }
+.sb-link.has-page.st-cov::after { background: none; border: 1px solid var(--accent); }
 .sb-link.no-page { color: var(--ink-3); }
 .sb-link.current { color: var(--accent); }
 .sb-row.current { background: var(--accent-bg); }

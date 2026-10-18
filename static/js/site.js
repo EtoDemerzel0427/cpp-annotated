@@ -56,6 +56,7 @@
   curPath.forEach(function (n) { openSet[n.i] = true; });
 
   function nodeHref(n, depth) {
+    if (n.u) return { href: ROOT + n.u, local: true };
     if (depth === 0 || n.p) return { href: ROOT + "std/" + n.i + ".html", local: true };
     return { href: EEL + n.i, local: false };
   }
