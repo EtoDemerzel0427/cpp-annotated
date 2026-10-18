@@ -1,14 +1,79 @@
 [
- {"id": "swap-two-step", "en": "std::swap two-step", "zh": "std::swap 两步法", "def": "泛型代码交换值的惯用法：先 `using std::swap;`，再非限定调用 `swap(a, b)`，让 ADL 找到类型自己的 `swap`，找不到时退回 `std::swap`。C++20 的 `std::ranges::swap` CPO 把它封装成一次调用。", "ref": "swappable.requirements"},
- {"id": "piecewise-construction", "en": "piecewise construction", "zh": "分段构造", "def": "`pair` 以 `piecewise_construct` 为首实参、另给两个 `tuple` 的构造方式：两个 `tuple` 中的元素分别被转发给 `first` 和 `second` 的构造函数，元素类型不必可复制或可移动。", "ref": "pairs.pair#19"},
- {"id": "tuple-protocol", "en": "tuple-like protocol", "zh": "tuple-like 协议", "def": "由 `std::tuple_size<E>`（完整且有 `value`）、`std::tuple_element<I, E>` 与成员或 ADL 可见的 `get<I>` 组成的开放协议；用户类型可以实现它，结构化绑定据此按元素绑定。", "ref": "dcl.struct.bind#7"},
- {"id": "tuple-like", "en": "tuple-like (concept)", "zh": "tuple-like 概念", "def": "说明专用概念，封闭清单：`remove_cvref_t<T>` 为 `array`、`complex`、`pair`、`tuple` 或 `ranges::subrange` 的特化。`tuple` 的转换构造/赋值/比较、`tuple_cat`、`apply`、`make_from_tuple` 只接受它，用户类型无法加入。", "ref": "tuple.like#1"},
- {"id": "pair-like", "en": "pair-like", "zh": "pair-like", "def": "说明专用概念：满足 *tuple-like* 且 `tuple_size_v<remove_cvref_t<T>> == 2`。`pair` 可从任何非 `subrange` 的 pair-like 构造与赋值。", "ref": "tuple.syn"},
- {"id": "conditionally-explicit", "en": "conditionally explicit", "zh": "条件 explicit", "def": "库条文中的 `explicit(see below)`：构造函数是否 explicit 由一个编译期条件决定（C++20 起用 `explicit(bool)` 实现），通常是\"当且仅当某个元素的对应转换不是隐式的\"，使包装类型的可隐式转换性与其元素一致。", "ref": "pairs.pair#10"},
- {"id": "implicitly-default-constructible", "en": "implicitly default-constructible", "zh": "可隐式默认构造", "def": "类型能从空花括号 `{}` 复制列表初始化（默认构造函数不是 explicit）。`pair`/`tuple` 的默认构造函数在某个元素不满足此性质时为 explicit。", "ref": "pairs.pair#7"},
- {"id": "uses-allocator-construction", "en": "uses-allocator construction", "zh": "使用分配器构造", "def": "构造对象时若其类型\"使用\"给定分配器（`uses_allocator_v` 为真），就按 `allocator_arg_t` 前缀或尾随分配器的约定把分配器传给构造函数，否则忽略分配器。`tuple` 的分配器扩展构造函数对每个非引用元素这样做。", "ref": "allocator.uses.construction#1"},
- {"id": "synth-three-way", "en": "synth-three-way", "zh": "合成三路比较（库）", "def": "库的说明专用函数对象：若 `t < u`、`u < t` 满足 *boolean-testable* 而 `t <=> u` 不可用，就用 `<` 合成 `weak_ordering`；否则直接用 `<=>`。`pair`、`tuple`、容器的 `<=>` 用它兼容只有 `<` 的老类型。", "ref": "expos.only.entity"},
- {"id": "unwrap-ref-decay", "en": "unwrap_ref_decay_t", "zh": "unwrap_ref_decay_t", "def": "先 `decay_t`，再把 `reference_wrapper<X>` 展开为 `X&` 的类型变换。`make_pair` 与 `make_tuple` 用它决定元素类型，所以 `std::ref(x)` 会产生引用元素；CTAD 不做这一展开。", "ref": "meta.trans.other"},
- {"id": "constexpr-param", "en": "constexpr-param", "zh": "constexpr-param", "def": "`<utility>` 中的说明专用概念：`requires { typename constant_wrapper<T::value>; }`。凡有可包装为 `constant_wrapper` 的静态 `value` 的类型（含 `integral_constant`）都满足它，`cw-operators` 的运算符据此保持常量性。", "ref": "utility.syn"},
- {"id": "dangling-reference-member", "en": "reference member bound to a temporary", "zh": "绑定临时量的引用成员", "def": "包装类型的引用元素在构造时被绑定到一个临时量，构造结束即悬垂。C++23 起 `pair`/`tuple` 中会造成这种绑定的构造函数定义为弃置，判据是 `reference_constructs_from_temporary_v`。", "ref": "pairs.pair#13"}
+  {
+    "id": "swap-two-step",
+    "en": "std::swap two-step",
+    "zh": "std::swap 两步法",
+    "def": "泛型代码交换值的惯用法：先 `using std::swap;`，再非限定调用 `swap(a, b)`，让 ADL 找到类型自己的 `swap`，找不到时退回 `std::swap`。C++20 的 `std::ranges::swap` CPO 把它封装成一次调用。",
+    "ref": "swappable.requirements"
+  },
+  {
+    "id": "piecewise-construction",
+    "en": "piecewise construction",
+    "zh": "分段构造",
+    "def": "`pair` 以 `piecewise_construct` 为首实参、另给两个 `tuple` 的构造方式：两个 `tuple` 中的元素分别被转发给 `first` 和 `second` 的构造函数，元素类型不必可复制或可移动。",
+    "ref": "pairs.pair#19"
+  },
+  {
+    "id": "tuple-protocol",
+    "en": "tuple-like protocol",
+    "zh": "tuple-like 协议",
+    "def": "由 `std::tuple_size<E>`（完整且有 `value`）、`std::tuple_element<I, E>` 与成员或 ADL 可见的 `get<I>` 组成的开放协议；用户类型可以实现它，结构化绑定据此按元素绑定。",
+    "ref": "dcl.struct.bind#7"
+  },
+  {
+    "id": "tuple-like",
+    "en": "tuple-like (concept)",
+    "zh": "tuple-like 概念",
+    "def": "说明专用概念，封闭清单：`remove_cvref_t<T>` 为 `array`、`complex`、`pair`、`tuple` 或 `ranges::subrange` 的特化。`tuple` 的转换构造/赋值/比较、`tuple_cat`、`apply`、`make_from_tuple` 只接受它，用户类型无法加入。",
+    "ref": "tuple.like#1"
+  },
+  {
+    "id": "pair-like",
+    "en": "pair-like",
+    "zh": "pair-like",
+    "def": "说明专用概念：满足 *tuple-like* 且 `tuple_size_v<remove_cvref_t<T>> == 2`。`pair` 可从任何非 `subrange` 的 pair-like 构造与赋值。",
+    "ref": "tuple.syn"
+  },
+  {
+    "id": "conditionally-explicit",
+    "en": "conditionally explicit",
+    "zh": "条件 explicit",
+    "def": "库条文中的 `explicit(see below)`：构造函数是否 explicit 由一个编译期条件决定（C++20 起用 `explicit(bool)` 实现），通常是\"当且仅当某个元素的对应转换不是隐式的\"，使包装类型的可隐式转换性与其元素一致。",
+    "ref": "pairs.pair#10"
+  },
+  {
+    "id": "implicitly-default-constructible",
+    "en": "implicitly default-constructible",
+    "zh": "可隐式默认构造",
+    "def": "类型能从空花括号 `{}` 复制列表初始化（默认构造函数不是 explicit）。`pair`/`tuple` 的默认构造函数在某个元素不满足此性质时为 explicit。",
+    "ref": "pairs.pair#7"
+  },
+  {
+    "id": "synth-three-way",
+    "en": "synth-three-way",
+    "zh": "合成三路比较（库）",
+    "def": "库的说明专用函数对象：若 `t < u`、`u < t` 满足 *boolean-testable* 而 `t <=> u` 不可用，就用 `<` 合成 `weak_ordering`；否则直接用 `<=>`。`pair`、`tuple`、容器的 `<=>` 用它兼容只有 `<` 的老类型。",
+    "ref": "expos.only.entity"
+  },
+  {
+    "id": "unwrap-ref-decay",
+    "en": "unwrap_ref_decay_t",
+    "zh": "unwrap_ref_decay_t",
+    "def": "先 `decay_t`，再把 `reference_wrapper<X>` 展开为 `X&` 的类型变换。`make_pair` 与 `make_tuple` 用它决定元素类型，所以 `std::ref(x)` 会产生引用元素；CTAD 不做这一展开。",
+    "ref": "meta.trans.other"
+  },
+  {
+    "id": "constexpr-param",
+    "en": "constexpr-param",
+    "zh": "constexpr-param",
+    "def": "`<utility>` 中的说明专用概念：`requires { typename constant_wrapper<T::value>; }`。凡有可包装为 `constant_wrapper` 的静态 `value` 的类型（含 `integral_constant`）都满足它，`cw-operators` 的运算符据此保持常量性。",
+    "ref": "utility.syn"
+  },
+  {
+    "id": "dangling-reference-member",
+    "en": "reference member bound to a temporary",
+    "zh": "绑定临时量的引用成员",
+    "def": "包装类型的引用元素在构造时被绑定到一个临时量，构造结束即悬垂。C++23 起 `pair`/`tuple` 中会造成这种绑定的构造函数定义为弃置，判据是 `reference_constructs_from_temporary_v`。",
+    "ref": "pairs.pair#13"
+  }
 ]
