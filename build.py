@@ -147,7 +147,7 @@ def split_list(v):
 
 FENCE_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})([^\n]*)\n(.*?)\n\1\2[ \t]*$", re.M | re.S)
 INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1", re.S)
-XREF_RE = re.compile(r"\[\[([^\[\]|]+?)(?:\|([^\[\]]+?))?\]\]")
+XREF_RE = re.compile(r"\[\[([^\[\]|\\]+?)(?:\\?\|([^\[\]]+?))?\]\]")  # `\|` allowed inside tables
 BADGE_RE = re.compile(r"\{\{([a-z0-9+\-]+)(?::([^{}]+))?\}\}", re.I)
 VERSION_RE = re.compile(r"^c\+\+(\d\d|2[a-c])$", re.I)
 PAPER_RE = re.compile(r"^(P\d{3,4}(?:R\d+)?|N\d{3,4}|CWG\d+|LWG\d+|EWG\d+|LEWG\d+|CWG|LWG)$", re.I)
