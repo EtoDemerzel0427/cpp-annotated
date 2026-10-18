@@ -1,0 +1,14 @@
+[
+ {"id": "format-string", "en": "format string", "zh": "格式串", "def": "由替换字段、转义序列 `{{`/`}}` 与其他普通字符组成的序列；它是否是“针对 args 的格式串”取决于实参个数与各实参 formatter 对 *format-spec* 的解释。不是格式串时，经 `format_string` 传入则编译期非良构，经 `vformat` 传入则抛 `format_error`。", "ref": "format.string.general#1"},
+ {"id": "replacement-field", "en": "replacement field", "zh": "替换字段", "def": "格式串中形如 `{ arg-id(opt) format-specifier(opt) }` 的部分，被对应实参的格式化结果替换。", "ref": "format.string.general#1"},
+ {"id": "automatic-indexing", "en": "automatic indexing", "zh": "自动编号", "def": "格式串中所有 *arg-id*（包括嵌套在 *format-spec* 里的）都省略时，依次使用实参 0、1、2……；与手动编号混用则不是格式串。", "ref": "format.string.general#4"},
+ {"id": "std-format-spec", "en": "std-format-spec", "zh": "标准格式说明", "def": "标准库为算术、字符、字符串、指针类型提供的格式说明语法：`[[fill]align][sign][#][0][width][.precision][L][type]`。", "ref": "format.string.std#1"},
+ {"id": "field-width", "en": "field width", "zh": "字段宽度", "def": "以终端列数（field width unit）计的宽度；UTF 编码下按扩展字素簇首码点估算，东亚宽字符与若干 emoji 区间计 2 列。", "ref": "format.string.std#2"},
+ {"id": "escaped-string", "en": "escaped string", "zh": "转义字符串", "def": "`?` 类型产生的调试表示：加引号，并把制表、换行、引号、反斜杠以及不可打印/分隔字符和非法码元写成 `\\t`、`\\u{..}`、`\\x{..}` 等转义形式。", "ref": "format.string.escaped#2"},
+ {"id": "debug-enabled-specialization", "en": "debug-enabled specialization", "zh": "启用调试的特化", "def": "额外提供 public constexpr 成员 `set_debug_format()` 的 formatter 特化；调用它相当于把 type 设为 `?`。范围与 tuple formatter 默认对元素调用它。", "ref": "format.formatter.spec#2"},
+ {"id": "constexpr-enabled-specialization", "en": "constexpr-enabled specialization", "zh": "启用 constexpr 的特化", "def": "`format` 成员函数被声明为 constexpr 的 formatter 特化；只有所用 formatter 都是这种特化时，格式化函数的调用才可能是常量子表达式。", "ref": "format.formatter.spec#2"},
+ {"id": "shortest-round-trip", "en": "shortest round-trip representation", "zh": "最短往返表示", "def": "不带 precision 的浮点 `to_chars` 输出的字符数最少、且同一实现上的 `from_chars` 能精确读回原值的表示；多个候选时取与原值差最小者，再按 round-to-nearest 定夺。", "ref": "charconv.to.chars#2"},
+ {"id": "execution-policy", "en": "execution policy", "zh": "执行策略", "def": "作为并行算法首个实参传入的对象，其类型（`sequenced_policy` 等）声明算法允许何种并行/向量化，以及因此对元素访问函数提出的要求。", "ref": "execpol.general#1"},
+ {"id": "element-access-function", "en": "element access function", "zh": "元素访问函数", "def": "并行算法在执行过程中调用的、由用户提供或由迭代器/元素类型决定的操作：迭代器操作、元素上的操作、用户提供的函数对象及其所需操作。", "ref": "algorithms.parallel.defns#3"},
+ {"id": "vectorization-unsafe", "en": "vectorization-unsafe", "zh": "向量化不安全", "def": "规定为与其他调用同步（synchronize with）的标准库函数（内存分配/释放与无锁原子读改写除外），例如 `mutex::lock`；在 `unseq`/`par_unseq` 算法的用户代码中调用它是 UB。", "ref": "algorithms.parallel.defns#5"}
+]
