@@ -1,0 +1,9 @@
+[
+ {"id": "optional-object", "en": "optional object", "zh": "可选对象", "def": "内含另一个对象的存储并管理其生命周期的对象；被包含对象可晚于它初始化、早于它销毁，初始化状态由它跟踪。", "ref": "optional.general#1"},
+ {"id": "contained-value", "en": "contained value", "zh": "被包含值", "def": "optional<T> 中活跃的说明用成员 val；optional<T> 含有值当且仅当 val 是活跃成员。optional<T&> 中则指 *val 的引用。", "ref": "optional.optional.general#1"},
+ {"id": "valid-contained-type", "en": "valid contained type", "zh": "合法被包含类型", "def": "左值引用类型，或完整的非数组对象类型，且去 cvref 后不是 in_place_t、nullopt_t；用其他类型实例化 optional 非良构。", "ref": "optional.optional.general#2"},
+ {"id": "converts-from-any-cvref", "en": "converts-from-any-cvref", "zh": "converts-from-any-cvref", "def": "仅用于说明的变量模板：T 能否从 W 的任一 cv/引用形式构造或隐式转换。为真时 optional/expected 的逐值转换构造函数让路。", "ref": "optional.ctor#1"},
+ {"id": "valid-value-type-for-expected", "en": "valid value type for expected", "zh": "expected 的合法值类型", "def": "remove_cv_t<T> 为 void，或为不是 in_place_t、unexpect_t、unexpected 特化的完整非数组对象类型。", "ref": "expected.object.general#2"},
+ {"id": "valid-unexpected-argument", "en": "valid template argument for unexpected", "zh": "unexpected 的合法模板实参", "def": "非数组、非 cv 限定、且不是 unexpected 特化的对象类型；以其他类型实例化 unexpected 的定义非良构，也是 expected 对 E 的要求。", "ref": "expected.un.general#2"},
+ {"id": "reinit-expected", "en": "reinit-expected", "zh": "reinit-expected", "def": "仅用于说明的函数模板：在 expected 的联合体存储中把旧对象换成新对象，按 nothrow 构造 / nothrow 移动 / 备份回滚三分支提供强异常保证。", "ref": "expected.object.assign#1"}
+]
