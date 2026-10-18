@@ -18,6 +18,7 @@
 | 章节导读 | `content/std/<clause>.md` | 如 `basic.md`：显示在第 6 章总览页顶部 |
 | 专题 | `content/topics/<slug>.md` | 跨条款主题，如 `value-categories.md` |
 | 工具链 | `content/toolchain/<slug>.md` | 编译、链接、ABI、构建等 |
+| 沿革 | `content/history/<slug>.md` | 历史专题：一个特性 / 库的演进史、委员会争论与妥协 |
 | 提案 | `content/papers/<slug>.md` | 如 `p2996-reflection.md` |
 | 术语 | `data/glossary/<任意名>.json` | 构建时合并所有文件；不同作者写不同文件，避免冲突 |
 | 中文标题 | `data/zh-titles.json` | `{stable-name: 中文标题}` |
@@ -182,3 +183,11 @@ clang++ -std=c++2c -O0 -fsanitize=address,undefined x.cpp -o x && ./x   # 运行
 
 标了 `ok` 的例子应能通过编译；标了 `error` 的例子应被拒绝（如果 Clang 接受了一个标准说非良构的程序，在正文里注明这是编译器缺陷或尚未实现）。
 临时文件放在 `/tmp` 或自己的临时目录，不要放进仓库。
+
+## 9. 沿革（history）页的写法
+
+- 讲一个特性或库**怎么走到今天**：动机 → 早期方案 → 委员会里的争论和否决 → 妥协 → 后来的转机 → 现状 → 还在进行中的工作。用时间线表格收尾或开头都可以。
+- **每个历史论断都要有出处**：WG21 文档（`[[N2773]]`、`[[P0443R14]]` 这类，构建时自动链接到 wg21.link）、Stroustrup 的 HOPL 论文（*Evolving a language in and for the real world: C++ 1991–2006*，HOPL III；*Thriving in a Crowded and Changing World: C++ 2006–2020*，HOPL IV）、*The Design and Evolution of C++*、会议 trip report（注明作者与会议地点/时间）、作者本人的公开文章或演讲。出处写在句末括号里或文末"参考资料"一节。
+- 区分**有文档的事实**和**流传的说法**。后者要标明"据……回忆"或"常见的说法是……"，不要写成定论。不揣测个人动机，不写人身评价；争论只陈述各方的技术理由。
+- 提案号写完后用 `python3 tools/check_refs.py --titles` 核对编号与标题是否对应。
+- 链接到本站的条款页（`[[temp.constr]]`）和专题页，让读者能从历史跳回规则本身。

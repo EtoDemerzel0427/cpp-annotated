@@ -168,6 +168,7 @@ body[data-active="std"] .topnav a[data-nav="std"],
 body[data-active="topics"] .topnav a[data-nav="topics"],
 body[data-active="toolchain"] .topnav a[data-nav="toolchain"],
 body[data-active="papers"] .topnav a[data-nav="papers"],
+body[data-active="history"] .topnav a[data-nav="history"],
 body[data-active="glossary"] .topnav a[data-nav="glossary"] { color: var(--accent); background: var(--accent-bg); }
 .search-btn {
   margin-left: auto; display: flex; align-items: center; gap: 18px;

@@ -89,12 +89,12 @@
 
   var TABS = [
     { k: "lang", label: "核心语言" }, { k: "lib", label: "标准库" }, { k: "annex", label: "附录" },
-    { k: "topics", label: "专题" }, { k: "toolchain", label: "工具链" }, { k: "papers", label: "提案" }
+    { k: "topics", label: "专题" }, { k: "toolchain", label: "工具链" }, { k: "history", label: "沿革" }
   ];
   function defaultTab() {
     var act = body.dataset.active;
     if (curPath.length) return NAV.groups[curPath[0].i] || "lang";
-    if (act === "topics" || act === "toolchain" || act === "papers") return act;
+    if (act === "topics" || act === "toolchain" || act === "history" || act === "papers") return act;
     return store("tab") || "lang";
   }
   function renderSidebar(tab) {
@@ -148,7 +148,7 @@
     document.head.appendChild(sc);
   }
   var sel = 0, results = [];
-  var KIND = { std: "笔记", clause: "章", topics: "专题", toolchain: "工具链", papers: "提案", term: "术语", eel: "原文 ↗" };
+  var KIND = { std: "笔记", clause: "章", topics: "专题", toolchain: "工具链", history: "沿革", papers: "提案", term: "术语", eel: "原文 ↗" };
 
   function openSearch() {
     if (!modal) return;

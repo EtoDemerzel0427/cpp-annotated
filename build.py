@@ -37,6 +37,7 @@ SITE_SUB = "The Annotated C++ Standard"
 COLLECTIONS = {
     "topics": ("专题", "跨越多个条款的主题：把散落在标准各处的规则串成一条线。"),
     "toolchain": ("工具链", "编译器、链接器、ABI、构建系统：标准之外，让 C++ 程序真正跑起来的那一半。"),
+    "history": ("沿革", "一个特性或一个库是怎么走到今天的：早期的尝试、委员会里的争论与妥协、被否决的方案、后来的转机，以及还在进行中的工作。"),
     "papers": ("提案", "WG21 提案解读：一个特性从动机、设计取舍到最终措辞的来龙去脉。"),
 }
 
@@ -451,7 +452,7 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
     <a href="{root}std/index.html" data-nav="std">标准</a>
     <a href="{root}topics/index.html" data-nav="topics">专题</a>
     <a href="{root}toolchain/index.html" data-nav="toolchain">工具链</a>
-    <a href="{root}papers/index.html" data-nav="papers">提案</a>
+    <a href="{root}history/index.html" data-nav="history">沿革</a>
     <a href="{root}glossary.html" data-nav="glossary">术语</a>
   </nav>
   <button class="search-btn" type="button" aria-label="搜索"><span>搜索 stable name / 关键词</span><kbd>/</kbd></button>
@@ -903,6 +904,7 @@ def home_page(clauses, by_id, ctx, pages, toc_meta):
     <div><b>{counts['std']}</b><span>条款笔记</span></div>
     <div><b>{counts['topics']}</b><span>专题</span></div>
     <div><b>{counts['toolchain']}</b><span>工具链</span></div>
+    <div><b>{counts['history']}</b><span>沿革</span></div>
     <div><b>{len(ctx.glossary)}</b><span>术语</span></div>
     <div><b>{round(100 * tot_cov / max(tot_all, 1))}%</b><span>条款覆盖</span></div>
   </div>
