@@ -1,0 +1,13 @@
+[
+  {"id": "two-phase-lookup", "en": "two-phase name lookup", "zh": "两阶段名字查找", "def": "非标准术语，指模板中的非依赖名在定义处查找并绑定、依赖名推迟到每个特化查找的规则合称；依赖调用在实例化时只追加 ADL。见 [[temp.res]]、[[temp.dep.res]]。", "ref": "temp.res.general#1"},
+  {"id": "typename-specifier", "en": "typename-specifier", "zh": "typename 说明符", "def": "形如 `typename N::id` 或 `typename N::template id<...>` 的类型说明符；向解析器声明依赖限定名指称类型，查找仍是普通的限定名查找。", "ref": "temp.res.general#3"},
+  {"id": "type-only-context", "en": "type-only context", "zh": "仅类型语境", "def": "语法上只可能是类型的位置（成员声明、命名空间作用域声明的返回类型、`using` 别名、尾置返回类型、具名转型的目标类型等）；其中终端名依赖的限定名被视为类型，可省略 `typename`（C++20）。", "ref": "temp.res.general#4"},
+  {"id": "dependent-call", "en": "dependent call", "zh": "依赖调用", "def": "被调表达式是 *unqualified-id*，且实参中有包展开或类型依赖的表达式，或被调名是带依赖模板实参的 *template-id* 的函数调用；其被调名是依赖名，实例化时追加 ADL。", "ref": "temp.dep.general#2"},
+  {"id": "type-dependent", "en": "type-dependent (expression)", "zh": "类型依赖的（表达式）", "def": "类型可能依赖于模板形参的表达式，如以依赖类型声明的变量名、`this`（在类模板中）、折叠表达式；`sizeof`、字面量等永不类型依赖。", "ref": "temp.dep.expr#1"},
+  {"id": "value-dependent", "en": "value-dependent (expression)", "zh": "值依赖的（表达式）", "def": "作为常量表达式求值时，其值可能依赖于模板形参的表达式，如常量模板形参名、`sizeof(T)`、`sizeof...(Ts)`；类型依赖的表达式也是值依赖的。", "ref": "temp.dep.constexpr#1"},
+  {"id": "current-instantiation", "en": "current instantiation", "zh": "当前实例化", "def": "在类模板（及其成员、嵌套类、部分特化）定义内部指称\"自己这个特化\"的名字，如注入类名、`X<T>`；其成员在定义处即可查找，无需 `typename`。", "ref": "temp.dep.type#1"},
+  {"id": "dependent-base-class", "en": "dependent base class", "zh": "依赖基类", "def": "是依赖类型且不是当前实例化的基类，如 `Base<T>`；模板定义时不被名字查找搜索，其成员须经 `this->` 或限定名访问。", "ref": "temp.dep.type#3"},
+  {"id": "member-of-the-current-instantiation", "en": "member of the current instantiation", "zh": "当前实例化的成员", "def": "（限定名的查找上下文是当前实例化，且）查找找到某个是当前实例化的类的成员的名字；若找到的是当前实例化中的成员声明，则称为当前实例化的依赖成员。", "ref": "temp.dep.type#4"},
+  {"id": "dependent-type", "en": "dependent type", "zh": "依赖类型", "def": "可能随模板实参变化的类型：模板形参、依赖名指称的类型、由依赖类型构造的复合类型、界值依赖的数组、有依赖实参的模板特化、类型依赖表达式的 `decltype` 等。", "ref": "temp.dep.type#10"},
+  {"id": "point-of-instantiation", "en": "point of instantiation (POI)", "zh": "实例化点", "def": "特化被视为实例化的程序点，依赖名的 ADL 从此出发。函数类特化紧随引用它的命名空间作用域声明之后（TU 末尾也算），类模板特化紧挨其前；多个 POI 含义不同则 IFNDR。", "ref": "temp.point#1"}
+]
