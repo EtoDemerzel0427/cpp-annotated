@@ -146,7 +146,7 @@ const Config& get_config() {
 !!! pitfall "在 func 里对同一个 once_flag 再调用 call_once"
     递归调用时，内层调用看到状态为"进行中"，会等待外层执行完成，而外层正在等内层返回——死锁。标准没有为这种情况规定行为。
 
-!!! pitfall "以为异常也算\"调用过了\""
+!!! pitfall "以为异常也算“调用过了”"
     `func` 抛异常后，`once_flag` 回到"未完成"状态，下一次 `call_once` 会再次调用 `func`（可能是**另一个** `func`——`call_once` 不关心你传的是哪个可调用对象，只看 flag）。
 
 ## 思考题

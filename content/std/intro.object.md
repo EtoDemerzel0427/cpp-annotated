@@ -81,7 +81,7 @@ int main() {
 
 不是任何对象的子对象的对象，叫**完整对象**（complete object）。
 
-!!! note "被\"提供存储\"的对象不是子对象"
+!!! note "被“提供存储”的对象不是子对象"
     在一个 `unsigned char` 数组里用 placement new 创建的对象**不是**该数组的子对象——它是一个完整对象，只是被"嵌套"在数组里（¶3–¶4）。子对象关系只来自类成员、基类和数组元素这三种语法结构。
 
 ### 在子对象的存储里重新创建对象
@@ -528,7 +528,7 @@ C 语言没有"对象被创建"的概念，它用**有效类型**（effective ty
 
 ## 陷阱
 
-!!! pitfall "把 `reinterpret_cast` 当成\"创建对象\""
+!!! pitfall "把 `reinterpret_cast` 当成“创建对象”"
     `reinterpret_cast<T*>(p)` 只改变指针类型。若 `p` 处没有 `T` 对象（或有，但 `p` 的值不指向它），通过结果访问就是 UB。正确做法：用 placement new 创建对象；或依赖隐式对象创建 + `std::launder`；或 C++23 的 `std::start_lifetime_as`；或干脆 `std::memcpy`/`std::bit_cast` 到一个局部变量。
 
 !!! pitfall "以为隐式对象创建对所有类型有效"

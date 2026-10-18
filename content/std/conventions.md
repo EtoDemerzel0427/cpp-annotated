@@ -344,7 +344,7 @@ struct array {
 !!! pitfall "试图使用 exposition-only 名字"
     在 cppreference 或标准中看到 *decay-copy*、*boolean-testable*、*can-reference*，以为可以 `std::decay_copy(x)`——不存在。需要时自己写，或用 `auto(x)`、`std::convertible_to` 等公开设施。
 
-!!! pitfall "以为 CPO 只是\"函数的另一种写法\""
+!!! pitfall "以为 CPO 只是“函数的另一种写法”"
     CPO 是对象，因此：不能对它做 ADL；不能用它重载（你不能在 `std::ranges` 中给 `begin` 加一个重载——那本来就是 UB，见 [[namespace.std]]）；定制它要通过它规定的途径（成员 `begin()`、ADL 可找到的非成员 `begin`、`enable_borrowed_range` 等），而不是特化它。
 
 !!! lawyer "using namespace std 与算法函数对象"

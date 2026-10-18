@@ -187,10 +187,10 @@ libc++ 用宏 `_LIBCPP_HARDENING_MODE` 选择模式（取值 `_LIBCPP_HARDENING_
 
 ## 常见误区
 
-!!! pitfall "\"insert(p, i, j) 用自己的区间做源很常见，应该没事\""
+!!! pitfall "“insert(p, i, j) 用自己的区间做源很常见，应该没事”"
     比如"把 vector 自身复制一遍追加到末尾"：`v.insert(v.end(), v.begin(), v.end())`。这违反 ¶37，是 {{ub}}——一旦触发扩容，`[i, j)` 就指向已释放的缓冲区。正确写法是先 `reserve(2 * v.size())` 再用下标/指针复制，或者复制到临时容器再 `append_range`。
 
-!!! pitfall "\"erase(end()) 什么都不做\""
+!!! pitfall "“erase(end()) 什么都不做”"
     `erase(q)` 要求 `q` **可解引用**（¶2 的记号 `q`），`end()` 不可解引用。这是 {{ub}}。`erase(q1, q2)` 中 `q1 == q2 == end()` 则是合法的空区间。
 
 ## 思考题

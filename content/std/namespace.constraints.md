@@ -360,7 +360,7 @@ int main() {
 
 ## 常见误区
 
-!!! pitfall "\"我只是加一个 operator<<\""
+!!! pitfall "“我只是加一个 operator<<”"
     在 `std` 中为 `std::vector`、`std::pair` 等加运算符是最普遍的违规。它在一个 TU 中"能用"，但如果两个库各加了一个，就是 ODR 违规；若标准库将来自己提供了（C++23 的 `std::formatter` 对范围的支持就是一例），则会产生歧义。
 
 !!! pitfall "特化 std::hash<std::pair<int,int>>"

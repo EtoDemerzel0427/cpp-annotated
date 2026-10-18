@@ -229,7 +229,7 @@ static_assert(p.x + p.y == 3);
 !!! pitfall "`substitute` 的硬错误"
     `can_substitute` 只检查直接语境。带推导返回类型的函数模板、在实例化中会 `static_assert` 失败的类模板，都可能让 `can_substitute` 本身变成硬错误（例 1 中的 `fn2`）。
 
-!!! pitfall "`define_aggregate` 只能对\"从未完整过\"的类调用"
+!!! pitfall "`define_aggregate` 只能对“从未完整过”的类调用"
     ¶8.2 要求 `C` 从求值上下文的每个点看都不完整。对已经定义的类、或在同一翻译单元中先被别处定义的类调用，都不是常量表达式。同一个类也只能被定义一次——第二次调用时它已经完整了。
 
 ## 小结

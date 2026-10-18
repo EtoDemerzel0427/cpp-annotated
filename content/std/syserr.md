@@ -153,7 +153,7 @@ public:
 - ¶4 `message()`：`category().message(value())`——注意它**不是** `noexcept`，可能分配内存并抛 `bad_alloc`；
 - ¶5 `explicit operator bool()`：`value() != 0`。
 
-!!! pitfall "\"0 表示成功\"是硬编码的"
+!!! pitfall "“0 表示成功”是硬编码的"
     `if (ec)` 判断的是 `value() != 0`，**与类别无关**。如果你为某个"0 表示错误"的底层库定义类别（例如 HTTP 状态码里没有 0，但某些库用 0 表示"未知错误"），就必须在映射时避开 0。整个 `<system_error>` 的约定是：值 0 在任何类别中都表示"没有错误"。
 
 ### 非成员函数（[syserr.errcode.nonmembers]）

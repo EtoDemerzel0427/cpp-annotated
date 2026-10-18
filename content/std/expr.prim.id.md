@@ -489,7 +489,7 @@ void f() {
 }
 ```
 
-!!! history "伪析构函数从\"无操作\"到\"结束生命周期\""
+!!! history "伪析构函数从“无操作”到“结束生命周期”"
     C++98–17 中，伪析构函数调用的唯一效果是对后缀表达式求值，**什么也不做**。C++20 起（随提案 [[P0593R6]] "隐式创建对象"一同修改），它**结束对象的生命周期**。这让 `std::destroy_at` 对标量和类类型行为一致：调用之后再读 `i` 就是读取生命周期已结束的对象。对常量求值器而言，这一区别是可观察的：在 `constexpr` 函数中对 `int` 调用伪析构函数后再读取它，不是常量表达式。
 
 !!! lawyer "`~T()` 不是析构函数调用"
@@ -518,7 +518,7 @@ void f() {
 !!! pitfall "按值捕获的变量在非 mutable lambda 中是 const"
     `[v]{ v.push_back(1); }` 非良构：`v` 被变换为闭包成员访问，而调用运算符是 const 的。要么加 `mutable`，要么按引用捕获。`decltype((v))` 也会如实地给出 `const std::vector<int>&`。
 
-!!! pitfall "move-eligible 只看\"名字本身\""
+!!! pitfall "move-eligible 只看“名字本身”"
     `return s.member;`、`return *p;`、`return std::get<0>(t);`、`return cond ? a : b;` 都**不是** move-eligible 的 id 表达式，会拷贝。结构化绑定 `return b;`（`auto [b] = ...`）也不会隐式移动——结构化绑定不是变量。
 
 !!! pitfall "非类型模板形参不能取地址"

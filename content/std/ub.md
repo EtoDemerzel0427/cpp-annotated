@@ -237,7 +237,7 @@ constexpr int x = f(0);   // error: 不是常量表达式（note: division by ze
 
 </details>
 
-!!! question "2. F.3.30 与 F.2.17 看起来都是\"坏指针\"，区别在哪里？"
+!!! question "2. F.3.30 与 F.2.17 看起来都是“坏指针”，区别在哪里？"
     `int a[10]; int* p = a + 11;` 和 `int* q = new int; delete q; q + 1;` 各是什么行为？
 
 <details markdown="1">

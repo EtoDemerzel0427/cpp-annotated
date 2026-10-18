@@ -229,7 +229,7 @@ int main() {}
 
 ## 陷阱
 
-!!! pitfall "`\"%\"PRId64`"
+!!! pitfall "`“%”PRId64`"
     在 C++11 及以后，`printf("%"PRId64"\n", v)` 中的 `"%"PRId64` 是一个后缀为 `PRId64` 的 UDL，宏不会展开。Clang 把这种"不以下划线开头的后缀紧贴字面量"报为错误（"invalid suffix on literal; C++11 requires a space between literal and identifier"）。在字符串与宏之间加空格。
 
 !!! pitfall "负数"

@@ -580,7 +580,7 @@ struct X {
 
 ## 实现视角
 
-!!! impl "链接器如何\"合并\"多份定义：COMDAT 与弱符号"
+!!! impl "链接器如何“合并”多份定义：COMDAT 与弱符号"
     inline 函数、inline 变量、模板实例化、vtable、typeinfo、inline 函数中的静态局部变量及其守卫变量——这些"允许在多个 TU 中出现"的东西在目标文件中被标记为**可合并**的：
 
     - **ELF**（Linux）：放在 COMDAT 组中（`.group` 节，`.text._Z7versionv` 这种独立节），链接器对同名组只保留一份；符号通常是 `W`（weak）。
@@ -662,16 +662,16 @@ MSVC 的标准库用 `#pragma detect_mismatch` 把 `_ITERATOR_DEBUG_LEVEL` 等�
 
 ## 陷阱
 
-!!! pitfall "\"C++17 后 `static const int` 成员就不用类外定义了\""
+!!! pitfall "“C++17 后 `static const int` 成员就不用类外定义了”"
     错。只有 `static constexpr` 与显式 `static inline` 的数据成员是 inline 的。`static const int N = 0;` 在被 odr-use（如传给 `const int&` 形参的 `std::max`、`std::min`、`std::vector::push_back`）时仍需要类外定义，否则链接失败——而且优化级别不同，表现不同（`-O2` 下调用被内联、常量被折叠，可能"碰巧"链接成功）。
 
-!!! pitfall "\"IFNDR 就是链接错误\""
+!!! pitfall "“IFNDR 就是链接错误”"
     不是。"多于一个定义"可能被链接器默默合并（inline、weak 符号），"缺少定义"可能因为优化删掉了调用而不报错，"定义不一致"几乎从不报错。IFNDR 的程序**没有任何行为保证**——不能指望"能链接成功就说明没问题"。
 
-!!! pitfall "\"`if (false)` 里的调用不算使用\""
+!!! pitfall "“`if (false)` 里的调用不算使用”"
     算。odr-use 是语法层面的判定，没有控制流分析。只有 `if constexpr` 被丢弃的分支、不求值操作数才能真正"不使用"。析构函数也一样：`if (c) { S s; }` 会 odr-use `~S`。
 
-!!! pitfall "\"命名空间常量在 inline 函数里用会违反 ODR\""
+!!! pitfall "“命名空间常量在 inline 函数里用会违反 ODR”"
     通常不会——¶16.5.1 专门豁免了"只读值的内部链接常量"。但一旦取址或绑定引用，豁免就失效了。
 
 ## 思考题

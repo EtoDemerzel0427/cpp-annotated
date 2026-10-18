@@ -140,7 +140,7 @@ static_assert(g() == 2);        // OK
 
 Clang 的说明是"modification of object of const-qualified type 'const int' is not allowed in a constant expression"。
 
-!!! note "什么是\"const 对象\""
+!!! note "什么是“const 对象”"
     [[basic.type.qualifier]]：类型为 `const T` 的对象、或这种对象的非 `mutable` 子对象，是 **const 对象**。经 `new const T` 创建的对象也是 const 对象。相反，`const T&` 绑定到非 const 对象，或者 `const T*` 指向非 const 对象，都不会使对象变成 const 的。
 
 ## "去掉常量性"（¶6–7）
@@ -231,13 +231,13 @@ C++23 的显式对象形参（`this auto& self`）提供了另一种去重方式
 
 ## 陷阱
 
-!!! pitfall "\"我只是去掉 const，又没写\""
+!!! pitfall "“我只是去掉 const，又没写”"
     `const_cast` 本身无害；只要不写入 const 对象就不是 UB。但"不写"往往依赖调用的函数——一旦那个函数的实现改为写入，UB 就悄悄出现了。
 
 !!! pitfall "字符串字面量"
     `char* p = const_cast<char*>("abc"); p[0] = 'x';` 是 UB：字符串字面量是 const 对象，通常位于只读段，运行时直接崩溃。
 
-!!! pitfall "以为 `int**` → `const int**` 是安全的\"加 const\""
+!!! pitfall "以为 `int**` → `const int**` 是安全的“加 const”"
     见 ¶6 的例子：它能让你在不写任何"去 const"代码的情况下修改 const 对象，因此语言把它归为"去掉常量性"。
 
 ## 思考题

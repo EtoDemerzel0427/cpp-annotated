@@ -106,7 +106,7 @@ int main() {
 
 ## 常见误区
 
-!!! pitfall "`default_sentinel` 不是\"通用的终点\""
+!!! pitfall "`default_sentinel` 不是“通用的终点”"
     它只对**专门支持它**的迭代器有意义。把 `vector<int>::iterator` 与 `default_sentinel` 配对不能编译（没有对应的 `operator==`），这是好事。
 
 !!! pitfall "`unreachable_sentinel` 让算法不再有安全网"

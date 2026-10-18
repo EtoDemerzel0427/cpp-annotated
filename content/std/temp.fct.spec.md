@@ -223,7 +223,7 @@ void g() { f<int, char>(1.0); }   // Ts = {int, char}（显式），U 从实参�
 
 ## 陷阱
 
-!!! pitfall "`f<T>(x)` 关掉了推导，也关掉了引用折叠的\"自动\""
+!!! pitfall "`f<T>(x)` 关掉了推导，也关掉了引用折叠的“自动”"
     `std::forward<T>(x)` 必须显式写 `T`，因为 `forward` 的形参是 `std::remove_reference_t<T>&`——非推导语境，故意不让推导。反过来，对一个 `template<class T> void g(T&&)` 写 `g<int>(i)`（`i` 是左值）会失败：`T` 被固定为 `int`，形参是 `int&&`，不能绑定左值。转发引用的特殊推导规则只在**推导**时生效。
 
 !!! pitfall "显式实参也会被替换，失败照样是 SFINAE"

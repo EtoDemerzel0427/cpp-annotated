@@ -569,7 +569,7 @@ static_assert(!noexcept(my_swap(std::declval<Throwy&>(), std::declval<Throwy&>()
 !!! pitfall "以为 `sizeof` 会求值"
     `sizeof(f())` 不调用 `f`，`sizeof(i++)` 不改变 `i`。也因此，只声明不定义的函数可以出现在 `sizeof` 中。
 
-!!! pitfall "`noexcept(expr)` 回答的是\"会不会抛\"，而不是\"会不会出错\""
+!!! pitfall "`noexcept(expr)` 回答的是“会不会抛”，而不是“会不会出错”"
     UB、`std::terminate`、断言失败都不在它的考虑范围内。它只看异常规约和少数几种内建会抛的构造。
 
 ## 思考题

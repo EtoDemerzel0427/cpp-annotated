@@ -200,7 +200,7 @@ Clang 在常量求值中会给出"integer value 4 is outside the valid range of 
 
 为什么这一条要单独列出？因为 C++23 引入了**扩展浮点类型**（`std::float16_t`、`std::bfloat16_t` 等，[[basic.extended.fp]]），它们之间的隐式转换只允许**等级不降**（[[conv.double]]）。`double` → `std::float16_t` 不能隐式进行，必须 `static_cast`——这条规则就是那扇门。
 
-!!! lawyer "IEEE 754 下什么叫\"超出范围\""
+!!! lawyer "IEEE 754 下什么叫“超出范围”"
     若目标类型能表示无穷大（IEEE 754，`std::numeric_limits<float>::has_infinity`），那么 `+inf` 也是 `float` 的一个值，`1e300` 就落在 `FLT_MAX` 与 `+inf` 这"两个相邻值之间"，按第二条成为实现定义的选择而非 UB。主流实现正是这样处理的：本机 Clang 在常量求值中接受 `constexpr float f = static_cast<float>(1e300);` 并得到 `+inf`。对没有无穷大的浮点格式，第三条的 UB 才真正适用。
 
 ## 指针的向下转换（¶10）
@@ -349,7 +349,7 @@ void f(const int* cp, int* ip, A* pa, void (*fp)()) {
 !!! pitfall "`static_cast<E>(n)` 对无固定底层类型的枚举可能是 UB"
     从网络或文件读入的整数转换为枚举前，要么给枚举指定底层类型，要么先检查范围。
 
-!!! pitfall "\"经 `void*` 中转\"不是类型双关的合法途径"
+!!! pitfall "“经 `void*` 中转”不是类型双关的合法途径"
     `static_cast<int*>(static_cast<void*>(&f))` 与 `reinterpret_cast<int*>(&f)` 完全等价；读取结果都违反严格别名规则。合法的位模式重新解释请用 `std::bit_cast` 或 `std::memcpy`（见 [[topics/casts]]）。
 
 ## 思考题

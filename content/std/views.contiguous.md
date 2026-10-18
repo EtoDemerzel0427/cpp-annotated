@@ -562,7 +562,7 @@ Clang 对此有专门的诊断 `-Wdangling-gsl`（默认开启）："object back
 
 </details>
 
-!!! question "3. 为什么 `span(It, End)` 需要 ¶8.4 \"`End` 不可转换为 `size_t`\"，而 `span(It, size_type)` 不需要对称的约束？"
+!!! question "3. 为什么 `span(It, End)` 需要 ¶8.4 “`End` 不可转换为 `size_t`”，而 `span(It, size_type)` 不需要对称的约束？"
 
 <details markdown="1">
 <summary>展开查看答案与解析</summary>

@@ -127,7 +127,7 @@ int main() {}
 
 ## 思考题
 
-!!! question "`char s[3] = {'a', 'b', 'c'};` 与 `char s[3] = \"abc\";` 哪个合法？`char s[] = {'a', 'b', 'c'};` 的大小是多少？"
+!!! question "`char s[3] = {'a', 'b', 'c'};` 与 `char s[3] = “abc”;` 哪个合法？`char s[] = {'a', 'b', 'c'};` 的大小是多少？"
 
 <details markdown="1">
 <summary>答案</summary>

@@ -110,12 +110,12 @@ template<class T>
 
 标准库自己的 `basic_string_view`、`span` 并不继承 `view_base`，而是在各自的头文件概要（[[string.view.synop]]、[[span.syn]]）中把 `ranges::enable_view` 与 `ranges::enable_borrowed_range` 都特化为 `true`。
 
-!!! pitfall "\"恰好一个\" view_interface 基类"
+!!! pitfall "“恰好一个” view_interface 基类"
     如果一个类从两个不同的 `view_interface<X>`、`view_interface<Y>` 派生（例如继承了两个各自用 CRTP 定义的视图），*is-derived-from-view-interface* 为假。这不是吹毛求疵：两个 CRTP 基类各自提供 `empty()`、`size()` 等成员会造成歧义。
 
 ## 历史：视图的定义改过三次
 
-!!! history "从 semiregular 到 movable，再到 \"允许拥有\""
+!!! history "从 semiregular 到 movable，再到 “允许拥有”"
     1. **C++20 初版**（[[P0896R4]]）：`view` 要求 `semiregular`（可复制、可默认构造），并要求复制、移动、析构都是 O(1)。这实际上禁止了视图拥有元素。
     2. **只可移动的视图**（[[P1456R1]]，进入 C++20）：把 `semiregular` 放宽为 `movable`，允许仅可移动的视图（如持有 `unique_ptr`、或者持有只能移动的协程句柄的生成器）。
     3. **不要求可默认构造**（[[P2325R3]]，C++23 但作为 C++20 的 DR）：`default_initializable` 被移出 `view`；各标准视图的默认构造函数改成有条件的（`requires default_initializable<V>`）。
@@ -125,7 +125,7 @@ template<class T>
 
 ## 常见误区
 
-!!! pitfall "以为视图就是\"不拥有元素\""
+!!! pitfall "以为视图就是“不拥有元素”"
     今天的定义只关心**代价**，不关心所有权。`owning_view`、`single_view`（自带一个元素）、`std::generator`（拥有协程帧）都是视图。正确的心智模型是："按值传递它不会让总代价超出与元素数成线性的范围"。
 
 !!! pitfall "以为视图都是可复制的"

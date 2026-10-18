@@ -142,7 +142,7 @@ while (v != 3) {
     ```
     ¶4.3 要求修改 happens before 通知。
 
-!!! pitfall "用 relaxed 等待去\"发布\"数据"
+!!! pitfall "用 relaxed 等待去“发布”数据"
     `wait(old, relaxed)` 返回只说明值变了，不建立同步。要读取对方在修改前写入的普通数据，`wait` 必须用 `acquire`（或之后接一个 acquire 栅栏），修改必须用 `release`。
 
 !!! pitfall "ABA"

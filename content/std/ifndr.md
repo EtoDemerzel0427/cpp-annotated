@@ -936,7 +936,7 @@ void x() {
 
 ## 思考题
 
-!!! question "1. 为什么 ODR 的\"相同定义\"要求是 IFNDR，而模块中的同一要求在某些情况下必须诊断？"
+!!! question "1. 为什么 ODR 的“相同定义”要求是 IFNDR，而模块中的同一要求在某些情况下必须诊断？"
     对比 [[basic.def.odr#16]] 的措辞"a diagnostic is required only if…"。
 
 <details markdown="1">

@@ -230,10 +230,10 @@ int main() {
 
 ## 陷阱
 
-!!! pitfall "\"死循环等中断\"在 C++23 及以前是 UB"
+!!! pitfall "“死循环等中断”在 C++23 及以前是 UB"
     `while (1) ;` 在 C++26 之前就是 UB。嵌入式代码常在其中加一条 `volatile` 访问或 `asm volatile("")` 来规避——后者是实现扩展，前者是可移植做法（¶1.4）。C++26 起，空的、条件为常量的循环可以直接写。
 
-!!! pitfall "只有\"空\"的循环才享受豁免"
+!!! pitfall "只有“空”的循环才享受豁免"
     `while (true) { ++local; }` 依然是 UB（如果它真的永远运行）——循环体不空。`for (;;) {}` 可以，`for (;; ++i) {}` 不行。条件必须是**常量表达式**：`const bool b = true; while (b);` 可以（`b` 是常量初始化的 `const` 整型/布尔变量，可用于常量表达式），读取普通全局变量的 `while (g);` 不行。
 
 !!! pitfall "自旋等待非原子标志"
@@ -256,7 +256,7 @@ int main() {
 只有 `f3` 是 UB：循环体不空，因而不是平凡空迭代语句，也不做 ¶1 中的任何事。`f1` 是平凡无限循环（¶1.6）；`f2` 调用 `yield`（¶1.2）；`f4` 执行原子操作（¶1.5，relaxed 也算）；`f5` 通过 volatile glvalue 访问（¶1.4；`(void)v` 是弃值表达式，对 volatile 左值会执行左值到右值转换，见 [[expr.context]]）。
 </details>
 
-!!! question "2. 为什么 ¶2.1 只要求 \"obstruction-free\"，而把真正的 lock-free 放进 \"should\"？"
+!!! question "2. 为什么 ¶2.1 只要求 “obstruction-free”，而把真正的 lock-free 放进 “should”？"
 
 <details markdown="1">
 <summary>答案</summary>

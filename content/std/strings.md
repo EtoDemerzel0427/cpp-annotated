@@ -35,7 +35,7 @@ updated: 2026-10-18
 
 这是个**比"字符类型"宽得多**的集合。核心语言里的 [[g:character-type]] 只有 `char`、`signed char`、`unsigned char`、`char8_t`、`char16_t`、`char32_t`、`wchar_t`；而一个 `struct Glyph { std::uint16_t code; std::uint8_t attr; };` 也是 char-like type。不过能放进 `basic_string` 还需要一个配套的 traits 类（[[char.traits]]），标准只为五种字符类型提供了 `char_traits` 特化——`basic_string<unsigned char>` 在 libc++ 上直接编译失败，原因在 [[char.traits]] 里解释。
 
-!!! note "char-like 与 \"character container type\""
+!!! note "char-like 与 “character container type”"
     [char.traits.general] ¶3 用的是另一个术语 *character container type*（[[defns.character.container]]）：traits 类 `X` 所描述的那个字符类型。实际上两者指的是同一批类型，只是一个从"能放进字符串"的角度命名，另一个从"traits 为谁服务"的角度命名。
 
 ## 四个子条款（¶2）

@@ -148,7 +148,7 @@ int main() {
 !!! pitfall "按值捕获导致切片"
     `catch (std::exception e)` 会把 `out_of_range` 切成 `exception`，`what()` 退化为基类版本（返回由实现定义的字符串）。永远按 `const&` 捕获。
 
-!!! pitfall "以为 `catch (const std::runtime_error&)` 能兜住\"运行期\"的所有错误"
+!!! pitfall "以为 `catch (const std::runtime_error&)` 能兜住“运行期”的所有错误"
     `bad_alloc`、`bad_cast`、`bad_optional_access` 都不在 `runtime_error` 分支里；`future_error` 甚至在 `logic_error` 分支里。需要兜底时捕获 `const std::exception&`。
 
 !!! pitfall "从 `std::string` 构造临时消息的开销"

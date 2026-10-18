@@ -256,7 +256,7 @@ template<class T> concept floating_point   = is_floating_point_v<T>;
 - 注 1、注 2：概念名与 [[basic.fundamental]] 的术语并不一一对应。`char` 不是"有符号整数类型"，但若实现中 `char` 有符号，它建模 `signed_integral`；`bool`、`char8_t`、`char16_t` 等都建模 `unsigned_integral`，尽管它们不是"无符号整数类型"。
 - `floating_point` 包括扩展浮点类型（[[basic.extended.fp]]）。
 
-!!! pitfall "用 `unsigned_integral` 约束\"数字\"会放进 `bool` 和字符类型"
+!!! pitfall "用 `unsigned_integral` 约束“数字”会放进 `bool` 和字符类型"
     `template<std::unsigned_integral T> T gcd(T, T)` 可以用 `bool`、`char8_t` 实例化。标准库中凡是想要"真正的整数"的地方（如 `<bit>` 的 `popcount`、`<numeric>` 的饱和算术），都另外排除了 `bool` 和字符类型——规格写的是"`T` 是无符号整数类型"（[[basic.fundamental]] 意义上的术语），而不是这几个概念。
 
 ```cpp run title="arithmetic.cpp" ok

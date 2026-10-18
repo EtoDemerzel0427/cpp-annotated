@@ -258,7 +258,7 @@ std::basic_string<unsigned char> s;   // error: implicit instantiation of undefi
 
 ## 思考题
 
-!!! question "1. `std::string(\"a\\0b\", 3) == std::string(\"a\\0c\", 3)` 的比较会在 `\\0` 处停下吗？"
+!!! question "1. `std::string(“a\\0b”, 3) == std::string(“a\\0c”, 3)` 的比较会在 `\\0` 处停下吗？"
 
 <details markdown="1">
 <summary>展开查看答案与解析</summary>

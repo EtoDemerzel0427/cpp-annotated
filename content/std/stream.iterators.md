@@ -69,7 +69,7 @@ private:
 - `x == y`：`x.in_stream == y.in_stream`（¶8）——**只比较流指针**，不比较读到的值，也不比较"位置"。
 - `i == default_sentinel`：`!i.in_stream`（¶9）。
 
-!!! note "\"流末\"与\"同一流\"的比较语义"
+!!! note "“流末”与“同一流”的比较语义"
     两个流末迭代器相等；两个绑定同一流、都未到末尾的迭代器也相等（即便它们的 `value` 不同）；绑定不同流的迭代器不相等。这对算法唯一有意义的用途——"与流末比较"——是足够的。
 
 ## `ostream_iterator`（[ostream.iterator]）

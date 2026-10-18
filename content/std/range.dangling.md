@@ -74,7 +74,7 @@ int main() {
 
 第三行说明了一个重要细节：`std::views::all(v)` 是一个**右值** `ref_view`，但 `ref_view` 借用，所以返回真正的迭代器——迭代器指向 `v`，与那个临时 `ref_view` 无关。同理，`std::string_view`、`std::span`、`subrange` 的右值都能得到真迭代器。
 
-!!! tip "只要结果的\"值\"而非迭代器"
+!!! tip "只要结果的“值”而非迭代器"
     对右值容器，若只是想知道最大值，可以用返回值而非迭代器的算法：`std::ranges::max(make())` 返回 `int`，与悬垂无关。`ranges::find` 之类返回迭代器的算法要么传左值，要么改用 `ranges::contains`（C++23）这类返回 `bool` 的算法。
 
 ## 它挡不住什么

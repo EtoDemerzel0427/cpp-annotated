@@ -474,13 +474,13 @@ void g() {
 
 ## 陷阱
 
-!!! pitfall "\"属性不会改变语义\"只对标准属性成立"
+!!! pitfall "“属性不会改变语义”只对标准属性成立"
     厂商属性可以任意改变语义：`[[gnu::packed]]` 改变布局，`[[clang::trivial_abi]]` 改变调用约定，`[[msvc::no_unique_address]]` 改变大小。可忽略性规则只约束 [dcl.attr] 中规定的属性。
 
 !!! pitfall "拼错的属性会被静默忽略"
     `[[nodicard]]`（少了 s）是一个"未知属性"，按 ¶8 被忽略——不会报错，只有 `-Wunknown-attributes`（Clang）或 `-Wattributes`（GCC）会提醒。建议在 CI 中把它们设为错误。
 
-!!! pitfall "`[[noreturn]]` 不是\"不会抛异常\""
+!!! pitfall "`[[noreturn]]` 不是“不会抛异常”"
     它只承诺不**返回**；抛出异常是允许的。与 `noexcept` 毫无关系。
 
 ## 思考题

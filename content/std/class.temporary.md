@@ -132,7 +132,7 @@ int main() {
 }
 ```
 
-!!! impl "ABI：\"对调用而言非平凡\""
+!!! impl "ABI：“对调用而言非平凡”"
     Itanium C++ ABI 把满足 ¶3.2 条件之外的类称为"对调用而言非平凡"（non-trivial for the purposes of calls）：这类对象**不能**放在寄存器里，而是由调用者在内存中创建，再传递其地址（"隐形引用"）。著名的例子是 `std::unique_ptr<T>`：它只有一个指针大小，却因为有非平凡析构函数，必须通过栈内存传递，比裸指针多一次内存往返。Clang 提供 `[[clang::trivial_abi]]` 属性让类在 ABI 意义上被当作平凡的。MSVC x64 的规则不同：它主要按大小（1、2、4、8 字节）以及是否为聚合等条件决定能否在寄存器中传递。
 
 ## 默认销毁时机（¶4）
@@ -308,7 +308,7 @@ const double& h() {
 
 本机 Clang 23 在 `-std=c++2c` 下对 `f`、`g`、`h` 报错（"returning reference to local temporary object"），在 `-std=c++23` 及更早模式下只给出 `-Wreturn-stack-address` 警告——与标准的版本变化一致。
 
-!!! lawyer "P2748 只能抓住\"临时表达式\""
+!!! lawyer "P2748 只能抓住“临时表达式”"
     [[stmt.return]] 的例子里还有：
 
     ```cpp
@@ -415,7 +415,7 @@ T1 与 T2 谁先创建是**未指定**的（函数实参的求值顺序未指定
 !!! pitfall "`auto&&` 绑定成员函数的结果"
     `auto&& x = make().value();`（如 `std::optional<T>::value()` 返回 `T&&`）——经过成员函数调用，不延长，`x` 悬垂。改为 `auto x = make().value();`（按值接收）。
 
-!!! pitfall "以为 `const T&` 形参能\"保存\"临时对象"
+!!! pitfall "以为 `const T&` 形参能“保存”临时对象"
     `struct W { const std::string& s; W(const std::string& s) : s(s) {} };  W w(std::string("x"));` —— 临时 `string` 绑定到构造函数的引用形参（¶6.10），分号处销毁，`w.s` 悬垂。这不是 mem-initializer 绑定临时对象（`s(s)` 绑定的是形参，一个左值），所以编译器不报错。
 
 !!! pitfall "范围 for 修复只在 C++23 模式下有效"

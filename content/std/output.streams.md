@@ -345,7 +345,7 @@ int main() {
 
 ¶8 的注提到一个实现难题："`rdbuf()` 是不是某个 `basic_syncbuf<charT, traits, Allocator>*`"需要知道 `Allocator`，而它无法从 `os` 推导；实现可以给 `basic_syncbuf` 引入一个不依赖分配器的中间基类来管理 *emit-on-sync* 标志，然后用 `dynamic_cast` 判断。后三个操纵符的用途见 [[syncstream]]。
 
-!!! pitfall "`endl` 不是\"换行\"，是\"换行并刷新\""
+!!! pitfall "`endl` 不是“换行”，是“换行并刷新”"
     对写文件或管道的流，每行一次 `flush` 意味着每行一次 `sync()`，通常就是一次系统调用。大量输出时用 `'\n'` 代替 `std::endl`，可以让 streambuf 攒满缓冲区再写。需要刷新的地方（如进度提示、崩溃前的最后日志）再显式 `flush`。对于交互式输入前的提示，`cin` 与 `cout` 的绑定（[[iostream.objects]]）已经保证了刷新，也不需要 `endl`。
 
 ## 右值流插入（[ostream.rvalue]）

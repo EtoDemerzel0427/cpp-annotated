@@ -158,7 +158,7 @@ int main() {
 
 ## 陷阱
 
-!!! pitfall "二值信号量不是\"可重复设置的标志\""
+!!! pitfall "二值信号量不是“可重复设置的标志”"
     对已经是 1 的 `binary_semaphore` 再 `release()` 是 UB（¶8），不会被饱和到 1。需要"设置标志（幂等）+ 唤醒"的语义时，用 `atomic<bool>` 配合 `wait`/`notify`（[[atomics.wait]]），或者条件变量。
 
 !!! pitfall "信号量不防止优先级反转，也不提供所有权诊断"

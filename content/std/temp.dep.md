@@ -138,7 +138,7 @@ int main() { }
 
 为什么 `I+0` 不行？因为要判断等价就得做常量求值和代数推理，规则选择了**纯语法**的判定：只认"直接转述"。这样每个编译器得出的结论都一样。
 
-!!! impl "Clang 对\"等价变量\"的支持不完整"
+!!! impl "Clang 对“等价变量”的支持不完整"
     上例在 Clang 23 下能编译，但那只是因为成员声明本身就是仅类型语境。实测在成员函数体内写 `A<k>::type x = 0;`（`k` 是与形参 `N` 等价的变量），Clang 并不把 `A<k>` 当作当前实例化，仍然要求 `typename`；`A<k>::nonexistent()` 也不会在定义处被诊断。直接用模板形参写的 `A<T>::Nested` 则没有问题。
 
 "是否当前实例化"的实际影响：`A<T>::B* p2` 不需要 `typename`，因为 `A<T>` 是当前实例化，`B` 在定义时就能被找到、知道它是类型；`A<T*>::B` 则可能被某个 `A<U*>` 的部分特化改写成完全不同的东西，只能当依赖名处理。
@@ -317,7 +317,7 @@ int main() { }
 
 ¶11（注 3）：typedef 不引入新类型，所以指向当前实例化成员 typedef 的名字只有在它所指的类型依赖时才是依赖的：`template<class T> struct S { using I = int; I x; };` 中 `I` 不依赖。
 
-!!! history "\"未知特化的成员\"去哪了？"
+!!! history "“未知特化的成员”去哪了？"
     C++11 到 C++20 的 [temp.dep.type] 还定义了一个术语**未知特化的成员**（member of an unknown specialization），用来描述 `T::x`、`Base<T>::x` 以及在当前实例化中找不到、但可能来自依赖基类的名字。C++23 的 [[P1787R6]] 用"依赖的限定名"（¶5）和查找上下文的概念统一重写了这部分规则，这个术语被删除了。读旧资料（包括很多书和 Stack Overflow 回答）时会遇到它，可以大致把它对应到今天 ¶5.2 与 ¶5.4 描述的那些名字。
 
 ## 类型依赖的表达式（[temp.dep.expr]）
@@ -561,7 +561,7 @@ int main() { }
 
 ## 实现视角
 
-!!! impl "编译器如何表示\"依赖\""
+!!! impl "编译器如何表示“依赖”"
     - **Clang** 在 AST 节点上计算一组依赖位（`ExprDependence`/`TypeDependence`：Type、Value、Instantiation、UnexpandedPack、Error 等），直接对应本节的类型依赖、值依赖与"含未展开包"。依赖的类型用专门的节点表示（如 `DependentNameType` 表示 `typename T::x`、`TemplateTypeParmType` 表示 `T`、`InjectedClassNameType` 表示注入类名）。实例化时 `TreeTransform` 遍历这些节点做替换。
     - **当前实例化**是 Clang 能在定义处报"no member named ... in 'X<T>'"的依据：它在定义处对当前实例化做真实的成员查找，没有依赖基类时直接诊断。
     - **GCC** 有对应的 `type_dependent_expression_p`、`value_dependent_expression_p` 等谓词，概念上与标准术语一一对应。
@@ -569,7 +569,7 @@ int main() { }
 
 ## 陷阱
 
-!!! pitfall "\"值依赖\"不等于\"类型依赖\""
+!!! pitfall "“值依赖”不等于“类型依赖”"
     `sizeof(t)`、`static_cast<int>(N)`、`noexcept(T())` 都是值依赖但非类型依赖的。依赖它们的类型（如 `int[sizeof(t)]`）是依赖类型，但表达式本身的类型在定义时已知，可以参与定义时的重载决议。
 
 !!! pitfall "当前实例化的嵌套类型是依赖类型，但名字不是依赖名"

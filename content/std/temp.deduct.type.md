@@ -483,7 +483,7 @@ int fv = f(g);                  // OK；Types = int, float
 
 ## 陷阱
 
-!!! pitfall "别名模板是\"透明\"的"
+!!! pitfall "别名模板是“透明”的"
     `template<class T> using Vec = std::vector<T>;` 后，`template<class T> void f(Vec<T>)` 等价于 `f(std::vector<T>)`，可以推导。但如果别名模板展开后 `T` 落在非推导语境里，例如 `template<class T> using Id = typename std::type_identity<T>::type;`，`f(Id<T>)` 中的 `T` 就不可推导——推导看的是**展开后**的类型。
 
 !!! pitfall "依赖的成员类型永远推不出来"

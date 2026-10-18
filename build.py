@@ -388,6 +388,8 @@ def render_markdown(src, ctx, page_key):
         return f"{indent}XCODEBLOCKX{len(blocks) - 1}X"
 
     src = FENCE_RE.sub(stash, src)
+    # a `"` inside an admonition title cannot be escaped; render `\"` as a plain quote instead of showing the backslash
+    src = re.sub(r'^([ \t]*!!! [\w-]+ ".*)$', lambda m: m.group(1).replace('\\"', '"'), src, flags=re.M)
     src = ADMON_RE.sub(
         lambda m: f'{m.group(1)}{m.group(2)} {m.group(3)} "{admonition_title(m.group(3))}"', src)
     src = expand_inline(src, ctx, page_key)

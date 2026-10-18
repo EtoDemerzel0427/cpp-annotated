@@ -388,7 +388,7 @@ Clang 的扩展属性 `[[clang::lifetimebound]]` 可以把这层关系告诉编�
 
 ## 思考题
 
-!!! question "1. `std::string_view sv = std::string(\"hi\"); std::cout << sv.size();` 有 UB 吗？"
+!!! question "1. `std::string_view sv = std::string(“hi”); std::cout << sv.size();` 有 UB 吗？"
 
 <details markdown="1">
 <summary>展开查看答案与解析</summary>

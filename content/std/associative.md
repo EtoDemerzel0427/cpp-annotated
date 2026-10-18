@@ -153,7 +153,7 @@ int main() {
 
 ## 思考题
 
-!!! question "`std::map<std::string, int> m; m.emplace(\"k\", 1);` 与 `m.try_emplace(\"k\", 1);`，在键 `\"k\"` 已存在时，哪个可能分配内存？"
+!!! question "`std::map<std::string, int> m; m.emplace(“k”, 1);` 与 `m.try_emplace(“k”, 1);`，在键 `“k”` 已存在时，哪个可能分配内存？"
 
 <details markdown="1">
 <summary>展开查看答案与解析</summary>

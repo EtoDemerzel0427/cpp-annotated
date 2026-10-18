@@ -164,7 +164,7 @@ using completion_signatures_of_t = decltype(get_completion_signatures<Sndr, Env.
 
 ¶5 设 `rcvr` 是右值接收器，`Sndr` 满足 `sender_in<Sndr, env_of_t<Rcvr>>`，`Sigs...` 是其签名。若发送器或其操作状态使 `CSO(rcvr, args...)` 被**潜在求值**（[[basic.def.odr]]），则必须存在某个 `Sig` 使 *MATCHING-SIG*(decayed-typeof<CSO>(decltype(args)...), Sig) 成立。这就是 [[exec.snd.concepts#3]] 中"允许的完成"在发送器作者一侧的义务：**声明的签名必须覆盖实际可能的完成**。
 
-!!! pitfall "\"潜在求值\"比\"实际执行\"宽"
+!!! pitfall "“潜在求值”比“实际执行”宽"
     ¶5 说的是**潜在求值**，不是"运行时真的会走到"。即使某条 `set_error` 只在一个运行期永远不成立的分支里，只要它出现在被实例化的代码中、是潜在求值的，就必须有对应的签名。反过来，实现可以利用 `if constexpr` 让不可能的分支根本不实例化，从而缩小签名集合——标准算法的阐述代码里大量的 `if constexpr (!nothrow)` 就是在做这件事：只有当某个操作可能抛异常时，才会出现 `set_error(…, current_exception())`，进而出现 `set_error_t(exception_ptr)` 签名。
 
 ## dependent_sender_error

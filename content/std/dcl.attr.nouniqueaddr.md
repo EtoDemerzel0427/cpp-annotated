@@ -196,7 +196,7 @@ int main() {
 !!! pitfall "不要 memcpy 潜在重叠子对象"
     `sizeof` 报告的是类型大小，子对象实际可能更小，尾部会与其他成员重叠。
 
-!!! pitfall "MSVC 上\"属性写了但没用\""
+!!! pitfall "MSVC 上“属性写了但没用”"
     在 MSVC 上测出的 `sizeof` 与 GCC/Clang 不同不是 bug，是有意为之。跨平台的结构体布局断言要考虑这一点。
 
 ## 思考题

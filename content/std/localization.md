@@ -196,7 +196,7 @@ int main() {
 
 ## 常见误区
 
-!!! pitfall "以为 `std::locale(\"\")` 一定可用"
+!!! pitfall "以为 `std::locale(“”)` 一定可用"
     `locale("")` 取决于运行环境的 `LANG`/`LC_*` 变量；若环境变量指向系统未安装的 locale，构造函数抛 `runtime_error`（¶3）。容器镜像里常见这个问题。
 
 !!! pitfall "以为 `imbue` 能改变已解析的格式"

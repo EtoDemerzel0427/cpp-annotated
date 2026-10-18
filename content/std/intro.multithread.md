@@ -427,7 +427,7 @@ int main() {
 !!! pitfall "volatile 不是同步"
     `volatile` 只保证每次访问都真的发生（[[intro.abstract]] 的可观察行为），不提供原子性，也不建立 happens before。两个线程无同步地访问同一个 `volatile int` **依然是数据竞争**（¶17 只对同一线程内的 `volatile sig_atomic_t` 开了口子）。MSVC 在 `/volatile:ms` 下给 volatile 附加了 acquire/release 语义，这是扩展，不是标准。
 
-!!! pitfall "\"良性\"数据竞争不存在"
+!!! pitfall "“良性”数据竞争不存在"
     `if (!initialized) { init(); initialized = true; }` 这类"反正只是读到旧值也没关系"的竞争在标准下是 UB。编译器可以假设无竞争而做出意想不到的变换（如把读合并、把写拆开）。需要时用 `std::atomic<bool>` 配合合适的内存序。
 
 !!! pitfall "relaxed 读到新值 ≠ 看到之前的写"

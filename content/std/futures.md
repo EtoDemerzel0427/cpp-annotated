@@ -239,7 +239,7 @@ int work(int value) {
     - **默认策略总是选 `async`**：`async(launch::async | launch::deferred, ...)` 先尝试创建新线程；只有在创建线程抛出异常时，才退回 `deferred`（纯 `launch::async` 则重新抛出）。所以在 libc++ 上，默认策略的 `async` 实际上总是并发的——但这是实现的选择，不是标准的保证。
     - 每次 `launch::async` 都创建一个**新的** `std::thread` 并立即 `detach`；共享状态的引用计数降为零时（`__on_zero_shared`），先 `wait()` 等待状态就绪，再销毁。
 
-!!! impl "libc++ 没有做到\"如同 join\""
+!!! impl "libc++ 没有做到“如同 join”"
     libc++ 等待的是**共享状态就绪**，而不是**线程完成**：线程函数的结果一存入共享状态，`get()` 和析构函数就可以返回，而那个已 detach 的线程此时可能还在析构它的 `thread_local` 对象。下面的程序在 libc++ 上打印 `0`，按 ¶4.1 的字面要求应当打印 `1`：
 
     ```cpp run title="async-thread-local.cpp" ok

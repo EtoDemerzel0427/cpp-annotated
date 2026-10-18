@@ -49,7 +49,7 @@ void* operator new(std::size_t size, std::align_val_t alignment);
 
 ¶4 *Remarks*：此函数是**可替换的**（[[dcl.fct.def.replace]]）。
 
-!!! note "\"是否调用 malloc 是未指明的\""
+!!! note "“是否调用 malloc 是未指明的”"
     这句话的分量在于：你**不能**假设 `operator new` 分配的内存可以用 `free` 释放，或者 `malloc` 分配的内存可以用 `operator delete` 释放——即使在你的平台上默认实现恰好就是 `malloc`。混用属于违反 ¶10 的前置条件，是 UB。
 
 ### nothrow 版本（¶5–¶9）
@@ -198,7 +198,7 @@ static_assert(f() == 42);
 int main() {}
 ```
 
-!!! pitfall "无法\"替换\"placement new"
+!!! pitfall "无法“替换”placement new"
     写 `void* operator new(std::size_t, void*)` 的全局定义会与 `<new>` 中的 inline 定义冲突（重定义），而且 ¶1 明确禁止。但你可以在**类作用域**声明 `operator new(size_t, void*)`——那是类专属的分配函数，会隐藏全局的 placement 形式，导致 `new (buf) T` 对该类走你的版本。标准容器为此总是写 `::new (p) T(...)`，用 `::` 跳过类作用域查找。
 
 ## 数据竞争（[new.delete.dataraces]）

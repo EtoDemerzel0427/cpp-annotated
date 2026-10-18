@@ -68,7 +68,7 @@ public:
 
 [[range.drop]] 的注释提到：`drop_view`/`drop_while_view` 之所以要缓存 `begin()`，正是为了让 `reverse_view` 叠在它们上面不变成平方复杂度——`reverse_iterator` 与 `rend()` 比较时会用到底层的 `begin()`。
 
-!!! pitfall "reverse_iterator 与\"藏匿型\"迭代器"
+!!! pitfall "reverse_iterator 与“藏匿型”迭代器"
     `std::reverse_iterator::operator*` 的效果是 `{ auto tmp = current; return *--tmp; }`——它对一个**局部副本**解引用并返回结果。若底层迭代器是"藏匿型"（stashing）的，即解引用返回指向迭代器**自身内部**的引用，那么 `tmp` 一销毁，返回的引用就悬垂了。标准把这类迭代器排除在双向/前向之外（[[iterator.concept.forward]] 要求引用的有效性不依赖迭代器对象），所以合规的视图不会出现这种问题；但手写迭代器时若违反了这条语义要求，`views::reverse` 会产生{{ub}}。
 
 ## 小结

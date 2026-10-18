@@ -275,7 +275,7 @@ T pop() {
 !!! history "C++17 之后这个理由还成立吗？"
     C++17 的保证复制消除让 `return tmp;` 这种具名返回值仍然**不在**保证之列（NRVO 依旧可选），只有 prvalue 才有保证。更关键的是，`auto x = s.pop();` 之外还有 `x = s.pop();` 这种**赋值**场景，赋值运算符照样可能抛出。所以 `void pop()` 的设计理由至今有效。现代库（例如并发队列）常提供 `bool try_pop(T& out)` 或 `optional<T>` 返回的变体，代价是要求 `T` 的移动不抛或者接受较弱的保证。
 
-!!! lawyer "从 priority_queue::top() 里\"偷走\"元素"
+!!! lawyer "从 priority_queue::top() 里“偷走”元素"
     `priority_queue::top()` 只有 `const` 版本，返回 `const_reference`——因为修改堆顶可能破坏堆性质。常见的"性能技巧"是 `T x = std::move(const_cast<T&>(pq.top())); pq.pop();`。底层元素本身不是 const 对象，所以 `const_cast` 后修改它不违反 [[dcl.type.cv]]；但随后的 `pop()` 调用 `pop_heap`，其 *Preconditions*（[[pop.heap#2]]）要求整个区间是合法堆——被移走的堆顶（例如变成空字符串）可能已经小于它的子节点，严格按条文这是 {{ub}}。主流实现的 `pop_heap` 采用 Floyd 式下沉，不会再比较原堆顶，因此"碰巧能用"；但这是依赖实现细节，而非标准保证。
 
 ## priority_queue（[priority.queue]）

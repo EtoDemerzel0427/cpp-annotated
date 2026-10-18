@@ -216,7 +216,7 @@ std::basic_string b = sv;   // error：explicit 推导指引不参与拷贝初�
 - ¶34：`operator=(const charT*)`；`operator=(nullptr_t) = delete`。
 - ¶35：`operator=(charT c)` 等价于赋值一个长度为 1 的视图。
 
-!!! pitfall "`s = 65;` 静默得到 \"A\""
+!!! pitfall "`s = 65;` 静默得到 “A”"
     `operator=(charT)` 接受任何能隐式转换为 `char` 的值。`std::string s; s = 65;` 编译通过，`-Wall -Wextra -pedantic` 下也没有任何警告（本机 Clang 23），结果是 `"A"`。常见来源是想写 `s = std::to_string(n)` 却写成了 `s = n`。
 
 ## 迭代器（[string.iterators]）
@@ -397,7 +397,7 @@ constexpr std::string s1 = "short";                           // 本机 libc++ �
 
 </details>
 
-!!! question "2. 为什么 `std::string s = sv;`（`sv` 是 `std::string_view`）非良构，而 `std::string s = \"abc\";` 合法？"
+!!! question "2. 为什么 `std::string s = sv;`（`sv` 是 `std::string_view`）非良构，而 `std::string s = “abc”;` 合法？"
 
 <details markdown="1">
 <summary>展开查看答案与解析</summary>

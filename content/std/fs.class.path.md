@@ -365,7 +365,7 @@ int main() {
 }
 ```
 
-!!! lawyer "`path::iterator` 是\"暂存迭代器\""
+!!! lawyer "`path::iterator` 是“暂存迭代器”"
     ¶2 放宽的那条要求，正是 *Cpp17ForwardIterator* 的"`a == b` 则 `*a` 与 `*b` 绑定到同一个对象"（[[forward.iterators#6]]）。原因是路径元素并不作为 `path` 对象存在于字符串里，迭代器只能在**自身内部**构造一个 `path` 来保存当前元素（本机 libc++ 的成员名就叫 `__stashed_elem_`），`operator*` 返回对它的引用。于是：
 
     - 复制迭代器后，原迭代器和副本解引用得到的是**不同**对象；迭代器销毁后，之前得到的引用悬垂。

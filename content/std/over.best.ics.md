@@ -565,7 +565,7 @@ void use() {
 
 ## 思考题
 
-!!! question "1. `void f(const char*); void f(std::string);`，`f(\"abc\")` 调用哪个？`void g(bool); void g(std::string);`，`g(\"abc\")` 呢？"
+!!! question "1. `void f(const char*); void f(std::string);`，`f(“abc”)` 调用哪个？`void g(bool); void g(std::string);`，`g(“abc”)` 呢？"
 
 <details markdown="1">
 <summary>答案</summary>

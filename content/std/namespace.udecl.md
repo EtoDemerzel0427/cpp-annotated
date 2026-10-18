@@ -505,7 +505,7 @@ int main() { Derived<Base> d; return d.get() - 1 + d.v; }
 
 ## 陷阱
 
-!!! pitfall "\"using 声明会跟着重载一起更新\""
+!!! pitfall "“using 声明会跟着重载一起更新”"
     不会。`using A::f;` 之后再往 `A` 中添加的 `f` 重载对它不可见（¶9）。头文件中先 `using` 再包含另一个扩展 `A::f` 的头文件，就会得到"有时能调用，有时不能"的效果。
 
 !!! pitfall "想用 using 声明公开基类的某一个重载"

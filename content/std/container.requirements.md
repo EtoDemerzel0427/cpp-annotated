@@ -203,13 +203,13 @@ int main() {
 
 ## 常见误区
 
-!!! pitfall "\"deque 的 push_back 不使任何东西失效\""
+!!! pitfall "“deque 的 push_back 不使任何东西失效”"
     错。它**不使引用失效**，但使**所有迭代器**失效（包括指向未被触碰元素的迭代器）。原因是 `deque` 迭代器内部持有指向"块指针表"（map）的指针，两端插入可能让这张表重新分配。
 
-!!! pitfall "\"unordered_map 插入只要没有 rehash 就安全\""
+!!! pitfall "“unordered_map 插入只要没有 rehash 就安全”"
     对引用而言，**无论是否 rehash** 都安全——标准保证插入从不使引用/指针失效。对迭代器而言，"没有 rehash"的唯一**可依赖**判据是 ¶243 的 (N+n) ≤ z·B；提前 `reserve` 就是为了建立这个条件。
 
-!!! pitfall "\"clear() 之后 end() 还能用\""
+!!! pitfall "“clear() 之后 end() 还能用”"
     [[sequence.reqmts#54]] 说 `clear()` **可能**使尾后迭代器失效。只有 `forward_list::clear()` 明确保证不使 end 失效（[[forward.list.modifiers#38]]）。
 
 ## 思考题

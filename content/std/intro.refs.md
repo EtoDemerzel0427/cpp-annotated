@@ -77,8 +77,8 @@ int main() {
 
 ## 陷阱
 
-!!! pitfall "\"C 标准里定义的行为在 C++ 里也一样\""
+!!! pitfall "“C 标准里定义的行为在 C++ 里也一样”"
     只对被引用的部分成立，而且要经过 C++ 的修改。例如 C 的 `<string.h>` 中 `strchr` 接受 `const char*` 返回 `char*`，而 C++ 的 `<cstring>` 提供 `const` 正确的两个重载（[[cstring.syn]]）；C 的 `<tgmath.h>` 宏在 C++ 中由重载代替。C 的核心语言规则（如联合体的类型双关）则完全不适用。
 
-!!! pitfall "\"`std::regex` 就是 JavaScript 的正则\""
+!!! pitfall "“`std::regex` 就是 JavaScript 的正则”"
     它基于 1999 年的 ECMAScript 第 3 版，而且是"修改过的"（[[re.grammar]] 增加了一些 POSIX 风格的字符类等）。后来 JavaScript 正则新增的命名捕获组、后行断言、`u` 标志等，`std::regex` 都不支持。

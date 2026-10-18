@@ -149,7 +149,7 @@ state.arrive(rcvr);
 
 ## 陷阱
 
-!!! pitfall "when_all 不提供\"任一完成即返回\""
+!!! pitfall "when_all 不提供“任一完成即返回”"
     `when_all` 等**所有**子操作；没有标准的 `when_any`。也不要指望"一个出错，其他立即停下"：请求停止只是一个请求，子操作可以忽略它（[[exec.bulk]] 注 2 就明确允许）。`when_all` 会耐心等到所有子操作真的完成。
 
 !!! pitfall "子发送器没有 value 签名"

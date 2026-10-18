@@ -215,7 +215,7 @@ A a2{i, ip};      // 用 #3 推导出 A<int&>，用 #2 初始化
 
 CTAD（[[over.match.class.deduct]]）把构造函数变成虚构的函数模板，类模板形参 `T` 成了虚构模板的形参——如果 `T&&` 也算转发引用，`A a{i, 0, ip}` 就会推出 `A<int&>`，这通常不是类作者的意图（`std::vector<T>` 有 `vector(T&&)` 风格的构造函数，你不会想要 `vector<int&>`）。所以定义特意排除。推导指引是用户显式写的，用户可以要求转发引用语义。
 
-!!! history "\"万能引用\"与\"转发引用\""
+!!! history "“万能引用”与“转发引用”"
     Scott Meyers 最早称之为 universal reference（万能引用），这个说法流传甚广。标准术语 forwarding reference 来自 [[N4164]]（Sutter、Stroustrup、Dos Reis），在 C++17 的标准文本中正式使用。两者指同一件事。
 
 ## 允许的三种差异（¶4–¶5）

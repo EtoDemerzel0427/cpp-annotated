@@ -313,7 +313,7 @@ int main() {}
 
 ## 陷阱
 
-!!! pitfall "`common_type` 不是\"能装下两者的类型\""
+!!! pitfall "`common_type` 不是“能装下两者的类型”"
     `common_type_t<int, unsigned>` 是 `unsigned`——负数会回绕。`common_type_t<long long, double>` 是 `double`——大整数会丢精度。它复刻的是条件运算符的常用算术转换，而不是"无损公共表示"。
 
 !!! pitfall "`conditional` 两个分支都会形成"

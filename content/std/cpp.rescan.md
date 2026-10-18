@@ -169,7 +169,7 @@ id(gg)      // id 的实参 gg 先完全展开，得到蓝色的 gg；代入 id 
 
 如果没有第三句，`id(gg)` 中 `gg` 被代入 `id` 的替换列表后，`gg` 已经不再"正在被替换"，就会再次展开为 `ff(gg)` → `gg` → …… 而把它包在 `id(id(id(...)))` 里就能绕开递归保护。第三句堵住了这条路。
 
-!!! note "为什么叫\"涂蓝\""
+!!! note "为什么叫“涂蓝”"
     "painted blue" 是 C 委员会内部的行话，源于描述这一算法时用不同颜色标记记号的做法。标准正文中没有这个词，只说"nonreplaced macro name preprocessing tokens"。
 
 ## 结果不是指令，但 _Pragma 会被执行（¶4）
@@ -250,7 +250,7 @@ int main() {}
 
 ## 陷阱
 
-!!! pitfall "以为宏会\"递归\""
+!!! pitfall "以为宏会“递归”"
     ```cpp
     #define LIST(x, ...) x __VA_OPT__(, LIST(__VA_ARGS__))
     LIST(1, 2, 3)   // → 1 , LIST(2, 3)，内层 LIST 被涂蓝，不会继续

@@ -162,7 +162,7 @@ int main() {
 !!! pitfall "`(Derived*)p` 不做检查"
     它是 `static_cast`，不是 `dynamic_cast`。错误的向下转换是静默 UB。
 
-!!! pitfall "`(T*)p` 在继承关系\"缺失\"时变成 reinterpret_cast"
+!!! pitfall "`(T*)p` 在继承关系“缺失”时变成 reinterpret_cast"
     类不完整（¶5）或者根本无关时，C 风格转换不报错，只是不再调整地址。
 
 !!! pitfall "以为 `(int)x` 和 `int(x)` 不同"

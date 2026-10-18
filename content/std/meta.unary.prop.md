@@ -206,7 +206,7 @@ int main() {}
 
 "可引用"排除了 `void` 和带 cv/引用限定的函数类型（你写不出 `const void&` 或 `void() const&`）。对引用类型 `T = int&`，`const T&` 按引用折叠就是 `int&`，所以 `is_copy_constructible_v<int&>` 为真。
 
-!!! pitfall "\"可移动构造\"不等于\"有移动构造函数\""
+!!! pitfall "“可移动构造”不等于“有移动构造函数”"
     `is_move_constructible_v<T>` 问的是 `T t(declval<T&&>())` 是否良构。一个只有拷贝构造函数（`T(const T&)`）、移动构造函数未声明的类，右值照样能绑定到 `const T&`，结果为真。反过来，移动构造函数被 `= delete` 显式删除时，重载决议选中被删除的函数，结果为假。
 
 ## 四、`is_assignable`、`is_swappable`、`is_destructible`

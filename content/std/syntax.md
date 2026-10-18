@@ -226,7 +226,7 @@ int main() {
 
 ## 陷阱
 
-!!! pitfall "\"语法允许就是合法的\""
+!!! pitfall "“语法允许就是合法的”"
     语法只是必要条件。`int x = "hello";` 完全符合语法（*init-declarator* 带 *initializer*），但违反了初始化的语义规则。判断良构性，语法只是第一步。
 
 !!! pitfall "把 *X-name* 当作纯语法类别"

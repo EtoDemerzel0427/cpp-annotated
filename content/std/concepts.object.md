@@ -104,7 +104,7 @@ int main() {}
 !!! pitfall "`const` 成员让类型失去 `movable`"
     `struct S { const int id; };` 的赋值运算符被隐式删除，于是 `S` 不是 `movable`，不能放进需要 `movable` 的 ranges 视图（例如作为 `views::single` 的元素）。引用成员同理。这是"值类型不要用 const/引用数据成员"这条经验规则在概念层面的体现。
 
-!!! pitfall "\"满足 `regular`\" 不代表 `==` 比较的是你以为的东西"
+!!! pitfall "“满足 `regular`” 不代表 `==` 比较的是你以为的东西"
     如果一个类型通过隐式转换（转为指针、转为 `bool`）获得 `==`，它可能满足 `regular`，但比较的语义未必是值相等——那就是满足但不建模。无捕获 lambda 恰好"歪打正着"；一个有状态却能转换为 `bool` 的类型则不会这么幸运。
 
 ## 思考题

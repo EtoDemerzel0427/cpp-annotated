@@ -482,13 +482,13 @@ template<typename T> struct S2 {
 
 ## 陷阱
 
-!!! pitfall "\"能编译\" ≠ \"所有成员都合法\""
+!!! pitfall "“能编译” ≠ “所有成员都合法”"
     类模板的成员函数只在被使用时才实例化。测试代码只用到 `push_back` 时，`resize` 中的错误永远不会被发现。写库时应该用显式实例化定义（`template class MyVec<SomeType>;`）在测试中强制实例化所有成员（[[temp.explicit#9]]）。
 
 !!! pitfall "模板里的静态数据成员初始化可能根本不发生"
     见 ¶4 的自注册例子。需要副作用时，必须确保这个静态成员被 odr-use。
 
-!!! pitfall "`decltype`/`sizeof` 并不总是\"不实例化\""
+!!! pitfall "`decltype`/`sizeof` 并不总是“不实例化”"
     不求值操作数里的函数调用不会实例化函数体——**除非**需要函数体来确定类型（`auto` 返回类型），或者表达式是潜在常量求值的（¶8）。`decltype(f<T>())` 对 `auto f()` 会实例化 `f<T>` 的函数体，函数体里的错误是硬错误。
 
 !!! pitfall "虚函数总是被实例化（实际上）"

@@ -511,7 +511,7 @@ int main() {
 !!! pitfall "被模板实参拉进来的命名空间"
     `std::vector<mylib::Widget>` 会让 mylib 中所有同名函数参与 `std` 算法的无限定调用；反之 `mylib::Container<std::string>` 让 std 的函数参与你的调用。给库函数起 `distance`、`find`、`size`、`data` 这样的名字时尤其要小心。
 
-!!! pitfall "用括号或限定名\"关闭\"ADL 也关闭了定制"
+!!! pitfall "用括号或限定名“关闭”ADL 也关闭了定制"
     `(swap)(a, b)` 确实不会被劫持，但也找不到用户的定制。需要"可定制但不可劫持"时，用 CPO。
 
 ## 思考题

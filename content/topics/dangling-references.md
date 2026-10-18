@@ -95,7 +95,7 @@ R f3() { return {42}; }                        // 返回对象的"组成引用"�
 
 C++23 中这些都是良构的"必然悬垂"代码。C++26 通过 [[P2748R5]] 规定：`return` 语句把**返回的引用**绑定到**临时表达式**，程序非良构；当前草案的 [[stmt.return#6]] 还把返回对象的**组成引用**（[[intro.object#12]]）一并纳入（¶6.2）。本机 Clang 23 在 `-std=c++2c` 下对三者都报"returning reference to local temporary object"。
 
-!!! lawyer "规则只看语法上的\"临时表达式\""
+!!! lawyer "规则只看语法上的“临时表达式”"
     ```cpp
     auto&& id(auto&& r) { return static_cast<decltype(r)&&>(r); }
     auto&& f4() { return id(42); }      // 良构，但必然悬垂

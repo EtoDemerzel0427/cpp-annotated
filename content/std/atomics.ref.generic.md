@@ -176,7 +176,7 @@ int main() {
 
 ## 陷阱
 
-!!! pitfall "atomic_ref 的生命周期就是\"原子期\""
+!!! pitfall "atomic_ref 的生命周期就是“原子期”"
     ```cpp
     std::atomic_ref r(x);
     r.store(1);

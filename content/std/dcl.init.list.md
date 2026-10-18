@@ -519,7 +519,7 @@ int main() {}
 !!! pitfall "`vector<int>{n, v}` 不是 `vector<int>(n, v)`"
     花括号对有 initializer-list 构造函数的类型几乎总是选它。需要"大小 + 值"的构造函数时，用圆括号。
 
-!!! pitfall "`vector<string>{{\"a\", \"b\"}}`"
+!!! pitfall "`vector<string>{{“a”, “b”}}`"
     第一阶段：`initializer_list<string>` 从 `{{"a", "b"}}` 构造——外层花括号是 `initializer_list`，内层 `{"a", "b"}` 初始化**一个** `string`，调用 `string(const char*, const char*)`（迭代器区间构造函数），两个指针指向不同的字面量，**UB**。正确写法是 `{"a", "b"}`。
 
 !!! pitfall "窄化是错误，不是不匹配"

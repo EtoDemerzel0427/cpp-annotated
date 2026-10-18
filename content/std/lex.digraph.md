@@ -88,7 +88,7 @@ int main() { std::puts(STR(CAT(he, llo))); }   // 打印 CAT(he, llo)：# 不展
 int not = 0;       // error：not 不是标识符
 ```
 
-!!! lawyer "Annex C 说它们是\"关键字\""
+!!! lawyer "Annex C 说它们是“关键字”"
     [[diff.header.iso646.h]] 写道：这些记号"在 C++ 中是关键字"，因此 `<iso646.h>` 不把它们引入为宏。但在第 5 章的分类里，它们既不在关键字表（[[lex.key]] 表 5）中，也不是 *identifier*，而是 *operator-or-punctuator*（[[lex.operators]]）。Annex C 是参考性（informative）的，这里的措辞是非正式的；规范性的分类以第 5 章为准。
 
 ## 与 C 的关系

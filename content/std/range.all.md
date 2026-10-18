@@ -113,7 +113,7 @@ public:
 - **借用性随底层**：`enable_borrowed_range<owning_view<T>>` = `enable_borrowed_range<T>`；对 `vector` 来说为假，所以算法对右值 `owning_view<vector>` 仍返回 `dangling`（[[range.dangling]]）；
 - **排除 `initializer_list`**：`initializer_list` 本身不拥有元素（它引用一个临时数组），"拥有一个 `initializer_list`"是假的所有权，必然悬垂。
 
-!!! history "\"把右值容器放进管道\"的转变"
+!!! history "“把右值容器放进管道”的转变"
     C++20 初版没有 `owning_view`：`views::all` 对非视图右值直接非良构，所以 `make_vector() | views::filter(p)` 不能编译——这在当时被看作一种"安全"。[[P2415R2]]（"What is a view?"，作为 C++20 的 DR）重新定义了视图（允许只移动的拥有型视图），并加入 `owning_view`，让这种写法合法且安全：临时 vector 被**移入**管道，跟着视图一起活。
 
 ## 所有权的心智模型

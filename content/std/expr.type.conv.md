@@ -264,7 +264,7 @@ int main() {
 
 ## 陷阱
 
-!!! pitfall "`T(x)` 不是\"构造函数调用\"，对指针和整数它是 C 风格转换"
+!!! pitfall "`T(x)` 不是“构造函数调用”，对指针和整数它是 C 风格转换"
     `IntPtr(&const_obj)`、`Handle(pointer)`、`uintptr_t(p)` 都会悄悄完成 `const_cast` 或 `reinterpret_cast`。在代码审查中，看到"单参数函数式转换 + 标量/指针类型"，应当像看到 C 风格转换一样警惕。
 
 !!! pitfall "`T(a)` 与 `T{a}` 可能选不同的构造函数"

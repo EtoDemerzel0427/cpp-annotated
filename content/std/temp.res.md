@@ -108,7 +108,7 @@ template<class T> void g(T) {
 double dd;
 ```
 
-!!! pitfall "\"等实例化时再找\"只适用于依赖名"
+!!! pitfall "“等实例化时再找”只适用于依赖名"
     常见误解是"模板里的名字都是实例化时才查的"。只有**依赖名**如此，而且即便是依赖调用，**普通的无限定查找**也只在定义处做，实例化处只追加 ADL（[[temp.dep.candidate]]）。所以 `f(t)` 中 `T = int` 时，定义之后才声明的 `f(int)` 永远找不到：`int` 没有关联命名空间。
 
 ### 模板实参的成员不影响绑定（例 3）
@@ -510,16 +510,16 @@ template<class T> class X {
 
 ## 陷阱
 
-!!! pitfall "typename 不是\"类型查找\""
+!!! pitfall "typename 不是“类型查找”"
     `typename T::X` 照常做限定名查找，找到数据成员就报错，不会"跳过"非类型去找类型（¶3 注 2）。需要仅类型查找时用详述类型说明符 `struct T::X`/`class T::X`。
 
 !!! pitfall "块作用域里还是得写 typename"
     C++20 之后很多人以为 `typename` 可以全面省略。块作用域的声明、命名空间作用域非限定函数的形参、模板实参（`std::vector<typename T::R>`）、`sizeof`/`decltype` 的操作数中仍然需要 `typename`——这些位置都存在合法的表达式解释。
 
-!!! pitfall "依赖调用的普通查找不会\"等\""
+!!! pitfall "依赖调用的普通查找不会“等”"
     `template<class T> void g(T t) { f(t); }` 之后才声明的 `f(int)`，对 `g(1)` 永远不可见：无限定查找只在定义处做，ADL 对 `int` 不贡献任何东西。修正方法是把 `f` 的声明提到模板前面，或者让实参类型有关联命名空间。
 
-!!! pitfall "IFNDR 意味着\"编译通过不代表正确\""
+!!! pitfall "IFNDR 意味着“编译通过不代表正确”"
     ¶6 的大部分情形 Clang/GCC 能诊断一部分、漏掉一部分，而 MSVC 的宽松模式几乎全部漏掉。代码在一个编译器上通过，换一个编译器（或升级版本）就报错，通常就是撞上了 ¶6。
 
 ## 思考题

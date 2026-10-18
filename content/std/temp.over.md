@@ -189,7 +189,7 @@ int n = size_of(42);   // OK：decltype(c.size()) 在签名中，推导失败，
     ```
     `p` 是非 const 左值：模板推导出 `Person(Person&)`，精确匹配；拷贝构造函数需要添加 `const`。转换序列不同（模板的更好），"非模板优先"根本用不上。需要用约束排除 `Person` 自身：`requires (!std::is_same_v<std::remove_cvref_t<S>, Person>)`。
 
-!!! pitfall "\"非模板优先\"只是最后的决胜"
+!!! pitfall "“非模板优先”只是最后的决胜"
     很多人以为"有非模板函数就一定选它"。实际上它只在转换序列完全不分高下时才生效（见上面的 `g('a')`）。
 
 ## 思考题

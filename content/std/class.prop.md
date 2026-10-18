@@ -18,7 +18,7 @@ updated: 2026-10-17
 
 这三个性质是**相互独立**的（¶6 的例子正好覆盖了各种组合）。在它们之上，[[basic.types.general]] 把标量类型也纳入进来，定义了"平凡可复制**类型**"、"标准布局**类型**"、"隐式生存期**类型**"；本节只管**类**。
 
-!!! note "\"平凡类\"去哪了？"
+!!! note "“平凡类”去哪了？"
     C++23 及以前，本节还定义了**平凡类**（trivial class）：平凡可复制，且有一个或多个合格的默认构造函数、全部平凡。C++26 草案 {{c++26}} 把这个概念连同 `std::is_trivial` 一起移入附录 D 弃用（[[depr.meta.types#3]]，[[P3247R2]]）。理由是"平凡"把"可以 `memcpy`"与"默认构造什么都不做"两件不相关的事捆在一起，几乎没有代码真正需要这个组合；需要的人应该分别问 `is_trivially_copyable` 和 `is_trivially_default_constructible`。同理，POD 早在 C++20 就已弃用。
 
 !!! note "平凡可重定位？"
@@ -336,7 +336,7 @@ int main() {
 !!! lawyer "含 `std::string` 的聚合也是隐式生存期类"
     `struct A { std::string s; };` 是聚合，析构函数是隐式声明的（非用户提供），所以按 ¶8.1 它是隐式生存期类，`std::is_implicit_lifetime_v<A>` 为 `true`。但这并不意味着 `malloc` 出来的存储里能凭空出现一个**可用的** `std::string`：隐式创建 `A` 对象时，其成员 `s` 的生命周期并不会开始（`std::string` 不是隐式生存期类型），使用 `s` 仍然是 UB。这个概念只保证"外壳"可以隐式出现，内部非隐式生存期的子对象仍需显式构造。
 
-!!! history "¶8.1 中\"析构函数不是用户提供的\""
+!!! history "¶8.1 中“析构函数不是用户提供的”"
     P0593R6 最初的定义是"是聚合，或……"，没有对聚合的析构函数加限制。这导致一个带有用户提供析构函数（可能释放资源）的聚合也能被"隐式创建"，与 ¶8.2 对析构函数的要求不一致。后来通过一个核心语言 issue 补上了"析构函数不是用户提供的"这一条件。
 
 ```cpp run title="il-classes.cpp" ok
@@ -362,7 +362,7 @@ C++23 进一步提供了 `std::start_lifetime_as<T>`（[[obj.lifetime]]），可
 !!! impl "编译器内建"
     `std::is_trivially_copyable`、`std::is_standard_layout`、`std::is_implicit_lifetime` 在 GCC/Clang/MSVC 上都由编译器内建实现（如 Clang 的 `__is_trivially_copyable`、`__is_standard_layout`、`__builtin_is_implicit_lifetime`），因为它们依赖于"合格"、"用户提供"等只有前端知道的信息，无法用纯库代码实现。
 
-!!! impl "标准布局与 Itanium ABI 的 \"POD for the purpose of layout\""
+!!! impl "标准布局与 Itanium ABI 的 “POD for the purpose of layout”"
     Itanium ABI 有自己的"用于布局目的的 POD"概念，用来决定派生类能否复用基类的**尾部填充**。例如 `struct A { int i; char c; }; struct B : A { char d; };`：若 `A` 是"用于布局目的的 POD"，`d` 不能放进 `A` 的尾部填充（因为 C 程序员可能 `memcpy(&a, ..., sizeof(A))` 覆盖填充）；否则可以。这个 ABI 定义基于 C++03 的 POD 定义，与 C++11 的标准布局/平凡可复制**不完全一致**，且为 ABI 稳定性被冻结。所以"类型是否标准布局"与"派生类会不会复用它的尾部填充"不能简单画等号。
 
 ## 历史与演进

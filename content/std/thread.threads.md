@@ -215,7 +215,7 @@ int main() { start(); }
 - ¶8 后置条件：`ssource.stop_possible()` 为 `true`。注 3：调用线程只能发出一次停止请求，因为它不能替换这个停止令牌。
 - ¶11 移动构造：接管 `x` 的线程和 `ssource`，之后 `x.ssource.stop_possible()` 为 `false`。
 
-!!! lawyer "\"如果良构\"会抢走第一个实参"
+!!! lawyer "“如果良构”会抢走第一个实参"
     ¶6 的判断依据只是"`invoke(f, stop_token, args...)` 是否良构"，不看你的意图。泛型可调用对象很容易让带令牌的版本意外地良构：
 
     ```cpp run title="jthread-generic.cpp" ok

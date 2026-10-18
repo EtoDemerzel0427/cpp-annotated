@@ -86,7 +86,7 @@ int main() {}
 !!! history "毒丸（poison pill）的来去"
     C++20 的措辞是：非成员 `begin(t)` 的重载决议"在一个包含若干**被删除的 `begin` 函数模板**声明的语境中进行"。这些被删除的声明俗称**毒丸**，作用是让非限定查找停在这里、找不到 `std::begin`。但毒丸本身也是重载决议的候选，在某些情况下会比用户提供的合法定制更匹配，从而把它"毒死"。C++23 的 [[P2602R2]]（"Poison Pills are Too Toxic"，作为 DR）把措辞改成了今天的"如同仅进行实参依赖查找"，彻底去掉了这一副作用。
 
-!!! impl "libc++ 怎么实现\"仅 ADL\""
+!!! impl "libc++ 怎么实现“仅 ADL”"
     libc++ 在 `__ranges/access.h` 中于 CPO 所在的内部命名空间里声明 `void begin() = delete;`——一个**零参数**的被删除函数。它的作用是让非限定查找在这里停下（不会继续向外找到 `std::begin`），而因为它不接受任何实参，永远不会成为可行函数，于是效果等于"只有 ADL 找到的候选"。函数对象的最后还有一个 `void operator()(auto&&) const = delete;` 兜底。
 
 ## `ranges::end`（[range.access.end]）
@@ -190,7 +190,7 @@ int main() {}
 
 ## 常见误区
 
-!!! pitfall "以为 `range<T>` 等于 \"T 有 begin/end 成员\""
+!!! pitfall "以为 `range<T>` 等于 “T 有 begin/end 成员”"
     `range` 检查的是 `ranges::begin(t)` 与 `ranges::end(t)` 能否**通过 CPO 的全部规则**。成员 `begin()` 返回非迭代器、`end()` 返回的不是对应 `begin` 的哨位、只有 `const` 版本缺失……都会让它为 `false`。用 `static_assert(std::ranges::range<T>)` 调试远比直接 `for` 出错信息友好。
 
 !!! pitfall "对 const 对象的定制只写了非 const 版本"

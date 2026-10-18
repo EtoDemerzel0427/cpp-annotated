@@ -119,7 +119,7 @@ void spin3() { while (true) { int x = 0; (void)x; } }  // 循环体不为空
 !!! warning "`while (flag) ;` 自旋等待是错误的"
     `spin1` 在另一个线程修改 `flag` 时也不安全：对非原子变量的并发读写是数据竞争（UB），而且编译器可以把 `flag` 的读取提到循环外，把它变成 `if (flag) for (;;);`——再结合前进保证，甚至可以假定循环不存在。正确做法是让 `flag` 成为 `std::atomic<bool>`（原子操作满足前进保证），或者使用条件变量。
 
-!!! lawyer "为什么是 \"替换为 yield\"，而不是直接说 \"不是 UB\"？"
+!!! lawyer "为什么是 “替换为 yield”，而不是直接说 “不是 UB”？"
     把语句替换为 `yield()` 是一个**语义改写**：它让平凡无限循环落入 [[intro.progress#1]] 已有的"线程会调用 yield"这一条，因此无需修改前进保证本身的逻辑。注意替换后的循环不再是"空循环"，所以它也不能被删除或与其他代码重排。[[intro.progress#1]] 中新增的 ¶1.6"继续执行平凡无限循环"则从另一个方向确认了这一点。
 
 ## while 语句 [stmt.while]
@@ -316,7 +316,7 @@ void f(const int* a, int n) {
 !!! pitfall "for 的 init-statement 不能声明两种类型"
     `for (int i = 0, double d = 0.0; ...)` 是语法错误：*simple-declaration* 只有一个 *decl-specifier-seq*。用结构化绑定或把其中一个提到循环外。
 
-!!! pitfall "\"空循环会被优化掉\" 不是总成立"
+!!! pitfall "“空循环会被优化掉” 不是总成立"
     C++26 起，`while (true);` 不会被删除；但 `while (x);`（`x` 不是常量）依然可以被假定终止。不要依赖空循环来"等待"任何东西。
 
 ## 思考题

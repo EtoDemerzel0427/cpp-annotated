@@ -111,7 +111,7 @@ C++20 之前，constexpr 函数体中不得包含 asm 声明（这是一条针�
 !!! pitfall "asm 不是可移植的 C++"
     即便语法被接受，其含义完全由实现定义；同一段代码在不同编译器、不同目标架构上可能语义迥异，甚至不能编译。需要可移植地使用硬件特性时，优先选择标准库（`<bit>`、`<atomic>`）或编译器内建函数。
 
-!!! pitfall "\"编译器屏障\"不等于内存序"
+!!! pitfall "“编译器屏障”不等于内存序"
     `asm volatile("" ::: "memory")` 只约束编译器，不约束 CPU。线程间同步请使用 `std::atomic` 与 `std::atomic_thread_fence`（[[intro.races]]）。
 
 ## 思考题

@@ -161,7 +161,7 @@ ex::sender auto ui_task(ex::scheduler auto ui, ex::scheduler auto pool) {
 }
 ```
 
-!!! pitfall "on(sch, s) 需要知道\"原地\""
+!!! pitfall "on(sch, s) 需要知道“原地”"
     第一种形式依赖接收器环境回答 `get_start_scheduler`。`sync_wait` 的环境回答它（[[exec.consumers]]），`task` 的承诺类型也回答（[[exec.task]]）；但若你自己写的接收器环境不提供它，`on(sch, s)` 在 connect 时就会因 *not-a-scheduler* 而在签名计算阶段失败。这正是"不知道该回到哪里"在类型层面的体现。
 
 ## 思考题

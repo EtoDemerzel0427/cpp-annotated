@@ -220,10 +220,10 @@ int main() {
 
 ## 陷阱
 
-!!! pitfall "\"满足 Lockable\" 不等于 \"能用来保护数据\""
+!!! pitfall "“满足 Lockable” 不等于 “能用来保护数据”"
     *Cpp17Lockable* 只是语法加上"阻塞/尝试"的语义。一个 `lock()`/`unlock()` 都是空函数的类型也满足这些要求（只要你不同时让两个代理"持有"它而违反自己的规约）。数据保护所需的 happens before 必须由类型自己的实现提供；标准的互斥量类型在 [[thread.mutex.requirements]] 里用 *Synchronization* 元素明确提供了它。
 
-!!! pitfall "unlock 的前置条件看的是\"当前代理\""
+!!! pitfall "unlock 的前置条件看的是“当前代理”"
     *Cpp17BasicLockable* ¶3 要求**调用 `unlock` 的代理**持有锁。在 A 线程 `lock()`、在 B 线程 `unlock()`，对 `std::mutex` 而言违反前置条件 {{ub}}。需要"一个线程获取、另一个线程释放"的语义时，用 `std::binary_semaphore`（[[thread.sema]]），它没有所有者的概念。
 
 ## 思考题

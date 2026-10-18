@@ -122,7 +122,7 @@ constexpr const char* name = make_name(3);         // "field_3"，以 '\0' 结�
 static_assert(!std::is_string_literal(name));      // 它是模板形参对象，不是字符串字面量
 ```
 
-!!! note "为什么叫 \"reflect_constant_*\" 而函数族里又有 \"define_static_*\""
+!!! note "为什么叫 “reflect_constant_*” 而函数族里又有 “define_static_*”"
     `reflect_constant_*` 返回**反射**（`info`），可以继续交给其他反射函数或拼接；`define_static_*` 返回普通的 C++ 指针/`span`，可以直接在非反射代码中使用。后者都用前者 + `extract` 定义。
 
 ## `meta::exception`：反射的错误模型（[meta.reflection.exception]）

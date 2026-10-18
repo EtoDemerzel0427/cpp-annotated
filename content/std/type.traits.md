@@ -36,7 +36,7 @@ updated: 2026-10-18
 - 是 *Cpp17DefaultConstructible* 与 *Cpp17CopyConstructible* 的——所以 `std::is_integral<int>{}` 能写；
 - 基特征的成员名**不得被隐藏**，且在 trait 中**无歧义可用**——所以 `is_integral<int>::value`、`::type`、`::value_type` 一定能访问到基特征的版本。
 
-!!! lawyer "\"派生自\"而不是\"就是\""
+!!! lawyer "“派生自”而不是“就是”"
     要求只说 trait **派生自**基特征，并没有说 trait **就是**基特征。所以 `std::is_same<int, int>` 和 `std::true_type` 是**两个不同的类型**，而 `std::is_same<int, int>::type` 才是 `true_type`：
 
     ```cpp run title="base-characteristic.cpp" ok
@@ -226,10 +226,10 @@ int main() {
 
 ## 陷阱
 
-!!! pitfall "\"能编译\"不等于\"没问题\""
+!!! pitfall "“能编译”不等于“没问题”"
     第一层前置条件违反时 Clang 通常会报错，这让人误以为"编译器会兜底"。但 `is_convertible` 等少数 trait 会静默给出答案，而第二层（补全前后结果不同）完全无诊断。头文件里只前向声明了某个类、就对它的指针问 `is_convertible`/`is_base_of` 关系，是真实项目中出现过的 bug 模式。
 
-!!! pitfall "不要为了\"修正\"结果去特化 trait"
+!!! pitfall "不要为了“修正”结果去特化 trait"
     想让 `std::is_trivially_copyable<MyType>` 为真（例如为了让某容器走 `memcpy`），正确的做法是让 `MyType` **真的**平凡可复制（默认化特殊成员函数），或者使用库提供的定制点；直接特化是 UB，在 libc++ 下是硬错误。
 
 ## 思考题

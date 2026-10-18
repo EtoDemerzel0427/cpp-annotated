@@ -146,7 +146,7 @@ auto merged = ex::env{ex::prop(ex::get_scheduler, sch_b), base};
 
 ## 思考题
 
-!!! question "1. 为什么 env 的 query 要求 \"至少一个子对象能回答\"？"
+!!! question "1. 为什么 env 的 query 要求 “至少一个子对象能回答”？"
     如果没有 ¶7 的约束，`env<>{}.query(get_scheduler)` 会怎样？有约束又会怎样？
 
 <details markdown="1">

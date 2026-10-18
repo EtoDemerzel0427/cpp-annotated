@@ -161,7 +161,7 @@ struct D3 : PrivBase   { char d; };
 
 为什么 POD 不能复用？因为 C 和 C++98 的代码会对 POD 做 `memcpy(&base, &other, sizeof(Base))`——如果派生类的成员住在基类的尾部填充里，这次拷贝就会把它覆盖掉。对非 POD 类，ABI 认为没有人会这么拷贝基类子对象。（按今天的标准，平凡可复制类型"拷出字节再拷回、值不变"的保证明确排除了**潜在重叠子对象**（[[basic.types.trivial#3]]），所以对基类子对象做这种 `memcpy` 本来就没有保证。）
 
-!!! pitfall "\"布局意义上的 POD\"不是任何现行标准术语"
+!!! pitfall "“布局意义上的 POD”不是任何现行标准术语"
     `PrivBase` 是平凡的、平凡可复制的，但因为有私有成员，它不是 C++03 的聚合，因而不是 C++03 的 POD；它甚至**是**标准布局类（所有成员访问控制相同）。今天的 `std::is_pod`（已弃用）、`is_trivial`、`is_standard_layout` 都不能准确预测 Itanium ABI 会不会复用它的尾部填充。改一个成员的访问控制、加一个空的用户构造函数，都可能改变派生类的大小——这是一种 ABI 变化。
 
 `[[no_unique_address]]` 成员同样适用这条规则（`-fdump-record-layouts-simple` 输出，单位为比特）：

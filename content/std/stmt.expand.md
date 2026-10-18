@@ -336,7 +336,7 @@ static_assert(count() == 2);       // x = 1 和 x = 3
 
 ## 陷阱
 
-!!! pitfall "`template for` 不会让运行期容器\"变成\"编译期的"
+!!! pitfall "`template for` 不会让运行期容器“变成”编译期的"
     `std::vector<int> v; template for (auto x : v)` 是非良构的：N 必须在编译期算出，而 `v.begin()`/`v.end()` 无法在常量求值中对一个运行期对象求值。需要运行期循环就用范围 for。
 
 !!! pitfall "N 份体意味着 N 份代码"

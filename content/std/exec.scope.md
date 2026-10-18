@@ -187,7 +187,7 @@ private:
 !!! note "join 不等于 close"
     从状态表看，在 *open-and-joining* 状态下 `try-associate` **仍然成功**：join 正在等待时，仍可以有新工作加入，join 会连它们一起等。这允许"一边处理一边等待全部结束"的模式（比如处理中又派生出子任务）。若要保证 join 之后不再有新工作，先 `close()`。另外，计数一旦归零并转为 *joined*，此后 *try-associate* 一律失败——joined 是终态。
 
-!!! lawyer "close 的后置条件说\"返回 false\""
+!!! lawyer "close 的后置条件说“返回 false”"
     [exec.simple.counting.mem] ¶3 写的是"any subsequent call to *try-associate*() on `*this` returns false"，但 *try-associate* 的返回类型是 *assoc-t*，不是 `bool`。显然意思是返回一个不 engaged 的（转换为 `bool` 为 false 的）*assoc-t*。
 
 ### 令牌（[exec.simple.counting.token]）
