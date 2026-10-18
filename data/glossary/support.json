@@ -1,0 +1,12 @@
+[
+  {"id": "signal-safe", "en": "signal-safe", "zh": "信号安全", "def": "可在信号处理函数中进行的求值：不调用除普通无锁原子操作和明确标注为信号安全的函数之外的标准库函数，不访问线程存储期对象，不使用 `dynamic_cast`、不抛异常、不进入 try 块、不触发或等待静态变量的动态初始化。信号处理函数含非信号安全的求值即为 UB。", "ref": "support.signal#3"},
+  {"id": "plain-lock-free-atomic-operation", "en": "plain lock-free atomic operation", "zh": "普通无锁原子操作", "def": "对 `atomic_flag` 的操作、`is_lock_free`/`atomic_is_lock_free`，或作用于无锁原子对象的原子操作；它们在信号处理函数中可以使用。", "ref": "support.signal#2"},
+  {"id": "substitutability", "en": "substitutability", "zh": "可替换性（比较）", "def": "若 `a == b` 时，任何只读取经由公开 const 成员可访问的比较显著状态的函数 f 都有 `f(a) == f(b)`，则称相等意味着可替换。`strong_ordering` 要求可替换性，`weak_ordering` 不要求。", "ref": "cmp.categories.pre#4"},
+  {"id": "required-behavior", "en": "required behavior", "zh": "要求的行为", "def": "库条款中对可替换函数和处理函数（如 `operator new`、`new_handler`、`terminate_handler`）的语义要求，对程序提供的替换版本同样有约束力；违反则行为未定义。", "ref": "structure.specifications"},
+  {"id": "default-behavior", "en": "default behavior", "zh": "默认行为", "def": "库条款中描述实现自带的可替换函数或处理函数做什么，例如默认 `operator new` 循环调用 new_handler、默认 `terminate_handler` 调用 `abort`。被替换后不再适用。", "ref": "structure.specifications"},
+  {"id": "new-handler", "en": "new_handler", "zh": "new 处理函数", "def": "`operator new` 分配失败时调用的处理函数；必须腾出内存后返回、抛出 `bad_alloc` 族异常或终止程序。初始值为空指针，用 `set_new_handler` 安装。", "ref": "new.handler"},
+  {"id": "terminate-handler", "en": "terminate_handler", "zh": "终止处理函数", "def": "`std::terminate` 调用的处理函数，必须终止程序且不返回；默认版本调用 `abort`，用 `set_terminate` 替换。", "ref": "terminate.handler"},
+  {"id": "coroutine-handle", "en": "coroutine handle", "zh": "协程句柄", "def": "`coroutine_handle<P>` 类型的对象，非拥有地指代一个挂起或正在执行的协程（本质是协程帧地址），用于恢复、销毁协程和访问其 promise。", "ref": "coroutine.handle.general#1"},
+  {"id": "coroutine-traits", "en": "coroutine traits", "zh": "协程特征", "def": "`std::coroutine_traits<R, Args...>`：编译器借它从协程的返回类型和形参类型找到 promise 类型；主模板转发 `R::promise_type`。", "ref": "coroutine.traits"},
+  {"id": "c-headers", "en": "C headers", "zh": "C 头文件", "def": "`<stdio.h>` 等 `<name.h>` 形式的头文件，仅供与 C 互操作；保证把名字放在全局命名空间，而 `<cname>` 保证放在 `std` 中。", "ref": "support.c.headers.general#1"}
+]
