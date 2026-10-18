@@ -1,0 +1,8 @@
+[
+ {"id": "execution-character-set", "en": "execution character set", "zh": "执行字符集", "def": "C/C++ 库函数在运行期解读 `char`（及 `wchar_t`，对应执行宽字符集）序列时所用的字符集，是基本字面量字符集的超集；其编码是 locale-specific 的，随 `setlocale` 改变，可以与任何字面量编码都无关。", "ref": "character.seq.general#1.2"},
+ {"id": "registered-character-encoding", "en": "registered character encoding", "zh": "注册字符编码", "def": "IANA Character Sets 注册表中的字符编码方案；`std::text_encoding::id` 为除 NATS-DANO 与 NATS-DANO-ADD 外的每个注册编码提供一个枚举器，其值即 IANA MIB 号。", "ref": "text.encoding.general#1"},
+ {"id": "facet", "en": "facet", "zh": "facet（刻面）", "def": "派生自 `std::locale::facet` 且含公开的 `static std::locale::id id;` 声明的类，或公开派生自另一个 facet 的类；locale 按 facet 的 `id` 索引其中的 facet。派生 facet 若不重新声明 `id`，就与基类共用同一槽位。", "ref": "locale.facet#1"},
+ {"id": "named-locale", "en": "named locale", "zh": "有名字的 locale", "def": "由名字字符串构造、或由两个有名字的 locale 的部分组合而成的 `std::locale`；可按名字比较相等，`locale::global` 只对它调用 `setlocale`。其余 locale 无名，`name()` 返回 \"*\"。", "ref": "locale.general#8"},
+ {"id": "ready-match-results", "en": "ready (match_results)", "zh": "就绪（match_results）", "def": "`match_results` 经一次已完成的正则匹配修改、结果状态完全建立后的状态；默认构造的对象不是 ready 的，在其上调用大多数成员函数是未定义行为。", "ref": "re.results.general#3"},
+ {"id": "zero-length-match", "en": "zero-length match", "zh": "零长度匹配", "def": "`regex_iterator` 持有的匹配中 `match[0].matched` 为真且 `match[0].first == match[0].second` 的情形；`operator++` 对它特殊处理以保证迭代前进。", "ref": "re.regiter.general#2"}
+]
