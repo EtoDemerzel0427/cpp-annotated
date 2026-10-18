@@ -1,0 +1,163 @@
+[
+ {
+  "id": "preprocessing",
+  "en": "preprocessing",
+  "zh": "预处理",
+  "def": "翻译阶段 4 中实现具备的四种能力的统称：有条件地处理或跳过源码片段、包含其他源文件、从头文件单元导入宏、宏替换。之所以叫\"预\"处理，是因为概念上它们发生在翻译所得的翻译单元之前。",
+  "ref": "cpp.pre#1"
+ },
+ {
+  "id": "preprocessing-directive",
+  "en": "preprocessing directive",
+  "zh": "预处理指令",
+  "def": "在阶段 4 开始时以位于行首的指令引导记号开头、到其后第一个换行为止的预处理记号序列。判定是纯词法的，宏展开不能制造或消灭指令。",
+  "ref": "cpp.pre#2"
+ },
+ {
+  "id": "directive-introducing-token",
+  "en": "directive-introducing token",
+  "zh": "指令引导记号",
+  "def": "预处理指令的第一个记号：位于文件开头或含换行的空白之后的 `#`；或在同一逻辑行上后跟特定记号的 `import`、`module`，以及后跟这两种形式的 `export`。",
+  "ref": "cpp.pre#2"
+ },
+ {
+  "id": "conditionally-supported-directive",
+  "en": "conditionally-supported-directive",
+  "zh": "条件支持的指令",
+  "def": "`#` 之后不以任何标准指令名开头的指令（如 `#ident`、`#assert`）。有条件支持、语义由实现定义；无论实现是否支持，它都算预处理指令。",
+  "ref": "cpp.pre#3"
+ },
+ {
+  "id": "header-search",
+  "en": "header search",
+  "zh": "头文件搜索",
+  "def": "对一个字符序列，在一系列位置中查找由它唯一标识的头文件；位置如何确定、头文件如何标识均由实现定义。`#include <...>` 使用它。",
+  "ref": "cpp.include#1"
+ },
+ {
+  "id": "source-file-search",
+  "en": "source file search",
+  "zh": "源文件搜索",
+  "def": "以实现定义的方式查找由字符序列命名的源文件；不支持或失败时，结果为对同一序列做头文件搜索的结果。`#include \"...\"` 使用它。",
+  "ref": "cpp.include#2"
+ },
+ {
+  "id": "bracket-resource-search",
+  "en": "bracket resource search",
+  "zh": "方括号资源搜索",
+  "def": "`#embed <...>` 使用的资源查找：在实现定义的一系列位置中查找由字符序列唯一标识的资源。",
+  "ref": "cpp.embed.gen#1"
+ },
+ {
+  "id": "quote-resource-search",
+  "en": "quote resource search",
+  "zh": "引号资源搜索",
+  "def": "`#embed \"...\"` 使用的资源查找：以实现定义的方式查找由字符序列命名的资源；不支持或失败时退回方括号资源搜索。",
+  "ref": "cpp.embed.gen#2"
+ },
+ {
+  "id": "resource-count",
+  "en": "resource-count",
+  "zh": "资源计数",
+  "def": "`#embed` 实际产生的元素个数：有 `limit` 时为 max(min(limit, 资源字节数 − offset), 0)，否则为 max(资源字节数 − offset, 0)。为 0 时资源为空。",
+  "ref": "cpp.embed.gen#9"
+ },
+ {
+  "id": "point-of-macro-import",
+  "en": "point of macro import",
+  "zh": "宏导入点",
+  "def": "导入头文件单元的 import 指令终结换行之后的位置，头文件单元中的宏从此处起在导入方可见。导入命名模块或分区的 import 没有宏导入点。",
+  "ref": "cpp.import#1"
+ },
+ {
+  "id": "macro-definition",
+  "en": "macro definition",
+  "zh": "宏定义",
+  "def": "预处理每个翻译单元时遇到的每条 `#define` 指令各产生一个独立的宏定义；它在每个翻译单元中至多有一个定义点和一个取消定义点，可经由头文件单元被导入。",
+  "ref": "cpp.import#4"
+ },
+ {
+  "id": "macro-point-of-definition",
+  "en": "point of definition (of a macro definition)",
+  "zh": "（宏的）定义点",
+  "def": "宏定义在翻译单元 T 中生效的位置：若 `#define` 就在 T 中，即该指令处；否则为 T 中第一个包含其定义点的头文件单元的宏导入点（宏名与关键字、module、import 相同者除外）。",
+  "ref": "cpp.import#4.1"
+ },
+ {
+  "id": "point-of-undefinition",
+  "en": "point of undefinition",
+  "zh": "取消定义点",
+  "def": "定义点之后第一个取消该宏的 `#undef`，或第一个包含其取消定义点的头文件单元的宏导入点，取较早者。",
+  "ref": "cpp.import#4.2"
+ },
+ {
+  "id": "active-macro-definition",
+  "en": "active (macro definition)",
+  "zh": "活跃的宏定义",
+  "def": "在某位置之前有定义点、且之前没有取消定义点的宏定义。同名的多个活跃宏定义在宏被替换或重定义时必须彼此是有效的重定义。",
+  "ref": "cpp.import#5"
+ },
+ {
+  "id": "macro-name",
+  "en": "macro name",
+  "zh": "宏名",
+  "def": "紧跟在 `define` 之后的标识符。宏名只有一个名字空间，不受作用域约束。",
+  "ref": "cpp.replace.general#8"
+ },
+ {
+  "id": "object-like-macro",
+  "en": "object-like macro",
+  "zh": "对象式宏",
+  "def": "由 `#define 标识符 替换列表` 定义的宏：此后宏名的每个实例被替换为替换列表并重新扫描。宏名与替换列表之间必须有空白。",
+  "ref": "cpp.replace.general#11"
+ },
+ {
+  "id": "function-like-macro",
+  "en": "function-like macro",
+  "zh": "函数式宏",
+  "def": "宏名后紧跟无前导空白的 `(` 与形参列表定义的宏；只有当宏名的下一个预处理记号是 `(` 时才构成调用并被替换。",
+  "ref": "cpp.replace.general#13"
+ },
+ {
+  "id": "variable-arguments",
+  "en": "variable arguments",
+  "zh": "可变实参",
+  "def": "可变参数宏调用中，具名形参之后的全部实参连同其间的逗号合并而成的一个整体，由 `__VA_ARGS__` 引用。",
+  "ref": "cpp.replace.general#16"
+ },
+ {
+  "id": "character-string-literal",
+  "en": "character string literal",
+  "zh": "字符串字面量（无前缀）",
+  "def": "没有编码前缀的 string-literal。`#` 运算符产生它，`#line` 的文件名必须是它。",
+  "ref": "cpp.stringize#2"
+ },
+ {
+  "id": "stringizing-argument",
+  "en": "stringizing argument",
+  "zh": "字符串化实参",
+  "def": "`#` 运算符的操作数所对应的实参记号序列去掉 placemarker 之后的结果；其中的空白被规范化为单个空格后拼进字符串字面量。",
+  "ref": "cpp.stringize#2"
+ },
+ {
+  "id": "placemarker",
+  "en": "placemarker preprocessing token",
+  "zh": "占位记号",
+  "def": "阶段 4 内部的临时记号：紧邻 `##` 的形参若对应空实参，或 `__VA_OPT__` 在可变实参为空时，以它代替；与其他记号拼接时消失，重新扫描前全部删除。",
+  "ref": "cpp.concat#2"
+ },
+ {
+  "id": "line-number",
+  "en": "line number",
+  "zh": "行号",
+  "def": "当前物理源行的行号：处理源文件直到当前预处理记号为止，在阶段 1 中读到或引入的换行数加一。`#line` 可以改写假定的行号。",
+  "ref": "cpp.line#2"
+ },
+ {
+  "id": "destringize",
+  "en": "destringize",
+  "zh": "反字符串化",
+  "def": "`_Pragma` 对其字符串字面量的处理：删除编码前缀和首尾引号，把 `\\\"` 换成 `\"`、`\\\\` 换成 `\\`，再经阶段 3 切分为预处理记号，作为 pragma 指令执行。",
+  "ref": "cpp.pragma.op#1"
+ }
+]
