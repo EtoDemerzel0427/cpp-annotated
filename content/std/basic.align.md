@@ -1,6 +1,6 @@
 ---
 title: 对齐
-summary: 对齐是对象地址必须满足的"整除"约束；基本对齐不超过 max_align_t，超过者为扩展对齐（over-aligned）；alignof 查询、alignas 加强、C++17 起 new 支持 over-aligned 类型
+summary: 对齐是对象地址必须满足的整除约束；基本对齐不超过 max_align_t，超过者为扩展对齐（over-aligned）；alignof 查询、alignas 加强、C++17 起 new 支持 over-aligned 类型
 status: done
 papers: P0035R4
 related: dcl.align, expr.alignof, basic.stc.dynamic.allocation, expr.new, intro.object
@@ -8,22 +8,22 @@ tags: 对齐, alignas, alignof
 updated: 2026-10-17
 ---
 
-**对齐**（alignment）回答的是：一个类型的对象**可以放在哪些地址上**。硬件层面，许多 CPU 读写未对齐的多字节数据要么更慢、要么直接触发总线错误，SIMD 指令（如要求 16/32/64 字节对齐的向量 load/store）更是如此。语言层面，标准把这件事抽象成一个整数：类型 `T` 的对齐 `alignof(T)` 是 `A`，意思是 `T` 对象的地址必须是 `A` 的倍数。
+**对齐**（alignment）回答的是一个类型的对象可以放在哪些地址上。在硬件层面，许多 CPU 读写未对齐的多字节数据要么更慢，要么直接触发总线错误，SIMD 指令（如要求 16/32/64 字节对齐的向量 load/store）更是如此。在语言层面，标准把这件事抽象成一个整数：类型 `T` 的对齐 `alignof(T)` 是 `A`，意思是 `T` 对象的地址必须是 `A` 的倍数。
 
-本节规定：对齐值是什么、哪些对齐值合法、哪些是"基本"的、哪些是"扩展"的，以及在不满足对齐的存储里创建对象的后果（UB）。具体的语法工具在别处：`alignof` 见 [[expr.alignof]]，`alignas` 见 [[dcl.align]]，动态分配的对齐保证见 [[basic.stc.dynamic.allocation]] 和 [[expr.new]]。
+本节规定对齐值是什么、哪些对齐值合法、哪些是基本对齐、哪些是扩展对齐，以及在不满足对齐的存储里创建对象的后果（UB）。具体的语法工具在别处：`alignof` 见 [[expr.alignof]]，`alignas` 见 [[dcl.align]]，动态分配的对齐保证见 [[basic.stc.dynamic.allocation]] 和 [[expr.new]]。
 
 ## 对齐要求（¶1）
 
 !!! std
     An *alignment* is an implementation-defined integer value representing the number of bytes between successive addresses at which a given object can be allocated.
 
-    对齐是一个实现定义的整数值，表示某个对象可以被分配的相邻两个地址之间相隔的字节数。
+    对齐是一个实现定义的整数值，表示可以分配某个对象的相邻两个地址之间相隔的字节数。
 
-- 每个**对象类型**都有对齐要求（[[basic.fundamental]]、[[basic.compound]]），对该类型的每个对象生效。
-- 可以用 *alignment-specifier*（`alignas`）要求**更严格**的对齐，但不能放宽（[[dcl.align#5]]）。
+- 每个对象类型都有对齐要求（[[basic.fundamental]]、[[basic.compound]]），对该类型的每个对象生效。
+- 可以用 *alignment-specifier*（`alignas`）要求更严格的对齐，但不能放宽（[[dcl.align#5]]）。
 - **在不满足类型对齐要求的存储中创建对象是 UB**。
 
-最后一条是本节唯一的 UB，它约束的是**创建对象**这个动作——不论是定义、placement new，还是隐式对象创建（[[intro.object#13]]）。因此 `reinterpret_cast` 一个未对齐的指针本身未必是 UB（结果未指定，见 [[expr.reinterpret.cast]]、[[expr.static.cast]]），但在那里 placement new 或者隐式创建对象就是 UB；隐式对象创建只会选择"能让程序有定义行为"的对象集合，若访问需要一个未对齐的对象，就不存在这样的集合，于是整个程序 UB。
+最后一条是本节唯一的 UB，它约束的是创建对象这个动作，不论是定义、placement new，还是隐式对象创建（[[intro.object#13]]）。因此，对一个未对齐的指针做 `reinterpret_cast` 本身未必是 UB（结果未指定，见 [[expr.reinterpret.cast]]、[[expr.static.cast]]），但在那里 placement new 或隐式创建对象就是 UB。隐式对象创建只会选择能让程序有定义行为的对象集合；如果访问需要一个未对齐的对象，这样的集合就不存在，于是整个程序都是 UB。
 
 ```cpp run title="misaligned.cpp" ub
 #include <new>
@@ -36,19 +36,19 @@ int main() {
 }
 ```
 
-!!! note "UBSan 能抓"
-    用 `-fsanitize=alignment`（包含在 `-fsanitize=undefined` 中）编译时，Clang 和 GCC 会在运行时检查对齐。x86 硬件对普通标量的未对齐访问是宽容的，所以这类 bug 在 x86 上常常"潜伏"，到了 ARM 的某些指令或者向量化之后才暴露。
+!!! note "UBSan 能检查出来"
+    用 `-fsanitize=alignment`（包含在 `-fsanitize=undefined` 中）编译时，Clang 和 GCC 会在运行时检查对齐。x86 硬件容许普通标量的未对齐访问，所以这类 bug 在 x86 上常常不显现，到了 ARM 的某些指令上或者向量化之后才暴露出来。
 
 ## 基本对齐与完整对象/子对象的差异（¶2）
 
 !!! std
     A *fundamental alignment* is represented by an alignment less than or equal to the greatest alignment supported by the implementation in all contexts, which is equal to `alignof(std::max_align_t)`.
 
-    基本对齐是小于等于实现在**所有上下文**中都支持的最大对齐的对齐值，该最大值等于 `alignof(std::max_align_t)`。
+    基本对齐是不超过实现在所有上下文中都支持的最大对齐的对齐值，该最大值等于 `alignof(std::max_align_t)`。
 
-`std::max_align_t`（[[support.types]]）是"对齐要求最严格的标量类型"的代表；凡是不超过它的对齐，在任何地方（静态、栈、`malloc`、`new`）都必须得到支持。
+`std::max_align_t`（[[support.types]]）代表对齐要求最严格的标量类型；凡是不超过它的对齐，实现在任何地方（静态、栈、`malloc`、`new`）都必须支持。
 
-¶2 后半段和例 1 讲一个容易被忽略的事实：**同一个类型作为完整对象和作为子对象时，对齐要求可能不同**。典型情形是虚继承：
+¶2 后半段和例 1 讲了一个容易忽略的事实：**同一个类型作为完整对象和作为子对象时，对齐要求可能不同**。典型的情形是虚继承：
 
 ```cpp title="virtual-base-align.cpp" ok
 struct B { long double d; };
@@ -58,22 +58,22 @@ struct D : virtual B { char c; };
 // D 子对象本身可能只需按 vptr / char 对齐。
 ```
 
-`alignof` 永远报告**完整对象**情形下的对齐要求。
+`alignof` 报告的总是完整对象情形下的对齐要求。
 
 ## 扩展对齐与 over-aligned 类型（¶3）
 
-- **扩展对齐**（extended alignment）：大于 `alignof(std::max_align_t)` 的对齐。是否支持、在哪些上下文支持，**实现定义**。
-- 具有扩展对齐要求的类型叫 **over-aligned 类型**。注 1：over-aligned 类型一定是或者包含一个被施加了扩展对齐的类类型（比如某个成员用了 `alignas(64)`）——标量类型的天然对齐都是基本对齐。
-- **new-extended 对齐**：大于 `__STDCPP_DEFAULT_NEW_ALIGNMENT__`（[[cpp.predefined]]）的对齐。这是 `operator new(std::size_t)` 本身就保证的对齐；超过它，*new-expression* 就会改调带 `std::align_val_t` 参数的分配函数（[[expr.new]]）。
+- **扩展对齐**（extended alignment）：大于 `alignof(std::max_align_t)` 的对齐。是否支持、在哪些上下文支持，由实现定义。
+- 具有扩展对齐要求的类型叫 **over-aligned 类型**。注 1 指出，over-aligned 类型一定是或者包含一个施加了扩展对齐的类类型（比如某个成员用了 `alignas(64)`），因为标量类型的天然对齐都是基本对齐。
+- **new-extended 对齐**：大于 `__STDCPP_DEFAULT_NEW_ALIGNMENT__`（[[cpp.predefined]]）的对齐。这是 `operator new(std::size_t)` 本身就保证的对齐；超过它时，*new-expression* 会改为调用带 `std::align_val_t` 参数的分配函数（[[expr.new]]）。
 
-注意"扩展对齐"和"new-extended 对齐"是**两个不同的阈值**：
+注意扩展对齐和 new-extended 对齐是**两个不同的阈值**：
 
 | 平台（示例） | `alignof(std::max_align_t)` | `__STDCPP_DEFAULT_NEW_ALIGNMENT__` |
 |---|---|---|
 | x86-64 Linux（GCC/Clang, libstdc++） | 16 | 16 |
 | arm64 macOS（Apple Clang/Homebrew Clang, libc++） | 8 | 16 |
 
-（arm64 macOS 一行是本机实测值。）在后者上，`alignas(16)` 的类型是 over-aligned（超过 8），但**不是** new-extended（不超过 16），`new` 用普通的 `operator new(size_t)` 就够了。
+（arm64 macOS 一行是本机实测值。）在后者上，`alignas(16)` 的类型是 over-aligned（超过 8），但不是 new-extended（不超过 16），`new` 用普通的 `operator new(size_t)` 就够了。
 
 ```cpp run title="over-aligned-new.cpp" ok
 #include <cstdint>
@@ -95,13 +95,13 @@ int main() {
 ```
 
 !!! history "C++17 之前的 over-aligned new"
-    C++11 引入了 `alignas`，却没有让 `new` 理会它：`new CacheLine` 只调用 `operator new(size_t)`，后者只保证基本对齐，于是得到的指针很可能不是 64 字节对齐的——在其上创建对象按 ¶1 就是 UB。程序员只能自己用 `posix_memalign`/`_aligned_malloc` + placement new。[[P0035R4]]（C++17）引入了 `std::align_val_t`、对齐版本的分配/释放函数和 `__STDCPP_DEFAULT_NEW_ALIGNMENT__`，从此 `new` 对 over-aligned 类型也"开箱即用"。见 [[basic.stc.dynamic.allocation#3]]。
+    C++11 引入了 `alignas`，却没有让 `new` 理会它：`new CacheLine` 只调用 `operator new(size_t)`，后者只保证基本对齐，于是得到的指针很可能不是 64 字节对齐的，按 ¶1，在其上创建对象就是 UB。程序员只能自己用 `posix_memalign`/`_aligned_malloc` 加 placement new。[[P0035R4]]（C++17）引入了 `std::align_val_t`、对齐版本的分配/释放函数和 `__STDCPP_DEFAULT_NEW_ALIGNMENT__`，从此 `new` 对 over-aligned 类型也可以直接使用。见 [[basic.stc.dynamic.allocation#3]]。
 
 ## 对齐值的合法范围与次序（¶4–¶7）
 
-- ¶4：对齐用 `std::size_t` 表示。**合法的对齐值**只有：各基本类型的 `alignof` 值，加上一个实现定义的（可以为空的）额外集合。**每个对齐值都必须是 2 的非负整数次幂**。所以 `alignas(3)` 是非良构的（[[dcl.align#2]]）。
-- ¶5：对齐从**弱**到**强**（更严格）排序，数值越大越严格。满足某对齐要求的地址也满足任何更弱的合法对齐——这对 2 的幂是显然的（64 的倍数一定是 16 的倍数）。
-- ¶6：完整类型的对齐要求可以用 `alignof` 查询（[[expr.alignof]]）。**窄字符类型的对齐要求最弱**（即 1）——这正是 `unsigned char` 数组可以作为任意对象的原始存储、由 `alignas` 加强对齐的原因（注 2）。
+- ¶4：对齐用 `std::size_t` 表示。合法的对齐值只有各基本类型的 `alignof` 值，再加上一个实现定义的（可以为空的）额外集合。**每个对齐值都必须是 2 的非负整数次幂**，所以 `alignas(3)` 是非良构的（[[dcl.align#2]]）。
+- ¶5：对齐从弱到强（更严格）排序，数值越大越严格。满足某对齐要求的地址也满足任何更弱的合法对齐，这对 2 的幂是显然的（64 的倍数一定是 16 的倍数）。
+- ¶6：完整类型的对齐要求可以用 `alignof` 查询（[[expr.alignof]]）。窄字符类型的对齐要求最弱（即 1），所以 `unsigned char` 数组可以用作任意对象的原始存储，再由 `alignas` 加强对齐（注 2）。
 - ¶7：比较对齐就是比较数值。
 
 ```cpp run title="alignas-rules.cpp" error
@@ -134,26 +134,26 @@ int main() {
 
 ## 不支持的扩展对齐（¶9）
 
-如果实现在某个特定上下文中不支持所请求的扩展对齐，程序**非良构**（必须诊断）。例如某实现可能支持静态变量 `alignas(4096)`，却不支持对自动变量这么做。标准把"支持哪些"留给实现定义（¶3），但把"不支持时必须报错"写成了硬性要求——避免静默地给出一个不满足对齐的对象。
+如果实现在某个特定上下文中不支持所请求的扩展对齐，程序**非良构**（必须诊断）。例如某个实现可能支持静态变量使用 `alignas(4096)`，却不支持自动变量这么做。标准把支持哪些对齐留给实现定义（¶3），但把不支持时必须报错写成了硬性要求，以免静默地给出一个不满足对齐的对象。
 
 ## 实现视角
 
 !!! impl "实现视角"
-    - **x86-64 System V / Itanium ABI**：`alignof(long double)` 为 16（x87 80 位扩展精度，按 16 字节存储），因而 `max_align_t` 对齐为 16。**AArch64 macOS** 上 `long double` 就是 `double`，`max_align_t` 对齐为 8，但 libc++/系统 `malloc` 仍保证 16 字节对齐，所以 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 为 16。MSVC x64 上 `alignof(std::max_align_t)` 为 8，`__STDCPP_DEFAULT_NEW_ALIGNMENT__` 为 16。
-    - 栈上的 over-aligned 变量：编译器在函数序言中把栈指针按需要的对齐值下调（`and rsp, -64` 之类），并通常需要帧指针来访问参数。
-    - 结构体布局：每个成员按自身对齐放置（可能插入填充），整个结构体的对齐取成员中最大者，`sizeof` 向上取整为对齐的倍数——这保证了数组中每个元素都对齐。
-    - `#pragma pack` / `__attribute__((packed))` 是非标准扩展，会产生**低于**天然对齐的成员；对这种成员取地址得到的指针再解引用，在严格对齐的硬件上可能崩溃，编译器通常对此给出警告。
+    - x86-64 System V / Itanium ABI：`alignof(long double)` 为 16（x87 80 位扩展精度，按 16 字节存储），因而 `max_align_t` 对齐为 16。AArch64 macOS 上 `long double` 就是 `double`，`max_align_t` 对齐为 8，但 libc++/系统 `malloc` 仍保证 16 字节对齐，所以 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 为 16。MSVC x64 上 `alignof(std::max_align_t)` 为 8，`__STDCPP_DEFAULT_NEW_ALIGNMENT__` 为 16。
+    - 对于栈上的 over-aligned 变量，编译器在函数序言中把栈指针按需要的对齐值下调（`and rsp, -64` 之类），通常还需要帧指针来访问参数。
+    - 结构体布局中，每个成员按自身对齐放置（可能插入填充），整个结构体的对齐取成员中的最大者，`sizeof` 向上取整为对齐的倍数，这保证了数组中每个元素都对齐。
+    - `#pragma pack` / `__attribute__((packed))` 是非标准扩展，会产生低于天然对齐的成员。对这种成员取地址，再解引用得到的指针，在严格对齐的硬件上可能崩溃，编译器通常会对此给出警告。
 
 ## 陷阱
 
 !!! pitfall "用 `char` 缓冲区当存储却忘了 `alignas`"
-    `unsigned char buf[sizeof(T)]` 的对齐只有 1。在其中 placement new 一个 `T` 前必须 `alignas(T)`。这是手写 small buffer / `optional` 时最常见的 bug，而且在 x86 上通常不会立刻崩溃。
+    `unsigned char buf[sizeof(T)]` 的对齐只有 1。在其中 placement new 一个 `T` 之前，必须加上 `alignas(T)`。这是手写 small buffer / `optional` 时最常见的 bug，而且在 x86 上通常不会立刻崩溃。
 
 !!! pitfall "以为 `malloc` 能满足任意对齐"
-    `malloc` 只保证基本对齐（对 `max_align_t` 够用）。over-aligned 类型要用 `std::aligned_alloc`（注意其 size 须是 alignment 的整数倍）或 C++17 的对齐版 `operator new`。
+    `malloc` 只保证基本对齐（满足 `max_align_t` 的需要）。over-aligned 类型要用 `std::aligned_alloc`（注意其 size 须是 alignment 的整数倍）或 C++17 的对齐版 `operator new`。
 
 !!! pitfall "`std::aligned_storage` 已被弃用"
-    C++23 弃用了 `std::aligned_storage` / `std::aligned_union`（主要原因是它们容易被误用，且无法为 `constexpr` 提供存储）。直接写 `alignas(T) std::byte buf[sizeof(T)];`。
+    C++23 弃用了 `std::aligned_storage` / `std::aligned_union`，主要原因是它们容易误用，且无法为 `constexpr` 提供存储。应当直接写 `alignas(T) std::byte buf[sizeof(T)];`。
 
 ## 思考题
 
@@ -177,7 +177,7 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-没有。`buf` 8 字节对齐，`buf + 4` 是 4 的倍数，满足 `int` 的对齐（¶5：满足强对齐的地址也满足弱对齐，反之地址 `buf+4` 不满足 8 但 `int` 只需要 4）。并且 `buf` 是 `unsigned char` 数组、新对象完全落在其中，所以 `buf` 为该 `int` 提供存储（[[intro.object#3]]），`buf` 的生命周期不受影响。
+没有。`buf` 按 8 字节对齐，`buf + 4` 是 4 的倍数，满足 `int` 的对齐。`buf+4` 虽然不满足 8 字节对齐，但 `int` 只需要 4（¶5：满足强对齐的地址也满足弱对齐）。另外，`buf` 是 `unsigned char` 数组，新对象完全落在其中，所以 `buf` 为该 `int` 提供存储（[[intro.object#3]]），`buf` 的生命周期不受影响。
 </details>
 
 ## 小结
@@ -189,4 +189,4 @@ int main() {
 | 扩展对齐 / over-aligned | > `alignof(std::max_align_t)`；支持与否实现定义，不支持时非良构 |
 | new-extended 对齐 | > `__STDCPP_DEFAULT_NEW_ALIGNMENT__`；`new` 改用 `align_val_t` 版本（C++17） |
 | 最弱对齐 | 窄字符类型（1）；字节数组 + `alignas` = 通用原始存储 |
-| UB | 在不满足对齐的存储中**创建对象** |
+| UB | 在不满足对齐的存储中创建对象 |
