@@ -1,0 +1,22 @@
+[
+ {"id": "container", "en": "container", "zh": "容器", "def": "存储其他对象并通过构造、析构、插入、擦除控制其分配与释放的对象；类型须满足 [container.reqmts] 的具名要求：成员类型、begin/end、size 常数、== 先比大小、swap 常数（array 与 inplace_vector 除外）等。", "ref": "container.requirements.pre#1"},
+ {"id": "reversible-container", "en": "reversible container", "zh": "可逆容器", "def": "迭代器为双向或随机访问类别、并提供 reverse_iterator 与 rbegin/rend/crbegin/crend 的容器。forward_list 与无序容器不是可逆容器。", "ref": "container.rev.reqmts#1"},
+ {"id": "allocator-aware-container", "en": "allocator-aware container", "zh": "分配器感知容器", "def": "经由 allocator_traits 使用分配器获取内存并构造/销毁元素的容器，满足 [container.alloc.reqmts]：拷贝构造用 select_on_container_copy_construction，分配器只在 POCCA/POCMA/POCS 为真时随赋值或交换替换。本章除 array、inplace_vector 外都是。", "ref": "container.alloc.reqmts#1"},
+ {"id": "contiguous-container", "en": "contiguous container", "zh": "连续容器", "def": "iterator 与 const_iterator 满足 Cpp17RandomAccessIterator 要求并建模 contiguous_iterator 的容器：array、vector（元素非 bool）、inplace_vector、basic_string。", "ref": "container.reqmts#68"},
+ {"id": "sequence-container", "en": "sequence container", "zh": "序列容器", "def": "把有限个同类型对象组织成严格线性排列、位置由插入方式决定的容器；基本的有 vector、inplace_vector、forward_list、list、deque，array 与 hive 只提供有限的序列操作。", "ref": "sequence.reqmts#1"},
+ {"id": "associative-container", "en": "associative container", "zh": "（有序）关联容器", "def": "按键并借助诱导严格弱序的比较对象组织元素、提供对数时间查找的容器：set、multiset、map、multimap；以键的非降序迭代。", "ref": "associative.reqmts.general#1"},
+ {"id": "unordered-associative-container", "en": "unordered associative container", "zh": "无序关联容器", "def": "借助哈希函数与键相等谓词把元素组织在桶中的容器：unordered_set/map 及其 multi 版本；查找平均常数、最坏线性；rehash 使迭代器失效但不使引用失效。", "ref": "unord.req.general#1"},
+ {"id": "iterator-invalidation", "en": "iterator invalidation", "zh": "迭代器失效", "def": "容器操作使先前获得的迭代器、指针或引用不再保证指向原元素（或不再可用）。容器总则是\"除非另有规定则不失效\"，各容器的插入、擦除、重新分配、rehash 条款给出具体规则。", "ref": "container.reqmts#67"},
+ {"id": "node-handle", "en": "node handle", "zh": "节点句柄", "def": "只能移动的对象，拥有从关联或无序容器中取出的单个元素（连同其节点与分配器），可插入具有兼容节点的另一容器而不拷贝、不移动元素；经由 key() 修改键是被允许的。", "ref": "container.node.overview#1"},
+ {"id": "default-inserted", "en": "default-inserted", "zh": "默认插入", "def": "元素以 allocator_traits<A>::construct(m, p) 初始化；对 std::allocator 即值初始化，自定义分配器可改为默认初始化。T 可如此构造称为 Cpp17DefaultInsertable。", "ref": "container.alloc.reqmts#2"},
+ {"id": "cpp17-copy-insertable", "en": "Cpp17CopyInsertable", "zh": "可拷贝插入", "def": "T 可移动插入，且 allocator_traits<A>::construct(m, p, v) 良构并使 *p 等价于 v、v 不变。与 is_copy_constructible 不同，它是\"经由分配器\"定义的，常作为容器操作的前置条件出现。", "ref": "container.alloc.reqmts#2"},
+ {"id": "unique-keys", "en": "unique keys", "zh": "唯一键", "def": "关联或无序容器对每个键（按等价关系）最多含一个元素的性质：set、map、unordered_set、unordered_map。", "ref": "associative.reqmts.general#4"},
+ {"id": "equivalent-keys", "en": "equivalent keys", "zh": "等价键", "def": "关联或无序容器允许多个元素具有等价键的性质：multiset、multimap 及其无序版本；有序容器中插入、擦除保持等价元素的相对顺序。", "ref": "associative.reqmts.general#4"},
+ {"id": "equivalent-key-group", "en": "equivalent-key group", "zh": "等价键组", "def": "等价键无序容器中键彼此等价、在迭代顺序中相邻的一组元素；修改操作与 rehash 保持组内相对顺序，operator== 按组做置换比较。", "ref": "unord.req.general#6"},
+ {"id": "comparison-object", "en": "comparison object", "zh": "比较对象", "def": "有序关联容器中 Compare 类型的对象；须诱导严格弱序，且对同一对键总返回相同结果。两键等价当且仅当 comp(k1,k2) 与 comp(k2,k1) 都为假。", "ref": "associative.reqmts.general#2"},
+ {"id": "key-equality-predicate", "en": "key equality predicate", "zh": "键相等谓词", "def": "无序容器中 Pred 类型的对象，须是 Key 上的等价关系；与哈希函数必须一致：等价的键哈希值相同。", "ref": "unord.req.general#4"},
+ {"id": "bucket", "en": "bucket", "zh": "桶", "def": "无序容器组织元素的单位：哈希值相同的键在同一个桶中；桶数随插入自动增长以使平均每桶元素数不超过最大负载因子。", "ref": "unord.req.general#9"},
+ {"id": "load-factor", "en": "load factor", "zh": "负载因子", "def": "无序容器中平均每桶的元素数 size()/bucket_count()；容器试图使其不超过 max_load_factor()（标准容器初始为 1.0）。", "ref": "unord.req.general#228"},
+ {"id": "rehash", "en": "rehash", "zh": "重新散列（rehash）", "def": "无序容器改变桶数并把元素重新分配到桶中；使全部迭代器失效、改变元素顺序，但不使指针和引用失效。插入满足 (N+n) <= z*B 时保证不发生。", "ref": "unord.req.general#9"},
+ {"id": "element-block", "en": "element block", "zh": "元素块", "def": "hive 存放元素的内存块；含元素的为活动块，不含的为保留块。块容量受 hive_limits 的最小/最大限制约束，擦除只标记跳过而不挪动元素。", "ref": "hive.overview#1"}
+]
