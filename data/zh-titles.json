@@ -3100,7 +3100,7 @@
  "atomics.ref.int": "整型的特化",
  "atomics.ref.float": "浮点类型的特化",
  "atomics.ref.pointer": "指针的特化",
- "atomics.ref.memop": "内存操作",
+ "atomics.ref.memop": "整数与对象指针共有的成员运算符",
  "atomics.types.generic": "类模板 atomic",
  "atomics.types.generic.general": "概述",
  "atomics.types.operations": "原子类型上的操作",
