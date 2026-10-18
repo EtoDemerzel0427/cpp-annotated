@@ -1,0 +1,10 @@
+[
+ {"id": "sum-type", "en": "sum type", "zh": "和类型", "def": "取值为若干类型之一、并记录当前是哪一种的类型（又称带标签联合体）。C++ 中的标准实现是 `std::variant`。", "ref": "variant.general#1"},
+ {"id": "variant-alternative", "en": "alternative (of a variant)", "zh": "（variant 的）候选类型", "def": "`variant<Types...>` 的模板实参 `Types` 中的每个类型；variant 持有值时，该值的类型必为其中之一。同一类型可出现多次，此时只能用下标区分。", "ref": "variant.general#1"},
+ {"id": "valueless-by-exception", "en": "valueless by exception", "zh": "因异常而无值", "def": "`variant` 不持有任何值的状态：`valueless_by_exception()` 为 true，`index()` 为 `variant_npos`。只会在类型改变的赋值或 `emplace` 中、新值初始化抛出异常时出现。", "ref": "variant.status#1"},
+ {"id": "never-quite-empty", "en": "never-quite-empty guarantee", "zh": "几乎永不为空", "def": "`std::variant` 的设计取舍：所含值必须嵌套在对象内（不得堆分配），因此不提供永不为空的强保证；正常使用中总有值，仅在异常打断类型切换时可能进入 valueless 状态。", "ref": "variant.variant.general#1"},
+ {"id": "imaginary-function-fun", "en": "imaginary function FUN", "zh": "虚构函数 FUN", "def": "variant 转换构造/转换赋值用来选定存放类型的说明手段：为每个满足 `T_i x[] = {std::forward<T>(t)};` 良构（即不窄化）的候选类型构造 `FUN(T_i)`，对 `FUN(std::forward<T>(t))` 做重载决议，选中的 `T_j` 即为存放类型。", "ref": "variant.ctor#14"},
+ {"id": "as-variant", "en": "as-variant", "zh": "as-variant", "def": "`std::visit` 规范中的说明用函数模板，接受 `variant<Ts...>` 的四种引用并原样返回；借助模板实参推导，使唯一派生自某个 variant 特化的类也能被 `visit` 访问（C++23，P2162R2）。", "ref": "variant.visit#1"},
+ {"id": "overload-pattern", "en": "overload pattern", "zh": "overload 模式", "def": "`template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };` 的惯用法：多重继承若干 lambda，用 using 包展开合并其 `operator()` 为一个重载集，常用作 `std::visit` 的访问者；C++20 起借助聚合 CTAD 无需推导指引。", "ref": "variant.visit"},
+ {"id": "discriminated-type", "en": "discriminated type", "zh": "可辨识类型", "def": "[any] 中的说法：可以容纳不同类型的值、记得值的类型但不在类型之间做任何转换的类型，如 `std::any`。", "ref": "any.general#1"}
+]
