@@ -34,7 +34,7 @@ updated: 2026-10-17
 
 ¶2 区分两种模板声明：
 
-- **主模板**（primary template）：模板名后面**不跟** *template-argument-list*。主模板的模板实参列表就是它的 *template-head* 的模板实参列表（[[temp.arg#2]]）：第 n 个实参就是第 n 个形参本身，形参包则写成包展开。
+- [[g:primary-template|**主模板**]]（primary template）：模板名后面**不跟** *template-argument-list*。主模板的模板实参列表就是它的 *template-head* 的模板实参列表（[[temp.arg#2]]）：第 n 个实参就是第 n 个形参本身，形参包则写成包展开。
 - 模板名后面**跟着** *template-argument-list* 的模板声明是该模板的**部分特化**（[[temp.spec.partial]]），被特化的必须是**类模板或变量模板**。
 
 ```cpp run ok
@@ -67,7 +67,7 @@ template<class T> using Ptr<T*> = T;                 // error: 别名模板不�
 
 ## 分别实例化的结构（¶3）
 
-¶3 定义了一个新术语：模板化函数 F 的**分别实例化的结构**（separately instantiated construct）是 F 的
+¶3 定义了一个新术语：模板化函数 F 的[[g:separately-instantiated-construct|**分别实例化的结构**]]（separately instantiated construct）是 F 的
 
 - ¶3.1 默认实参；
 - ¶3.2 *noexcept-specifier*；

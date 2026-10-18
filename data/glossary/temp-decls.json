@@ -1,0 +1,20 @@
+[
+  {"id": "primary-template", "en": "primary template", "zh": "主模板", "def": "模板名后不跟模板实参列表的模板声明；其模板实参列表就是自身 template-head 的实参列表。部分特化总是相对于主模板而言。", "ref": "temp.decls.general#2"},
+  {"id": "separately-instantiated-construct", "en": "separately instantiated construct", "zh": "分别实例化的结构", "def": "模板化函数的默认实参、noexcept 说明符与函数契约说明符。它们（以及 type-constraint、requires-clause）就名字查找与实例化而言各自是独立的定义，按需实例化。", "ref": "temp.decls.general#3"},
+  {"id": "class-template", "en": "class template", "zh": "类模板", "def": "为一个无界的相关类型集合规定布局与操作的模板；每个特化是一个独立的类类型。", "ref": "temp.class.general#1"},
+  {"id": "deduction-guide", "en": "deduction guide", "zh": "推导指引", "def": "形如 `模板名(形参) -> simple-template-id;` 的声明，在类模板实参推导中把构造实参映射到类模板特化；不经名字查找，所有可达的指引都会被考虑。", "ref": "temp.deduct.guide#1"},
+  {"id": "member-template", "en": "member template", "zh": "成员模板", "def": "在类或类模板内部声明的模板（成员函数模板、成员类模板等）。成员函数模板不能是虚函数，析构函数不能是模板。", "ref": "temp.mem#1"},
+  {"id": "template-parameter-pack", "en": "template parameter pack", "zh": "模板形参包", "def": "接受零个或多个模板实参的模板形参，如 `class... Ts`。", "ref": "temp.variadic#1"},
+  {"id": "function-parameter-pack", "en": "function parameter pack", "zh": "函数形参包", "def": "接受零个或多个函数实参的函数形参，如 `Ts... ts`；其声明本身是一个包展开。", "ref": "temp.variadic#2"},
+  {"id": "init-capture-pack", "en": "init-capture pack", "zh": "init-capture 包", "def": "形如 `...xs = expr` 的 lambda 捕获，对初始化器包展开中的每个元素引入一个 init-capture（C++20）。", "ref": "temp.variadic#3"},
+  {"id": "pack", "en": "pack", "zh": "包", "def": "模板形参包、函数形参包、init-capture 包与结构化绑定包的统称；包名只能出现在包展开之中。", "ref": "temp.variadic#5"},
+  {"id": "pack-expansion", "en": "pack expansion", "zh": "包展开", "def": "由模式和省略号组成的结构，实例化时对包的每个元素实例化一次模式，产生一个（可能为空的）列表；只能出现在标准列举的语境中。", "ref": "temp.variadic#6"},
+  {"id": "unexpanded-pack", "en": "unexpanded pack", "zh": "未展开包", "def": "包展开的模式中、未被任何嵌套包展开所展开的包；同一包展开中的所有未展开包必须元素个数相同，同步展开。", "ref": "temp.variadic#8"},
+  {"id": "partial-specialization", "en": "partial specialization", "zh": "部分特化", "def": "模板名后跟含模板形参的实参列表的类模板或变量模板声明；当特化的实参与之匹配时提供替代定义。每个部分特化是独立的模板。", "ref": "temp.spec.partial.general#1"},
+  {"id": "non-specialized-argument", "en": "non-specialized (constant template argument)", "zh": "非特化的（常量模板实参）", "def": "部分特化实参列表中恰好是某个常量模板形参名字的常量模板实参；其余常量模板实参都是特化的。", "ref": "temp.spec.partial.general#8"},
+  {"id": "more-specialized", "en": "more specialized", "zh": "更特化", "def": "模板 F 至少与 G 一样特化而 G 不至少与 F 一样特化时，F 比 G 更特化；部分特化之间借由改写为函数模板来比较。", "ref": "temp.spec.partial.order#1"},
+  {"id": "expression-equivalent-template", "en": "equivalent (expressions involving template parameters)", "zh": "等价（涉及模板形参的表达式）", "def": "包含两表达式的函数定义满足 ODR（模板形参可按位置换名）时二者等价；按记号结构比较，依赖名只比较名字，lambda 永不等价。", "ref": "temp.over.link#5"},
+  {"id": "functionally-equivalent", "en": "functionally equivalent", "zh": "功能等价", "def": "两个不等价的、涉及模板形参的表达式对任何模板实参求值结果相同（或不求值操作数执行相同操作）；template-head 接受相同的实参集合。功能等价而不等价导致 IFNDR。", "ref": "temp.over.link#5"},
+  {"id": "partial-ordering", "en": "partial ordering (of function templates)", "zh": "（函数模板的）偏序", "def": "当多个函数模板都能生成可行特化时，通过合成唯一类型变换模板并双向推导来判定哪个更特化的过程；双向都成功时再按约束裁决。", "ref": "temp.func.order#1"},
+  {"id": "alias-template", "en": "alias template", "zh": "别名模板", "def": "`template<...> using N = type;` 声明的一族类型的名字；其特化等价于代入后的类型，不能被特化，也不能从类型中被推导出来。", "ref": "temp.alias#1"}
+]

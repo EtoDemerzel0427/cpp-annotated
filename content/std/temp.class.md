@@ -10,7 +10,7 @@ tags: 模板, 类模板, 推导指引, CTAD, 类外定义
 updated: 2026-10-17
 ---
 
-**类模板**（class template）为一个**无界的**相关类型集合规定布局与操作：`std::vector<int>`、`std::vector<std::string>`……每个特化都是一个独立的类类型，但它们共享同一份"蓝图"。
+[[g:class-template|**类模板**]]（class template）为一个**无界的**相关类型集合规定布局与操作：`std::vector<int>`、`std::vector<std::string>`……每个特化都是一个独立的类类型，但它们共享同一份"蓝图"。
 
 13.7.2 [temp.class] 分为六个小节，本页全部覆盖：
 
@@ -211,7 +211,7 @@ int main() {
 
 ## 13.7.2.3 推导指引
 
-**推导指引**（deduction guide）是 C++17 类模板实参推导（CTAD）中由用户提供的部分：它告诉编译器"见到这样的构造实参时，推导出这样的特化"。完整的推导算法在 [[over.match.class.deduct]]，占位符本身在 [[dcl.type.class.deduct]]，本小节只管推导指引的**声明**。
+[[g:deduction-guide|**推导指引**]]（deduction guide）是 C++17 类模板实参推导（CTAD）中由用户提供的部分：它告诉编译器"见到这样的构造实参时，推导出这样的特化"。完整的推导算法在 [[over.match.class.deduct]]，占位符本身在 [[dcl.type.class.deduct]]，本小节只管推导指引的**声明**。
 
 ### 何时使用、怎样被找到（¶1）
 

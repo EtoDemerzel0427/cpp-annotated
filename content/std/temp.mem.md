@@ -9,7 +9,7 @@ tags: 模板, 成员模板, 虚函数, 转换函数
 updated: 2026-10-17
 ---
 
-**成员模板**（member template）是在类或类模板**内部**声明的模板：成员函数模板、成员类模板、静态数据成员模板（变量模板）、成员别名模板。它们是"两层参数化"的典型来源——`std::vector<T>` 的范围构造函数 `template<class InputIt> vector(InputIt, InputIt)` 既依赖外层的 `T`，又有自己的 `InputIt`。
+[[g:member-template|**成员模板**]]（member template）是在类或类模板**内部**声明的模板：成员函数模板、成员类模板、静态数据成员模板（变量模板）、成员别名模板。它们是"两层参数化"的典型来源——`std::vector<T>` 的范围构造函数 `template<class InputIt> vector(InputIt, InputIt)` 既依赖外层的 `T`，又有自己的 `InputIt`。
 
 本节规定：类外定义的写法（¶1）、成员模板的几条禁令（¶2–3）、成员模板与虚函数的关系（¶4）、转换函数模板的命名（¶5）。
 
