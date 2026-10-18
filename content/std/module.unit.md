@@ -36,7 +36,7 @@ module-name-qualifier:
 
 ## 模块单元、具名模块与模块名（¶1）
 
-¶1 含有 *module-declaration* 的 TU 是**模块单元**（module unit）。具有相同 *module-name* 的所有模块单元组成一个**具名模块**（named module）。
+¶1 含有 *module-declaration* 的 TU 是[[g:module-unit|模块单元]]（module unit）。具有相同 *module-name* 的所有模块单元组成一个**具名模块**（named module）。
 
 注意这个定义的方向：标准里没有一个"模块对象"可以独立存在，模块就是"同名模块单元的集合"。一个模块的边界由构建系统决定（哪些文件被一起编译、链接），标准只通过诸如 ¶2"恰好一个主接口单元"这样的 IFNDR 规则约束这个集合。
 
@@ -66,7 +66,7 @@ export module my.import;   // error: import 不能出现在模块名中
 
 ¶2 *module-declaration* 以 `export` 开头的模块单元是**模块接口单元**（module interface unit）；其他模块单元是**模块实现单元**（module implementation unit）。
 
-一个具名模块必须**恰好有一个**不带分区名的接口单元，称为**主模块接口单元**（primary module interface unit）；{{ifndr}}。
+一个具名模块必须**恰好有一个**不带分区名的接口单元，称为[[g:primary-module-interface-unit|主模块接口单元]]（primary module interface unit）；{{ifndr}}。
 
 为什么是 IFNDR？编译器每次只看一个 TU，它无法知道别处是否还有第二个 `export module M;`，也无法知道是否根本没有。这类"模块整体"层面的错误只有构建系统或链接器能发现——而且未必能发现（两个主接口单元各自产出 BMI，导入者拿到哪个取决于构建配置）。
 
@@ -79,7 +79,7 @@ export module my.import;   // error: import 不能出现在模块名中
 
 ## 模块分区（¶3–¶4）
 
-¶3 *module-declaration* 含有 *module-partition* 的模块单元是**模块分区**（module partition）。约束：
+¶3 *module-declaration* 含有 *module-partition* 的模块单元是[[g:module-partition|模块分区]]（module partition）。约束：
 
 - 一个具名模块不得包含两个同名分区；
 - 模块的所有**接口分区**（即 `export module M:P;` 形式的单元）必须被主模块接口单元**直接或间接导出**（`export import :P;`）。
@@ -127,7 +127,7 @@ int bar() { return baz() - 10; }
 int baz() { return 30; }
 ```
 
-```cpp title="main.cpp" run ok
+```cpp title="main.cpp" ok
 import A;
 int main() { return foo() + baz(); }   // 2*(20+1) + 30 = 72
 ```
@@ -146,7 +146,7 @@ int main() { return foo() + baz(); }   // 2*(20+1) + 30 = 72
 
 ## 管辖范围（¶5）
 
-¶5 **模块单元管辖范围**（module unit purview）是从 *module-declaration* 开始、到 TU 末尾为止的记号序列。具名模块 M 的**管辖范围**是 M 的所有模块单元的管辖范围的集合。
+¶5 [[g:purview|模块单元管辖范围]]（module unit purview）是从 *module-declaration* 开始、到 TU 末尾为止的记号序列。具名模块 M 的**管辖范围**是 M 的所有模块单元的管辖范围的集合。
 
 注意：
 
@@ -156,7 +156,7 @@ int main() { return foo() + baz(); }   // 2*(20+1) + 30 = 72
 
 ## 全局模块（¶6）
 
-¶6 **全局模块**（global module）是所有**全局模块片段**和所有**非模块单元的 TU** 的集合。出现在这些地方的声明称为在全局模块的管辖范围中。
+¶6 [[g:global-module|全局模块]]（global module）是所有**全局模块片段**和所有**非模块单元的 TU** 的集合。出现在这些地方的声明称为在全局模块的管辖范围中。
 
 Note 2：全局模块没有名字、没有模块接口单元，也不由任何 *module-declaration* 引入。
 
@@ -197,7 +197,7 @@ Note 2：全局模块没有名字、没有模块接口单元，也不由任何 *
     - 在模块中定义一个供非模块代码通过头文件声明来调用的函数；
     - 把一个代码库渐进迁移到模块时保持 ABI 不变（修饰名不含模块名）。
 
-```cpp title="M.cppm" run ok
+```cpp title="M.cppm" ok
 export module M;
 int f1() { return 1; }                 // 附属于 M，模块链接
 export int f2() { return 2; }          // 附属于 M，外部链接

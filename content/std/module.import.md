@@ -76,7 +76,7 @@ Note 1：被导入 TU 中**导出的**命名空间作用域声明，可以在导
 
 ## 头文件单元（¶5–¶6）
 
-¶5 指定 *header-name* H 的导入声明，导入一个合成的**头文件单元**（header unit）：对 H 指名的源文件或头文件施加翻译阶段 1 到 7（[[lex.phases]]）得到的 TU。该文件不得含有 *module-declaration*。
+¶5 指定 *header-name* H 的导入声明，导入一个合成的[[g:header-unit|头文件单元]]（header unit）：对 H 指名的源文件或头文件施加翻译阶段 1 到 7（[[lex.phases]]）得到的 TU。该文件不得含有 *module-declaration*。
 
 Note 2：头文件单元是一个**独立的** TU，拥有独立的宏定义集合。头文件单元中的所有声明都**隐式导出**（[[module.interface#2]]），并**附属于全局模块**（[[module.unit#7]]）。
 
@@ -230,7 +230,7 @@ import M;               // error: 不能在自己的单元中导入 M
 
 ## 接口依赖与禁止循环（¶10）
 
-¶10 TU 对 TU U 有**接口依赖**（interface dependency），若它含有导入 U 的声明（包括 *module-declaration*——普通实现单元隐式导入主接口），或它对某个对 U 有接口依赖的 TU 有接口依赖（传递闭包）。
+¶10 TU 对 TU U 有[[g:interface-dependency|接口依赖]]（interface dependency），若它含有导入 U 的声明（包括 *module-declaration*——普通实现单元隐式导入主接口），或它对某个对 U 有接口依赖的 TU 有接口依赖（传递闭包）。
 
 **TU 不得对自身有接口依赖。**
 
@@ -270,7 +270,7 @@ C++23（[[P2465R3]]）起，标准库提供两个具名模块（[[std.modules]]�
 - 和所有具名模块一样，`import std;` **不提供宏**：`assert`、`errno`、`offsetof`、`va_arg` 等需要另外 `#include <cassert>` 等（[[std.modules#6]] Note 2）。
 - 由于 `std` 是保留名，用户不能自己写 `export module std;`（[[module.unit#1]]）。
 
-```cpp title="hello.cpp" run ok
+```cpp title="hello.cpp" ok
 import std;
 int main() {
   std::vector<int> v{3, 1, 2};

@@ -73,7 +73,7 @@ export int g();     // error: 不在模块接口单元中（¶1）
 
 ## 什么是"被导出"（¶2）
 
-¶2 一个声明**被导出**（exported），当且仅当它：
+¶2 一个声明[[g:exported-declaration|被导出]]（exported），当且仅当它：
 
 - 在 *export-declaration* 之中**并且**栖居于命名空间作用域；或
 - **¶2.1** 是**含有被导出声明的命名空间定义**；或

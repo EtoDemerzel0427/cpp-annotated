@@ -1,0 +1,22 @@
+[
+  {"id": "module-unit", "en": "module unit", "zh": "模块单元", "def": "含有 *module-declaration*（`export module M;`、`module M:P;` 等）的翻译单元。", "ref": "module.unit#1"},
+  {"id": "named-module", "en": "named module", "zh": "具名模块", "def": "具有相同 *module-name* 的所有模块单元的集合。模块名中的点没有层次语义。", "ref": "module.unit#1"},
+  {"id": "module-interface-unit", "en": "module interface unit", "zh": "模块接口单元", "def": "*module-declaration* 以 `export` 开头的模块单元；只有它的管辖范围中能出现 `export` 声明。", "ref": "module.unit#2"},
+  {"id": "module-implementation-unit", "en": "module implementation unit", "zh": "模块实现单元", "def": "不是接口单元的模块单元（`module M;` 或实现分区 `module M:P;`）。不能被导出；无分区名的实现单元不能被导入，且隐式导入主接口单元。", "ref": "module.unit#2"},
+  {"id": "primary-module-interface-unit", "en": "primary module interface unit", "zh": "主模块接口单元", "def": "没有分区名的模块接口单元，每个具名模块恰好一个（违反时 IFNDR）。接口分区必须由它直接或间接导出。", "ref": "module.unit#2"},
+  {"id": "module-partition", "en": "module partition", "zh": "模块分区", "def": "*module-declaration* 含 `:P` 的模块单元，分接口分区与实现分区；只能被同一模块的单元以 `import :P;` 导入，对模块外部不可见。", "ref": "module.unit#3"},
+  {"id": "purview", "en": "purview", "zh": "管辖范围", "def": "模块单元管辖范围是从 *module-declaration* 到 TU 末尾的记号序列（不含全局模块片段，含私有模块片段）；具名模块的管辖范围是其所有模块单元管辖范围的集合。", "ref": "module.unit#5"},
+  {"id": "global-module", "en": "global module", "zh": "全局模块", "def": "所有全局模块片段与所有非模块 TU（包括头文件单元）的集合；没有名字和接口单元。传统代码中的声明都附属于它。", "ref": "module.unit#6"},
+  {"id": "attached", "en": "attached (to a module)", "zh": "附属（于模块）", "def": "每个声明附属于一个模块：命名空间、类型/命名空间别名、语言链接规范中的声明附属于全局模块，指名已有实体的友元随被指名实体，其余随所在管辖范围。附属于不同模块的同名实体是不同实体。", "ref": "module.unit#7"},
+  {"id": "exported-declaration", "en": "exported declaration", "zh": "被导出的声明", "def": "位于 *export-declaration* 中且栖居于命名空间作用域的声明、含被导出声明的命名空间定义、或头文件单元中引入名字的声明。导入者的名字查找能找到它；它不能声明内部链接名字（头文件单元除外）。", "ref": "module.interface#2"},
+  {"id": "header-unit", "en": "header unit", "zh": "头文件单元", "def": "`import <h>;` 或 `import \"h\";` 导入的、由可导入头文件经翻译阶段 1–7 合成的 TU：独立宏环境、所有声明隐式导出并附属于全局模块，且其宏对直接导入者可见。", "ref": "module.import#5"},
+  {"id": "importable-header", "en": "importable header", "zh": "可导入头文件", "def": "实现定义的一组可以作为头文件单元导入的头文件，至少包括所有可导入的 C++ 库头文件（[[headers]] 表 24）。", "ref": "module.import#5"},
+  {"id": "interface-dependency", "en": "interface dependency", "zh": "接口依赖", "def": "TU 导入了 U（含 *module-declaration* 的隐式导入），或对某个依赖 U 的 TU 有接口依赖时，称它对 U 有接口依赖。TU 不得对自身有接口依赖（禁止循环导入）。", "ref": "module.import#10"},
+  {"id": "global-module-fragment", "en": "global module fragment", "zh": "全局模块片段", "def": "模块单元中 `module;` 与 *module-declaration* 之间的部分，只能含预处理指令；其中（经 `#include`）的声明附属于全局模块，未被管辖范围用到的会被丢弃。", "ref": "module.global.frag#1"},
+  {"id": "decl-reachable", "en": "decl-reachable", "zh": "decl 可达", "def": "同一 TU 中声明之间的关系：D 被 S 提及、被 S 中表达式命名、被 S 中依赖调用的保守查找找到等，并按类与成员、模板与特化等规则闭包。用于判定全局模块片段中的声明是否被丢弃。", "ref": "module.global.frag#2"},
+  {"id": "discarded-declaration", "en": "discarded declaration", "zh": "被丢弃的声明", "def": "全局模块片段中、不从 TU 的 *declaration-seq* 中任何声明 decl-reachable 的声明。它在该模块单元之外既不可达也不可见。", "ref": "module.global.frag#3"},
+  {"id": "private-module-fragment", "en": "private module fragment", "zh": "私有模块片段", "def": "`module :private;` 之后的部分，只能出现在作为模块唯一单元的主接口单元中；其中的声明对其他 TU 不可达，也不受暴露检查。", "ref": "module.private.frag#1"},
+  {"id": "instantiation-context", "en": "instantiation context", "zh": "实例化语境", "def": "决定依赖名的 ADL 能找到哪些声明、哪些声明可达的一组程序点；对嵌套实例化，包括模块主接口单元的末尾。", "ref": "module.context#1"},
+  {"id": "necessarily-reachable", "en": "necessarily reachable", "zh": "必然可达", "def": "从点 P 必然可达的 TU：P 所在 TU 在 P 之前对其有接口依赖的模块接口单元，或在 P 之前直接导入的 TU。", "ref": "module.reach#1"},
+  {"id": "reachable-declaration", "en": "reachable (declaration)", "zh": "可达（声明）", "def": "声明的语义属性（定义、完整性、默认实参等）在某处生效。声明从 P 可达：同 TU 中先于 P，或位于可达 TU 中、未被丢弃且不在私有模块片段中。与是否导出无关。", "ref": "module.reach#3"}
+]
