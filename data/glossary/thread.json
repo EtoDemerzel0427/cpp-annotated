@@ -1,0 +1,177 @@
+[
+ {
+  "id": "execution-agent",
+  "en": "execution agent",
+  "zh": "执行代理",
+  "def": "线程之类、可以与其他执行代理并行工作的实体；实现或用户也可以引入进程、线程池任务等其他种类的代理。可锁类型的要求与互斥量的\"拥有\"都以执行代理为主体。",
+  "ref": "thread.req.lockable.general#1"
+ },
+ {
+  "id": "native-resolution",
+  "en": "native resolution",
+  "zh": "原生分辨率",
+  "def": "实现在超时函数中能提供的最细的计时分辨率，取决于操作系统与硬件。",
+  "ref": "thread.req.timing#6"
+ },
+ {
+  "id": "timeout-related-exception",
+  "en": "timeout-related exceptions",
+  "zh": "超时相关异常",
+  "def": "接受超时参数的函数在执行期间，由时钟、时间点或时长（通常是用户自定义的 rep 或时钟）抛出的异常；函数原样传播它们。实现自带的时钟与时长类型不抛异常。",
+  "ref": "thread.req.timing#8"
+ },
+ {
+  "id": "stop-state",
+  "en": "stop state",
+  "zh": "停止状态",
+  "def": "stop_source、stop_token、stop_callback 共同引用的状态：记录是否已收到停止请求，并维护已注册的回调列表。stop_* 系列共享其所有权；inplace_stop_source 独占它。",
+  "ref": "thread.stoptoken.intro#2"
+ },
+ {
+  "id": "stop-request",
+  "en": "stop request",
+  "zh": "停止请求",
+  "def": "通过停止源要求某个操作尽快停止执行的异步请求；对所有关联的令牌可见，一旦发出不可撤回，此后的停止请求无效果。第一次停止请求会同步执行已注册的回调。",
+  "ref": "thread.stoptoken.intro#1"
+ },
+ {
+  "id": "detached-thread",
+  "en": "detached thread",
+  "zh": "分离的线程",
+  "def": "没有任何 std::thread 对象表示的执行线程，例如调用 detach() 之后。分离的线程没有\"完成 synchronizes with join 返回\"这条同步边。",
+  "ref": "thread.thread.class.general#1"
+ },
+ {
+  "id": "coherence-ordered-before",
+  "en": "coherence-ordered before",
+  "zh": "一致性序先于",
+  "def": "同一原子对象上两个原子操作之间的关系：A 是被 B 读到的修改、A 在修改顺序中先于 B、A 读到的修改先于 B，或经由修改传递。seq_cst 的单一全序 S 必须与之一致。",
+  "ref": "atomics.order#3"
+ },
+ {
+  "id": "atomic-modify-write-operation",
+  "en": "atomic modify-write operation",
+  "zh": "原子 modify-write 操作",
+  "def": "同步要求更弱的原子读-改-写操作（如 store_add、store_max），不返回旧值，不能作为栅栏同步中的读端，也不算执行步骤；意图以不受 acquire 栅栏排序的硬件机制实现。",
+  "ref": "atomics.order#12"
+ },
+ {
+  "id": "out-of-thin-air",
+  "en": "out-of-thin-air value",
+  "zh": "无中生有的值",
+  "def": "循环依赖于自身计算的值，如两个线程各自把读到的值写给对方而凭空得到 42。标准以建议性条款要求实现不产生这样的值。",
+  "ref": "atomics.order#8"
+ },
+ {
+  "id": "address-free",
+  "en": "address-free",
+  "zh": "地址无关",
+  "def": "原子操作经由两个不同地址访问同一内存位置时仍能原子地通信，不依赖每进程状态；这是在进程间共享内存中使用原子对象的前提。无锁操作应当是地址无关的（推荐做法）。",
+  "ref": "atomics.lockfree#5"
+ },
+ {
+  "id": "atomic-waiting-operation",
+  "en": "atomic waiting operation",
+  "zh": "原子等待操作",
+  "def": "atomic、atomic_ref、atomic_flag 的 wait 及其非成员版本：反复读取原子对象并与旧值按值表示比较，相等则阻塞，直到被原子通知操作解除阻塞或虚假解除阻塞。",
+  "ref": "atomics.wait#1"
+ },
+ {
+  "id": "eligible-to-be-unblocked",
+  "en": "eligible to be unblocked",
+  "zh": "有资格被解除阻塞",
+  "def": "原子等待操作在观察到修改 X 后阻塞，而存在修改顺序中晚于 X、且 happens before 某次原子通知操作的修改 Y 时，该等待操作有资格被这次通知解除阻塞。这一定义排除了\"先修改、后通知\"时的丢失唤醒。",
+  "ref": "atomics.wait#4"
+ },
+ {
+  "id": "mutex-ownership",
+  "en": "owns (a mutex)",
+  "zh": "拥有（互斥量）",
+  "def": "执行代理从成功调用某个加锁函数起、到调用 unlock 为止拥有该互斥量。对非递归互斥量重复加锁、解锁不拥有的互斥量、在拥有时终止线程都违反要求，是未定义行为。",
+  "ref": "thread.mutex.requirements.general#1"
+ },
+ {
+  "id": "lock-object",
+  "en": "lock",
+  "zh": "锁（对象）",
+  "def": "持有一个可锁对象的引用、并可能在自身析构时解锁它的对象，如 lock_guard、scoped_lock、unique_lock、shared_lock；锁不管理可锁对象的生命周期。",
+  "ref": "thread.lock.general#1"
+ },
+ {
+  "id": "spurious-wakeup",
+  "en": "spurious wakeup",
+  "zh": "虚假唤醒",
+  "def": "等待函数在没有收到通知的情况下解除阻塞并返回。条件变量的 wait、原子 wait 都明确允许它，因此条件变量的等待必须写在检查条件的循环中（或使用带谓词的重载）。",
+  "ref": "thread.condition.condvar#8"
+ },
+ {
+  "id": "barrier-phase",
+  "en": "barrier phase",
+  "zh": "barrier 阶段",
+  "def": "barrier 生命周期中的一段：预期计数被 arrive/arrive_and_drop 递减到零后，执行一次阶段完成步骤，计数被重置，下一阶段开始。",
+  "ref": "thread.barrier.class#1"
+ },
+ {
+  "id": "phase-completion-step",
+  "en": "phase completion step",
+  "zh": "阶段完成步骤",
+  "def": "每个 barrier 阶段结束时由某个参与者线程执行一次：调用完成函数，然后解除阻塞在阶段同步点上的线程；其结束 strongly happens before 被解除阻塞的调用返回。",
+  "ref": "thread.barrier.class#3"
+ },
+ {
+  "id": "shared-state",
+  "en": "shared state",
+  "zh": "共享状态",
+  "def": "future、promise、packaged_task、async 用来传递结果的状态：包含状态信息和一个（可能尚未求值的）结果——值或异常。只有持有可取回的结果时才是就绪的。",
+  "ref": "futures.state#1"
+ },
+ {
+  "id": "asynchronous-return-object",
+  "en": "asynchronous return object",
+  "zh": "异步返回对象",
+  "def": "从共享状态读取结果的对象，如 future 与 shared_future；其可能阻塞以等待共享状态就绪的成员函数称为等待函数。",
+  "ref": "futures.state#3"
+ },
+ {
+  "id": "asynchronous-provider",
+  "en": "asynchronous provider",
+  "zh": "异步提供者",
+  "def": "向共享状态提供结果的对象，如 promise 与 packaged_task。异步提供者被销毁而未提供结果时放弃共享状态，存入 broken_promise 错误。",
+  "ref": "futures.state#4"
+ },
+ {
+  "id": "abandon-shared-state",
+  "en": "abandon (a shared state)",
+  "zh": "放弃（共享状态）",
+  "def": "异步提供者在未就绪的共享状态中存入错误条件为 broken_promise 的 future_error 并使其就绪，然后释放共享状态；promise 与 packaged_task 的析构函数这样做。",
+  "ref": "futures.state#7"
+ },
+ {
+  "id": "deferred-function",
+  "en": "deferred function",
+  "zh": "延迟函数",
+  "def": "以 launch::deferred 策略调用 async 时存入共享状态的函数与实参副本；对共享该状态的异步返回对象第一次调用非定时等待函数时，在该等待线程中调用它。",
+  "ref": "futures.async#3"
+ },
+ {
+  "id": "region-of-rcu-protection",
+  "en": "region of RCU protection",
+  "zh": "RCU 保护区域",
+  "def": "从 rcu_domain 上的一次 lock 到与之对应的 unlock 之间的区域（读侧临界区）。若某次 retire 不 strongly happens before 区域的开始，区域的结束就 strongly happens before 被安排的删除。",
+  "ref": "saferecl.rcu.general#4"
+ },
+ {
+  "id": "hazard-pointer",
+  "en": "hazard pointer",
+  "zh": "hazard pointer",
+  "def": "单写者多读者的指针，至多由一个线程拥有。拥有者让它指向某个对象，以告知可能删除该对象的线程：对象尚不能安全回收。",
+  "ref": "saferecl.hp.general#1"
+ },
+ {
+  "id": "protection-epoch",
+  "en": "protection epoch",
+  "zh": "保护纪元",
+  "def": "hazard pointer 从创建到销毁被划分成的时间段；每个纪元中它要么关联一个 hazard-protectable 对象，要么未关联。改变关联即开始新纪元。退休前开始的纪元会推迟对象的回收。",
+  "ref": "saferecl.hp.general#3"
+ }
+]
