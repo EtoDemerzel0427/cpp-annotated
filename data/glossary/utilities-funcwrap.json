@@ -1,0 +1,10 @@
+[
+ {"id": "polymorphic-function-wrapper", "en": "polymorphic function wrapper", "zh": "多态函数包装器", "def": "以固定类型存储（或引用）任意满足给定调用签名的可调用对象的类模板：`function`、`move_only_function`、`copyable_function`、`function_ref`。", "ref": "func.wrap.general#1"},
+ {"id": "type-erasure", "en": "type erasure", "zh": "类型擦除", "def": "在编译期把具体类型隐藏到运行时的分派机制（虚函数、函数指针表或 thunk）之后，使不同类型的对象能以同一个类型被存储和使用的技术。", "ref": "func.wrap.general#1"},
+ {"id": "small-object-optimization", "en": "small-object optimization (SBO/SOO)", "zh": "小对象优化", "def": "把足够小的目标对象直接存放在包装器内部的缓冲区中以避免堆分配的实现技术。对拥有型函数包装器，标准只将其列为推荐做法，并指出它只能用于 nothrow 移动构造的类型。", "ref": "func.wrap.move.class#2"},
+ {"id": "double-wrapping", "en": "double wrapping", "zh": "双重包装", "def": "用一个多态函数包装器构造另一个时，把前者整体作为目标对象再包一层的做法；标准推荐实现避免它，并为此允许内外层调用的实参互相别名。", "ref": "func.wrap.general#3"},
+ {"id": "inv-quals", "en": "inv-quals", "zh": "调用限定（inv-quals）", "def": "move_only_function/copyable_function 中调用目标对象时使用的限定：签名无引用限定时为 cv&，否则为 cv ref。目标以 static_cast<F inv-quals>(f) 被调用。", "ref": "func.wrap.move.general#2"},
+ {"id": "is-callable-from", "en": "is-callable-from", "zh": "is-callable-from 约束", "def": "说明用的变量模板：要求目标类型 VT 按签名的 cv ref 与按 inv-quals 两种方式都可调用并把结果转换为 R（noexcept 签名时要求不抛出）。是转换构造与 in_place_type 构造的核心约束。", "ref": "func.wrap.move.ctor#1"},
+ {"id": "bound-entity", "en": "bound-entity", "zh": "绑定实体（bound-entity）", "def": "function_ref 中说明用的成员：一个未指明的平凡可复制类型的值，存放对象指针或函数指针，在调用时连同实参一起传给 thunk-ptr。", "ref": "func.wrap.ref.class#1"},
+ {"id": "thunk-ptr", "en": "thunk-ptr", "zh": "thunk 指针", "def": "function_ref 中说明用的成员：类型为 R(*)(BoundEntityType, Args&&...) noexcept(noex) 的函数指针，指向构造时针对具体目标实例化的小函数，负责把 bound-entity 还原为目标并调用它。", "ref": "func.wrap.ref.class#1"}
+]
