@@ -1,0 +1,20 @@
+[
+ {"id": "iterator-value-type", "en": "value type (of an iterator)", "zh": "（迭代器的）值类型", "def": "输入迭代器 `i` 的 `*i` 所对应的对象类型 `T`；C++20 起以 `iter_value_t<I>` 查询，对 `const int*` 是 `int`（去 cv）。", "ref": "iterator.requirements.general#1"},
+ {"id": "iterator-difference-type", "en": "difference type (of an iterator)", "zh": "（迭代器的）差值类型", "def": "每个迭代器类型对应的有符号类整数类型，用来表示两个迭代器之间的距离；以 `iter_difference_t<I>` 查询，可以是实现提供的整数类类型。", "ref": "iterator.requirements.general#1"},
+ {"id": "mutable-iterator", "en": "mutable iterator", "zh": "可变迭代器", "def": "同时满足输出迭代器要求的迭代器，即可以通过它修改所指元素，如 `vector<int>::iterator`。", "ref": "iterator.requirements.general#5"},
+ {"id": "constant-iterator", "en": "constant iterator", "zh": "常量迭代器", "def": "不是可变迭代器的迭代器：不能通过它修改所指元素，如 `vector<int>::const_iterator`。C++23 的 `basic_const_iterator` 可把任意输入迭代器包装成常量迭代器。", "ref": "iterator.requirements.general#5"},
+ {"id": "past-the-end-value", "en": "past-the-end value", "zh": "过尾值", "def": "指向序列最后一个元素之后位置的迭代器值，类比指向数组末尾之后的指针。库从不假定过尾值可解引用。", "ref": "iterator.requirements.general#7"},
+ {"id": "dereferenceable-iterator", "en": "dereferenceable", "zh": "可解引用（的迭代器值）", "def": "使表达式 `*i` 有定义的迭代器值。可解引用的值总是非奇异的；过尾值不可解引用。", "ref": "iterator.requirements.general#7"},
+ {"id": "singular-value", "en": "singular value", "zh": "奇异值", "def": "不与任何序列关联的迭代器值（如默认初始化的指针或迭代器）。对它几乎所有表达式的结果都未定义；只允许销毁、被赋予非奇异值，以及（值初始化时）作为复制/移动的源。", "ref": "iterator.requirements.general#7"},
+ {"id": "reachable-sentinel", "en": "reachable", "zh": "可达", "def": "若对迭代器 `i` 有限次应用 `++i` 能使 `i == s`，则称哨位 `s` 从 `i` 可达；此时 `[i, s)` 是有效范围。", "ref": "iterator.requirements.general#10"},
+ {"id": "valid-range", "en": "valid range", "zh": "有效范围", "def": "哨位从起始迭代器可达的范围 `[i, s)`。对无效范围调用库函数的结果是未定义的。", "ref": "iterator.requirements.general#10"},
+ {"id": "counted-range", "en": "counted range", "zh": "计数范围", "def": "以迭代器加元素个数表示的范围 `i+[0, n)`：从 `i` 所指元素开始的 `n` 个元素。`n == 0` 时为空；否则有效当且仅当 `i` 可解引用且 `++i+[0, n-1)` 有效。", "ref": "iterator.requirements.general#11"},
+ {"id": "invalid-iterator", "en": "invalid iterator", "zh": "无效迭代器", "def": "可能是奇异的迭代器，例如容器操作使之失效的迭代器。对已失效迭代器解引用是未定义行为。", "ref": "iterator.requirements.general#16"},
+ {"id": "constexpr-iterator", "en": "constexpr iterator", "zh": "constexpr 迭代器", "def": "为满足迭代器类别要求而提供的所有操作都是 constexpr 函数的迭代器，如 `int*`、`reverse_iterator<int*>`。", "ref": "iterator.requirements.general#17"},
+ {"id": "integer-class-type", "en": "integer-class type", "zh": "整数类类型", "def": "由实现定义的、行为如同整数且宽度大于同符号所有整数类型的类型（不一定是类类型），可用作差值类型，如 `iota_view<long long>` 的差值类型。", "ref": "iterator.concept.winc#2"},
+ {"id": "integer-like-type", "en": "integer-like type", "zh": "类整数类型", "def": "除 cv `bool` 外建模 `integral` 的类型，或整数类类型；再分为有符号类整数与无符号类整数。迭代器的差值类型必须是有符号类整数类型。", "ref": "iterator.concept.winc#4"},
+ {"id": "multi-pass-guarantee", "en": "multi-pass guarantee", "zh": "多遍保证", "def": "前向迭代器的语义保证：`a == b` 蕴含 `++a == ++b`，且递增 `a` 的副本不影响 `*a`。它使同一序列可以被遍历多次。", "ref": "iterator.concept.forward#4"},
+ {"id": "iterator-category-tag", "en": "category tag", "zh": "（迭代器）类别标签", "def": "`input_iterator_tag` 等六个空类，通过继承表达类别间的包含关系；迭代器经 `iterator_traits<I>::iterator_category`（及 `iterator_concept`）申报，用于编译期标签分派。", "ref": "std.iterator.tags#1"},
+ {"id": "insert-iterator", "en": "insert iterator", "zh": "插入迭代器", "def": "把对 `*it = x` 的赋值翻译为对容器的 `push_back`、`push_front` 或 `insert` 的输出迭代器适配器，使复制类算法以插入模式而非覆写模式工作。", "ref": "insert.iterators.general#1"},
+ {"id": "end-of-stream-iterator", "en": "end-of-stream iterator", "zh": "流末迭代器", "def": "流迭代器在到达流尾或读取失败后所处的值，由默认构造（或以 `default_sentinel` 构造）得到，用作输入范围的终点。", "ref": "istreambuf.iterator.general#1"}
+]
