@@ -1,0 +1,22 @@
+[
+  {"id": "name-lookup", "en": "name lookup", "zh": "名字查找", "def": "把名字的一次使用关联到该名字的一组声明的过程；之后才进行重载决议与访问检查。见 [[basic.lookup]]。", "ref": "basic.lookup.general#1"},
+  {"id": "overload-set", "en": "overload set", "zh": "重载集", "def": "名字查找找到的声明全部是函数或函数模板时，这组声明称为重载集，交由重载决议（[[over.match]]）选择。", "ref": "basic.lookup.general#1"},
+  {"id": "program-point", "en": "program point", "zh": "程序点", "def": "翻译单元中记号之间的位置：首个记号前、每对相邻记号之间、末个记号后各至少一个。名字查找总是\"从某个程序点出发\"。", "ref": "basic.lookup.general#2"},
+  {"id": "precedes", "en": "precedes (a program point)", "zh": "先于（程序点）", "def": "声明 X 先于程序点 P：P 在同一 TU 中跟随 X；或 X 栖身于类作用域且从 P 可达；或 X 来自被导入的 TU 且被导出（或同模块、非内部链接）。是旧标准\"可见\"的精确替身。", "ref": "basic.lookup.general#2"},
+  {"id": "single-search", "en": "single search", "zh": "单次搜索", "def": "在作用域 S 中从 P 出发对名字 N 的单次搜索：找出 S 中绑定了与 N 相同的名字、且先于 P 的所有声明；非依赖的 using 声明符被替换为其指名的声明。", "ref": "basic.lookup.general#3"},
+  {"id": "type-only-lookup", "en": "type-only lookup", "zh": "仅类型查找", "def": "只考虑类型与特化是类型的模板的查找；若同时找到类型别名与其底层实体，丢弃别名。用于 `struct X` 等详述类型说明符与基类说明符。", "ref": "basic.lookup.general#4"},
+  {"id": "search-in-scope", "en": "search", "zh": "搜索（作用域中的）", "def": "对非类作用域即单次搜索；对类作用域，自身找不到时按查找集算法递归合并各直接非依赖基类的结果。", "ref": "class.member.lookup#1"},
+  {"id": "lookup-set", "en": "lookup set", "zh": "查找集", "def": "类 C 中名字 N 的查找集 S(N,C)，由声明集与子对象集组成，用于计算类作用域中的搜索结果及二义性。", "ref": "class.member.lookup#2"},
+  {"id": "declaration-set", "en": "declaration set", "zh": "声明集", "def": "查找集的一部分：找到的名为 N 的成员声明（类型声明替换为其类型）；合并冲突时成为\"无效\"集，表示二义。", "ref": "class.member.lookup#2"},
+  {"id": "subobject-set", "en": "subobject set", "zh": "子对象集", "def": "查找集的一部分：声明是在哪些（基类）子对象中找到的；合并时据此判断支配关系。", "ref": "class.member.lookup#2"},
+  {"id": "active-using-directive", "en": "active (using-directive)", "zh": "活跃的 using 指令", "def": "在作用域 S、程序点 P 处，先于 P 且栖身于 S 或某个在 S 中活跃的 using 指令所提名命名空间的 using 指令。该定义使 using 指令具有传递性。", "ref": "basic.lookup.unqual#1"},
+  {"id": "unqualified-search", "en": "unqualified search", "zh": "无限定搜索", "def": "在作用域 S 中搜索，并加上活跃 using 指令提名的、被 S 包含的命名空间；什么都没找到时转到 S 的父作用域继续。", "ref": "basic.lookup.unqual#2"},
+  {"id": "unqualified-name", "en": "unqualified name", "zh": "无限定名字", "def": "不紧跟在 *nested-name-specifier* 或成员访问的 `.`/`->` 之后的名字（可隔着 `template` 或 `~`）；默认做无限定名字查找。", "ref": "basic.lookup.unqual#4"},
+  {"id": "argument-dependent-lookup", "en": "argument-dependent lookup (ADL)", "zh": "实参依赖查找", "def": "无限定函数调用中，若普通查找未找到类成员、块作用域函数声明或非函数，则再在实参类型的关联命名空间中搜索函数，并收集关联类的友元。", "ref": "basic.lookup.argdep#1"},
+  {"id": "associated-entities", "en": "associated entities", "zh": "关联实体", "def": "由函数调用实参类型决定的一组类、枚举与模板（如类本身、所属类、基类、模板类型实参的关联实体）；typedef 不影响它。", "ref": "basic.lookup.argdep#3"},
+  {"id": "associated-namespaces", "en": "associated namespaces", "zh": "关联命名空间", "def": "各关联实体的最内层外围非内联命名空间及其内联命名空间集；ADL 在其中搜索。", "ref": "basic.lookup.argdep#4"},
+  {"id": "member-qualified-name", "en": "member-qualified name", "zh": "成员限定名", "def": "类成员访问表达式中 `.`/`->` 之后的 *unqualified-id*，或形如 `type-name ::`/`namespace-name ::` 的嵌套名说明符的组件名；查找上下文是对象表达式的类型。", "ref": "basic.lookup.qual.general#2"},
+  {"id": "qualified-name", "en": "qualified name", "zh": "限定名", "def": "成员限定名，或带 *nested-name-specifier* 的 *qualified-id*、*using-declarator*、*typename-specifier* 等结构的终端名。", "ref": "basic.lookup.qual.general#2"},
+  {"id": "lookup-context", "en": "lookup context", "zh": "查找上下文", "def": "限定名被查找的地方：成员限定名为对象表达式的类型，其他限定名为前面嵌套名说明符所指名的类型、模板或命名空间。", "ref": "basic.lookup.qual.general#2"},
+  {"id": "qualified-name-lookup", "en": "qualified name lookup", "zh": "限定名字查找", "def": "在类、命名空间或枚举中对其关联作用域的一次搜索；命名空间还额外搜索内联命名空间集，找不到时沿 using 指令传递。", "ref": "basic.lookup.qual.general#3"}
+]

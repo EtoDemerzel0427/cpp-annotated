@@ -3,6 +3,7 @@
 
     python3 build.py            # build into _site/
     python3 build.py --serve    # build, then serve _site/ on http://localhost:8766
+    python3 build.py --serve --watch   # ...and rebuild + live-reload whenever content changes
     python3 build.py --check    # render everything into a temp dir and report warnings only
 
 Requires: pip install markdown pygments
@@ -545,8 +546,9 @@ def build():
         import tempfile
         OUT = Path(tempfile.mkdtemp(prefix="cppstd-check-"))
     if OUT.exists():
-        shutil.rmtree(OUT)
-    OUT.mkdir()
+        for child in OUT.iterdir():
+            shutil.rmtree(child) if child.is_dir() else child.unlink()
+    OUT.mkdir(exist_ok=True)
     shutil.copytree(STATIC, OUT / "static")
 
     toc_meta, entries, by_id = load_toc()
@@ -690,6 +692,7 @@ def build():
     (OUT / "static/js/search-data.js").write_text(
         "window.SEARCH=" + json.dumps(search, ensure_ascii=False, separators=(",", ":")) + ";\n", encoding="utf-8")
     (OUT / ".nojekyll").write_text("")
+    (OUT / "static/build-id.txt").write_text(str(dt.datetime.now().timestamp()))
 
     n_std = len(ctx.std_pages)
     print(f"built {len(pages)} pages ({n_std} std, " +
@@ -884,8 +887,33 @@ def write(rel, text):
     path.write_text(text, encoding="utf-8")
 
 
+def snapshot():
+    files = [ROOT / "build.py"]
+    for d in (CONTENT, DATA, STATIC):
+        files.extend(p for p in d.rglob("*") if p.is_file())
+    return {str(p): p.stat().st_mtime for p in files if p.exists()}
+
+
+def watch_loop():
+    import time
+    last = snapshot()
+    while True:
+        time.sleep(1.5)
+        cur = snapshot()
+        if cur != last:
+            last = cur
+            WARNINGS.clear()
+            try:
+                build()
+            except Exception as ex:  # a page may be half-written; try again on the next change
+                print("  build failed:", ex)
+
+
 if __name__ == "__main__":
     code = build()
+    if "--watch" in sys.argv:
+        import threading
+        threading.Thread(target=watch_loop, daemon=True).start()
     if "--serve" in sys.argv:
         import functools
         import http.server

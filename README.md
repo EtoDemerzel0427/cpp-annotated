@@ -8,7 +8,7 @@
 
 ```bash
 pip install markdown pygments
-python3 build.py --serve        # http://localhost:8766
+python3 build.py --serve --watch   # http://localhost:8766，内容改动后自动重建并刷新浏览器
 ```
 
 `_site/` 是构建产物（不入库）。打开 `_site/index.html` 也能直接浏览。

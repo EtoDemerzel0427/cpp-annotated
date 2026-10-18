@@ -291,4 +291,17 @@
     var q = gf.value.trim().toLowerCase();
     document.querySelectorAll(".term").forEach(function (t) { t.hidden = q && t.textContent.toLowerCase().indexOf(q) < 0; });
   });
+
+  /* ---------------- live reload (local preview only) ---------------- */
+  if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    var lastBuild = null;
+    setInterval(function () {
+      fetch(ROOT + "static/build-id.txt", { cache: "no-store" }).then(function (r) { return r.ok ? r.text() : null; })
+        .then(function (id) {
+          if (!id) return;
+          if (lastBuild && id !== lastBuild) location.reload();
+          lastBuild = id;
+        }, function () {});
+    }, 2000);
+  }
 })();
