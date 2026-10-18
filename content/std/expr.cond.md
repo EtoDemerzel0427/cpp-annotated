@@ -340,14 +340,14 @@ void f(bool c, int* pi, long* pl) {
 
 GCC 和 Clang 支持 `x ?: y`，含义是 `x ? x : y`，但 `x` 只求值一次。它**不是标准 C++**：
 
-```cpp title="cond-gnu.cpp" ok
+```cpp title="cond-gnu.cpp"
 int f(int* p, int* fallback) {
     int* q = p ?: fallback;   // GNU 扩展；-pedantic 下 Clang 警告
     return *q;                // "use of GNU ?: conditional expression extension, omitting middle operand"
 }
 ```
 
-（本例在 Clang 中能编译，按标准却是语法错误；这里的 `ok` 判定只说明它在 GCC/Clang 下的表现。）可移植的写法是 `p ? p : fallback`，或者当 `p` 有副作用时先存入局部变量。
+（本例在 GCC/Clang 中能编译，按标准却是语法错误，所以没有标注判定。）可移植的写法是 `p ? p : fallback`，或者当 `p` 有副作用时先存入局部变量。
 
 ## 实现视角
 
@@ -394,9 +394,12 @@ int f(int* p, int* fallback) {
 - `cd`（`const D` lvalue）→ 目标 `B&`（`b` 是 lvalue，¶4.1）：`B&` 不能绑定到 `const D`（会丢 const），不能直接绑定 → 失败；`b` 是 lvalue 不是 prvalue，但两个 ¶4.1 方向都失败且有类类型，于是走 ¶4.3：`T2 = B` 是 `T1 = const D` 的基类（¶4.3.2），目标为 *cv1* `B` = `const B` → 可以构造（复制构造切片）。
 - `b`（`B` lvalue）→ 目标 `const D&`（¶4.1）：不能把 `B` 绑定为 `D` 的引用 → 失败；¶4.3：`D` 不是 `B` 的基类，¶4.3.3 目标 `D`：`B` → `D` 无转换 → 失败。
 
-恰好一个方向成功（¶4.6）：`cd` 被转换为 `const B` prvalue。此时一边是 `const B` prvalue，一边是 `B` lvalue，类型（只差 cv）不同但不满足"同值类别的 glvalue"，¶5 不适用；¶6：结果为 prvalue，类型不同但……注意此时两个操作数的类型仍不同（`const B` vs `B`），有类类型，进行重载决议——内置候选中没有类类型参数，重载决议失败？
+恰好一个方向成功（¶4.6）：`cd` 被转换为 `const B` prvalue。此时一边是 `const B` prvalue，一边是 `B` lvalue：
 
-实际上，类类型 prvalue 的 cv 限定会在 [[expr.type]] 中被保留，而 Clang 和 GCC 都把这个表达式的结果定为 `const B`（或 `B`）prvalue。这个例子正好落在标准措辞的灰色地带：严格逐字阅读会得出"非良构"，主流实现则给出切片后的 `B` 类 prvalue。遇到这种情况，最好的答案是：**不要写这样的代码**，显式写出 `static_cast<const B&>(cd)`。
+- ¶5 不适用（不是同值类别的 glvalue）；
+- ¶6：结果为 prvalue；两个操作数类型仍然不同（`const B` 与 `B`，类类型 prvalue 保留 cv），且有类类型 → 用内置候选做重载决议。但 `?:` 的内置候选只涉及算术、指针、成员指针和有作用域枚举类型，`B` 无法转换为其中任何一种 → 重载决议失败 → **非良构**。
+
+Clang 也拒绝它："incompatible operand types ('const D' and 'B')"。对比：若 `b` 声明为 `const B`，¶4.1 中 `cd` → `const B&` 可以直接绑定，结果是 `const B` lvalue；若 `cd` 去掉 `const`，结果是 `B` lvalue。一个 `const` 就让表达式从"左值"变成"非良构"——这正是 ¶4 的精确性（也是脆弱性）所在。需要时请显式写出 `static_cast<const B&>(cd)`。
 </details>
 
 !!! question "思考题 2"

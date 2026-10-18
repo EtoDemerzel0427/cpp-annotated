@@ -1,0 +1,9 @@
+[
+  {"id": "truncation-toward-zero", "en": "truncation towards zero", "zh": "向零截断", "def": "整数除法 `/` 的舍入方式：丢弃代数商的小数部分（`-7 / 2 == -3`）。C++11 起为硬性规定；由恒等式 `(a/b)*b + a%b == a` 推出 `%` 的结果与被除数同号。", "ref": "expr.mul#4"},
+  {"id": "comparison-category-type", "en": "comparison category type", "zh": "比较类别类型", "def": "`std::strong_ordering`、`std::weak_ordering`、`std::partial_ordering` 三个类类型，作为 `<=>` 的结果类型。它们不是预定义的：使用内置 `<=>` 前必须有 `<compare>` 中的声明，否则非良构。", "ref": "expr.spaceship#8"},
+  {"id": "short-circuit-evaluation", "en": "short-circuit evaluation", "zh": "短路求值", "def": "内置 `&&` 在左操作数为 `false`、`||` 在左操作数为 `true` 时不求值右操作数，且左操作数先于右操作数。重载的 `&&`/`||` 失去短路（C++17 起仍保留顺序）。", "ref": "expr.log.and#1"},
+  {"id": "yield-expression", "en": "yield-expression", "zh": "产出表达式", "def": "`co_yield e`，等价于 `co_await p.yield_value(e)`（`p` 为承诺对象），但不经过 `await_transform`。只能出现在挂起语境中，处于赋值表达式一级。", "ref": "expr.yield#1"},
+  {"id": "throw-expression", "en": "throw-expression", "zh": "抛出表达式", "def": "`throw e` 或 `throw`，类型为 `void`。带操作数时从操作数（退化、去顶层 cv 后的静态类型）复制初始化异常对象；不带操作数时重新抛出当前处理的异常，没有则调用 `std::terminate`。", "ref": "expr.throw#1"},
+  {"id": "rethrow", "en": "rethrow", "zh": "重新抛出", "def": "不带操作数的 `throw;`：以原有的异常对象重新激活当前正在处理的异常，不创建新对象、不切片；若没有正在处理的异常则调用 `std::terminate`。", "ref": "expr.throw#3"},
+  {"id": "compound-assignment", "en": "compound assignment", "zh": "复合赋值", "def": "`E1 op= E2`，等价于 `E1 = E1 op E2` 但 `E1` 只求值一次。相对于不确定顺序的函数调用是单次求值；结果是指代 `E1` 的左值。", "ref": "expr.assign#6"}
+]

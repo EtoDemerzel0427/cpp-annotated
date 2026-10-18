@@ -9,7 +9,7 @@ tags: 比较, 三路比较, 窄化
 updated: 2026-10-17
 ---
 
-`<=>`（俗称"宇宙飞船运算符"，spaceship operator）是 C++20 由 [[P0515R3]]（Consistent comparison）引入的。它一次比较得出"小于 / 等于 / 大于 / 无序"四种结果之一，结果是一个**比较类别类型**（comparison category type，[[cmp.categories]]）的值。它的主要用途在类类型上：`auto operator<=>(const T&) const = default;` 一行代码生成全部关系比较（[[class.spaceship]]），而 `a < b` 可以被**重写**为 `(a <=> b) < 0`（[[over.match.oper]]）。
+`<=>`（俗称"宇宙飞船运算符"，spaceship operator）是 C++20 由 [[P0515R3]]（Consistent comparison）引入的。它一次比较得出"小于 / 等于 / 大于 / 无序"四种结果之一，结果是一个**比较类别类型**（[[g:comparison-category-type]]，[[cmp.categories]]）的值。它的主要用途在类类型上：`auto operator<=>(const T&) const = default;` 一行代码生成全部关系比较（[[class.spaceship]]），而 `a < b` 可以被**重写**为 `(a <=> b) < 0`（[[over.match.oper]]）。
 
 本节只管**内置**的 `<=>`：操作数是算术、枚举、对象指针时它做什么。与 `<`、`==` 这些"老"运算符相比，内置 `<=>` 刻意**更严格**——它借新运算符之机，拒绝了几种长期被认为是陷阱的混合比较（有符号对无符号、`bool` 对整数、数组对数组）。理解这些"拒绝"背后的理由，是本节的重点。
 
