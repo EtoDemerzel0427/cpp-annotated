@@ -1,0 +1,51 @@
+[
+ {
+  "id": "static-extent",
+  "en": "static extent",
+  "zh": "静态 extent",
+  "def": "`extents`（或 `span` 的 `Extent`）中不等于 `dynamic_extent` 的模板实参：该维长度在编译期确定，不占对象存储。",
+  "ref": "mdspan.extents.overview#3"
+ },
+ {
+  "id": "dynamic-extent",
+  "en": "dynamic extent",
+  "zh": "动态 extent",
+  "def": "取值为 `dynamic_extent`（即 `numeric_limits<size_t>::max()`）的 extent 模板实参：该维长度在运行期给出并存储在对象中。",
+  "ref": "mdspan.extents.overview#3"
+ },
+ {
+  "id": "multidimensional-index-space",
+  "en": "multidimensional index space",
+  "zh": "多维下标空间",
+  "def": "若干整数半开区间 `[Lᵢ, Uᵢ)` 的笛卡尔积。区间个数为 rank；size 为各区间长度之积，rank 为 0 时 size 为 1。`extents` 即表示这样一个空间（下界恒为 0）。",
+  "ref": "mdspan.overview#1"
+ },
+ {
+  "id": "layout-mapping",
+  "en": "layout mapping",
+  "zh": "布局映射",
+  "def": "把多维下标映射为一维偏移的可调用对象，须提供 `extents()`、`required_span_size()` 及 unique/exhaustive/strided 等性质查询；`mdspan` 的 `LayoutPolicy::mapping<E>` 即为此类类型。",
+  "ref": "mdspan.layout.reqmts#1"
+ },
+ {
+  "id": "accessor-policy",
+  "en": "accessor policy",
+  "zh": "访问器策略",
+  "def": "规定如何由数据句柄 `p` 与偏移 `i` 得到元素引用（`access(p, i)`）以及如何移动句柄（`offset(p, i)`）的类型；数据句柄不必是指针，引用也不必是 `T&`。",
+  "ref": "mdspan.accessor.general#1"
+ },
+ {
+  "id": "accessible-range",
+  "en": "accessible range",
+  "zh": "可访问范围",
+  "def": "对给定数据句柄与访问器，若对每个 `i ∈ [0, N)` 访问函数都产生有效引用，则 `[0, N)` 是其可访问范围。`mdspan` 构造函数的前置条件要求 `[0, required_span_size())` 是可访问范围。",
+  "ref": "mdspan.accessor.general#2"
+ },
+ {
+  "id": "borrowed-range",
+  "en": "borrowed range",
+  "zh": "借用 range",
+  "def": "其迭代器的有效性不依赖于 range 对象本身生命周期的 range（如 `span`、`string_view`、左值引用）。ranges 算法对右值 borrowed range 返回真实迭代器而非 `ranges::dangling`。",
+  "ref": "range.range#4"
+ }
+]
