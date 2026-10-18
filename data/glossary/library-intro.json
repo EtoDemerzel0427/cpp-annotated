@@ -1,0 +1,170 @@
+[
+ {
+  "id": "constraints-element",
+  "en": "Constraints (element)",
+  "zh": "Constraints 要素",
+  "def": "库函数规范中的要素：函数参与重载决议的条件。不满足时函数静默地不可行，可被 requires 表达式与类型萃取观测到（SFINAE 友好）。",
+  "ref": "structure.specifications#3.1"
+ },
+ {
+  "id": "mandates-element",
+  "en": "Mandates (element)",
+  "zh": "Mandates 要素",
+  "def": "库函数规范中的要素：不满足即使程序非良构（必须诊断）的条件。通常以函数体内的 static_assert 实现，因此不能被 requires 表达式探测。",
+  "ref": "structure.specifications#3.2"
+ },
+ {
+  "id": "preconditions-element",
+  "en": "Preconditions (element)",
+  "zh": "Preconditions 要素",
+  "def": "库函数规范中的要素：函数在每次调用时假定成立的条件；违反任何前置条件都是未定义行为。实现可以但不必用契约断言检查。",
+  "ref": "structure.specifications#3.4"
+ },
+ {
+  "id": "hardened-precondition",
+  "en": "hardened precondition",
+  "zh": "加固前置条件",
+  "def": "库函数规范中 Hardened preconditions 要素列出的条件。在加固实现中，调用时以终止语义求值相应的契约断言；在非加固实现中违反即未定义行为。",
+  "ref": "structure.specifications#3.5"
+ },
+ {
+  "id": "effects-equivalent-to",
+  "en": "Effects: Equivalent to",
+  "zh": "效果等价于",
+  "def": "库规范中以代码描述函数语义的写法：函数自身的 Constraints/Mandates 先施加，代码中各调用的全部规范要素传递过来，函数自身的 Throws/Postconditions/Complexity 覆盖之。它规定可观察语义，不约束实现方式。",
+  "ref": "structure.specifications#4"
+ },
+ {
+  "id": "cpp17-named-requirement",
+  "en": "Cpp17 named requirement",
+  "zh": "Cpp17 命名要求",
+  "def": "以斜体、Cpp17 前缀命名的一组以表格给出的有效表达式要求（如 Cpp17CopyConstructible）。与等宽字体的库概念不同，它只是文字要求，不满足时通常为未定义行为。",
+  "ref": "structure.requirements#5"
+ },
+ {
+  "id": "exposition-only",
+  "en": "exposition only",
+  "zh": "仅用于说明",
+  "def": "库规范中为描述语义而引入、注释以 exposition only 结尾的实体（如 decay-copy、说明性私有成员）。程序不能命名它们，实现也不必提供。",
+  "ref": "expos.only.entity#1"
+ },
+ {
+  "id": "decay-copy",
+  "en": "decay-copy",
+  "zh": "退化复制",
+  "def": "说明性函数：以拷贝初始化返回实参退化（decay_t）后的副本。与 auto(x) 相近，但带 convertible_to 约束并使用拷贝初始化。",
+  "ref": "expos.only.entity#2"
+ },
+ {
+  "id": "bitmask-type",
+  "en": "bitmask type",
+  "zh": "位掩码类型",
+  "def": "可实现为重载了位运算符的枚举、整数类型或 bitset 的库类型（如 ios_base::fmtflags）。只能依赖其元素与 &、|、^、~ 等运算；set/clear/is set 有精确定义。",
+  "ref": "bitmask.types#1"
+ },
+ {
+  "id": "enumerated-type",
+  "en": "enumerated type",
+  "zh": "枚举类型（库）",
+  "def": "可实现为枚举或枚举同义词的库类型（如 ios_base::seekdir），其枚举元素的值互不相同。",
+  "ref": "enumerated.types#1"
+ },
+ {
+  "id": "ntbs",
+  "en": "null-terminated byte string (NTBS)",
+  "zh": "以零结尾的字节串",
+  "def": "最高地址的有确定内容的元素为零、其他元素均非零的字符序列。字符串字面量是静态 ntbs。",
+  "ref": "byte.strings#1"
+ },
+ {
+  "id": "ntmbs",
+  "en": "null-terminated multibyte string (NTMBS)",
+  "zh": "以零结尾的多字节串",
+  "def": "构成有效多字节字符序列、在初始移位状态开始和结束的 ntbs。",
+  "ref": "multibyte.strings#2"
+ },
+ {
+  "id": "algorithm-function-object",
+  "en": "algorithm function object",
+  "zh": "算法函数对象",
+  "def": "被规定为一组重载函数模板的定制点对象（如 std::ranges::find，俗称 niebloid）。调用它与调用那组函数模板表达式等价；它不被 ADL 找到，并在被非限定查找找到时抑制 ADL。",
+  "ref": "alg.func.obj#1"
+ },
+ {
+  "id": "freestanding-item",
+  "en": "freestanding item",
+  "zh": "独立项",
+  "def": "在独立实现和宿主实现中都必须存在的声明、实体或宏；由 synopsis 中的 freestanding 注释及其继承规则确定。",
+  "ref": "freestanding.item#1"
+ },
+ {
+  "id": "freestanding-deleted-function",
+  "en": "freestanding deleted function",
+  "zh": "独立删除函数",
+  "def": "synopsis 中注释含 freestanding-deleted 的函数声明。在独立实现上它是否为删除函数由实现定义，以防迁移到宿主实现时重载决议静默改变。",
+  "ref": "freestanding.item#3"
+ },
+ {
+  "id": "hosted-library-facilities",
+  "en": "hosted library facilities",
+  "zh": "宿主库设施",
+  "def": "宿主实现必须提供而独立实现不必提供的库设施。独立实现可以提供其实现定义的子集，或为其中的函数提供删除定义。",
+  "ref": "compliance#4"
+ },
+ {
+  "id": "importable-library-header",
+  "en": "importable C++ library header",
+  "zh": "可导入的 C++ 库头文件",
+  "def": "表 24 中的 C++ 库头文件（独立实现为其提供的子集），可以作为头文件单元被 import；C 设施头文件不在其中。",
+  "ref": "headers#4"
+ },
+ {
+  "id": "non-constant-library-call",
+  "en": "non-constant library call",
+  "zh": "非常量库调用",
+  "def": "使所在表达式不成为核心常量表达式的库函数调用。例如引发 FE_INEXACT 以外浮点异常的 C 库函数调用。",
+  "ref": "library.c#3"
+ },
+ {
+  "id": "swappable-with",
+  "en": "swappable with",
+  "zh": "可与……交换",
+  "def": "t 可与 u 交换：在同时考虑 <utility> 中的 swap 模板与 ADL 结果的上下文中，swap(t, u) 与 swap(u, t) 都有效且确实交换两者的值。",
+  "ref": "swappable.requirements#2"
+ },
+ {
+  "id": "program-defined-specialization",
+  "en": "program-defined specialization",
+  "zh": "程序定义的特化",
+  "def": "不属于标准库、也不由实现定义的显式特化或偏特化。其实例化也是程序定义的类型。",
+  "ref": "namespace.std#2"
+ },
+ {
+  "id": "addressable-function",
+  "en": "addressable function",
+  "zh": "可寻址函数",
+  "def": "被明确指定为可以取地址的标准库函数（如 iostream 操纵符 std::endl、std::hex，<meta> 中的函数）。对其他标准库函数形成指针、引用或成员指针，行为未指明（可能非良构）。",
+  "ref": "namespace.std#6"
+ },
+ {
+  "id": "zombie-name",
+  "en": "zombie name",
+  "zh": "僵尸名字",
+  "def": "已从标准中移除的设施留下的名字（auto_ptr、bind1st、<codecvt>……），仍保留给先前的标准化，程序不得另作他用。",
+  "ref": "zombie.names#1"
+ },
+ {
+  "id": "allocator-completeness-requirements",
+  "en": "allocator completeness requirements",
+  "zh": "分配器完整性要求",
+  "def": "无论 T 是否完整，分配器类 X 及 allocator_traits<X> 除 value_type 外的成员类型都是完整类型。它是 vector/list/forward_list 允许以不完整类型实例化的前提。",
+  "ref": "allocator.requirements.completeness#1"
+ },
+ {
+  "id": "equivalently-valued",
+  "en": "equivalently-valued pointer values",
+  "zh": "等值指针",
+  "def": "两个（可能不同类型的）分配器指针值，经仅在 pointer/const_pointer/void_pointer/const_void_pointer 间的 static_cast 序列转换为 const_pointer 后比较相等。",
+  "ref": "allocator.requirements#93"
+ }
+]
