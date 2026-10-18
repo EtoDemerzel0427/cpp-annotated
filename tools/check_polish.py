@@ -29,6 +29,7 @@ def extract(text):
                 fm[k.strip()] = v.strip()
     return {
         "code blocks": Counter(code),
+        "inline code": Counter(re.findall(r"`[^`\n]+`", prose)),
         "xrefs": Counter(re.findall(r"\[\[([^\[\]|\\]+)", prose)),
         "badges": Counter(re.findall(r"\{\{[^{}]+\}\}", prose)),
         "¶ markers": Counter(re.findall(r"¶\d+(?:\.\d+)*", prose)),
@@ -68,7 +69,7 @@ def main():
                 continue
             if lost:
                 problems.append(f"  {key} removed: " + ", ".join(f"{k}×{v}" if v > 1 else str(k) for k, v in lost.items()))
-            if added and key != "xrefs":
+            if added and key not in ("xrefs", "inline code"):
                 problems.append(f"  {key} added: " + ", ".join(str(k) for k in added))
         print(f"{path}: " + ("OK" if not problems else "CONTENT CHANGED"))
         print("\n".join(problems))
