@@ -12,6 +12,7 @@ import base64
 import datetime as dt
 import html
 import json
+import os
 import re
 import shutil
 import sys
@@ -930,6 +931,10 @@ def watch_loop():
     while True:
         time.sleep(1.5)
         cur = snapshot()
+        me = str(ROOT / "build.py")
+        if cur.get(me) != last.get(me):
+            print("build.py changed, restarting")
+            os.execv(sys.executable, [sys.executable] + sys.argv)  # pick up the new generator code
         if cur != last:
             last = cur
             WARNINGS.clear()
