@@ -1,0 +1,12 @@
+[
+  {"id": "exception-object", "en": "exception object", "zh": "异常对象", "def": "抛出异常时初始化的、具有动态存储期的对象；其类型决定哪些 handler 能捕获它。存储方式未指定（不调用全局 `operator new`），在最后一个潜在销毁点被销毁。", "ref": "except.throw#3"},
+  {"id": "uncaught-exception", "en": "uncaught exception", "zh": "未捕获的异常", "def": "从异常对象初始化完成，到该异常的某个 handler 激活完成之间的异常；被重抛后再次处于未捕获状态。`std::uncaught_exceptions()` 返回其个数。", "ref": "except.throw#6"},
+  {"id": "stack-unwinding", "en": "stack unwinding", "zh": "栈回溯", "def": "控制从抛出点传到 handler 的过程中，按构造完成的逆序销毁自进入 try 块以来已构造的自动对象的过程。", "ref": "except.ctor#1"},
+  {"id": "known-to-be-initialized", "en": "known to be initialized", "zh": "已知已初始化（的子对象）", "def": "不是匿名联合体成员、且其初始化由 [[class.base.init]]、[[dcl.init.aggr]] 等规则安排的子对象；对象初始化因异常终止时，这类已完成初始化的子对象会被析构。", "ref": "except.ctor#3"},
+  {"id": "active-handler", "en": "active handler", "zh": "活动的 handler", "def": "catch 子句的参数初始化完成后、catch 子句退出前的 handler；因抛出而进入 `std::terminate` 时有一个隐式 handler 处于活动状态。", "ref": "except.handle#9"},
+  {"id": "currently-handled-exception", "en": "currently handled exception", "zh": "当前处理的异常", "def": "拥有最近激活且仍然活动的 handler 的异常；`throw;` 重抛它，`std::current_exception()` 返回它。", "ref": "except.handle#10"},
+  {"id": "exception-specification", "en": "exception specification", "zh": "异常说明", "def": "表示函数能否以异常退出的谓词，由 `noexcept`/`noexcept(常量表达式)` 显式给出或按规则隐式确定；C++17 起是函数类型的一部分。", "ref": "except.spec#1"},
+  {"id": "potentially-throwing-exception-specification", "en": "potentially-throwing exception specification", "zh": "潜在抛出的异常说明", "def": "异常说明谓词为假，即函数可能以异常退出。没有 *noexcept-specifier* 的普通函数默认如此。", "ref": "except.spec#1"},
+  {"id": "non-throwing-exception-specification", "en": "non-throwing exception specification", "zh": "非抛出的异常说明", "def": "异常说明谓词为真。若 handler 搜索离开这样的函数的函数体，调用 `std::terminate`。", "ref": "except.spec#1"},
+  {"id": "potentially-throwing-expression", "en": "potentially-throwing (expression)", "zh": "潜在抛出的（表达式）", "def": "调用或隐式调用潜在抛出函数、*throw-expression*、到引用的需运行时检查的 `dynamic_cast`、对多态指针解引用的 `typeid`，或含有这类求值子表达式的表达式。`noexcept` 运算符据此求值。", "ref": "except.spec#6"}
+]

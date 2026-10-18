@@ -125,6 +125,7 @@ struct D : B {
 这是一个纯**静态**、**保守**的判断：它只看类型上的异常说明，不看函数实际会不会抛。`noexcept` 运算符（[[expr.unary.noexcept]]）的结果就是"操作数的完整表达式**不是**潜在抛出的"。
 
 ```cpp title="potentially-throwing.cpp" ok
+#include <new>
 #include <typeinfo>
 
 struct Poly { virtual ~Poly(); };
@@ -133,6 +134,7 @@ struct Thr { ~Thr() noexcept(false); };
 Thr make_thr() noexcept;
 
 void may();
+int may_int();
 void never() noexcept;
 int x;
 Poly* pp;
@@ -148,13 +150,13 @@ static_assert(!noexcept(typeid(*pp)));              // 6.5
 static_assert( noexcept(typeid(pp)));               // 不是对多态 glvalue 解引用
 static_assert(!noexcept(make_thr()));               // 6.2: 临时量的析构函数潜在抛出
 static_assert( noexcept(x + 1));
-static_assert( noexcept(sizeof(may())));            // sizeof 的操作数是未求值操作数（6.6）
+static_assert( noexcept(sizeof(may_int())));        // sizeof 的操作数是未求值操作数（6.6）
 ```
 
 两个容易忽略的点：
 
 - **析构函数也算**：`make_thr()` 本身是 `noexcept` 的，但 `noexcept` 运算符对 prvalue 操作数施加临时量实质化（[[expr.unary.noexcept#1]]），由此产生的临时量在完整表达式结束时被析构，而 `Thr` 的析构函数潜在抛出。
-- **未求值操作数不算**（¶6.6 的"不是未求值操作数"）：`noexcept(sizeof(may()))` 是 `true`。
+- **未求值操作数不算**（¶6.6 的"不是未求值操作数"）：`noexcept(sizeof(may_int()))` 是 `true`。
 
 （上面的代码在 Clang 下会对 `new`、`throw` 等出现在未求值操作数中给出"副作用无效"的警告，这是预期的。）
 
