@@ -1,0 +1,121 @@
+[
+ {
+  "id": "range-concept",
+  "en": "range",
+  "zh": "范围",
+  "def": "建模 `std::ranges::range` 概念的类型：其左值可经 `ranges::begin` 得到迭代器、经 `ranges::end` 得到与之构成 `sentinel_for` 的哨位，且二者摊还 O(1)、不修改范围；迭代器为前向时 `begin` 还须保持相等性。",
+  "ref": "range.range#2"
+ },
+ {
+  "id": "reified-object",
+  "en": "reified object",
+  "zh": "物化对象",
+  "def": "[range.access] 中子表达式 E 所对应的对象：E 为 glvalue 时就是它所指的对象，否则是对 E 施加临时量实质化转换的结果。各范围访问 CPO 一律在指代它的左值上调用 `begin()`/`size()` 等。",
+  "ref": "range.access.general#2"
+ },
+ {
+  "id": "range-view",
+  "en": "view",
+  "zh": "视图",
+  "def": "建模 `std::ranges::view` 的范围：可移动、经 `enable_view` 声明，且移动构造 O(1)、N 份副本/移动源的析构总代价 O(N+M)、可复制时复制 O(1)。适配器按值持有的底层总是视图。",
+  "ref": "range.view#2"
+ },
+ {
+  "id": "viewable-range",
+  "en": "viewable range",
+  "zh": "可视图化范围",
+  "def": "能被 `views::all` 安全转换为视图的范围：视图本身（可由实参构造），或非视图的左值，或可移动且不是 `initializer_list` 的非视图右值。所有范围适配器的第一个实参都要求它。",
+  "ref": "range.refinements#6"
+ },
+ {
+  "id": "common-range",
+  "en": "common range",
+  "zh": "公共范围",
+  "def": "`ranges::begin` 与 `ranges::end` 返回同一类型的范围（`iterator_t<R>` 与 `sentinel_t<R>` 相同）；C++17 风格的迭代器对接口要求它，`views::common` 可以把视图转成它。",
+  "ref": "range.refinements#4"
+ },
+ {
+  "id": "sized-range",
+  "en": "sized range",
+  "zh": "有大小范围",
+  "def": "可用 `ranges::size` 在摊还 O(1) 内求出元素个数、且结果等于 `ranges::distance(begin, end)` 的范围；类型可通过特化 `disable_sized_range` 退出。",
+  "ref": "range.sized#2"
+ },
+ {
+  "id": "constant-range",
+  "en": "constant range",
+  "zh": "常量范围",
+  "def": "元素不能通过其迭代器修改的输入范围（迭代器是常量迭代器）。C++23 引入，`views::as_const` 可以把任意输入范围转换成它。",
+  "ref": "range.refinements#7"
+ },
+ {
+  "id": "simple-view",
+  "en": "simple-view",
+  "zh": "简单视图",
+  "def": "仅用于说明的概念：视图 V 与 const V 的迭代器类型相同、哨位类型也相同。适配器用 `begin() requires (!simple-view<V>)` 与 `begin() const` 搭配，在底层为简单视图时只保留一套 const 实现。",
+  "ref": "range.utility.helpers#1"
+ },
+ {
+  "id": "range-adaptor",
+  "en": "range adaptor",
+  "zh": "范围适配器",
+  "def": "把一个范围变换为具有自定义行为的视图的工具（如 `views::filter`、`views::transform`），声明在 `std::ranges::views` 中，可用 `|` 串联成惰性求值的管道。",
+  "ref": "range.adaptors.general#1"
+ },
+ {
+  "id": "range-adaptor-object",
+  "en": "range adaptor object",
+  "zh": "范围适配器对象",
+  "def": "第一个实参接受 viewable_range 并返回视图的定制点对象；只有一个实参时它本身就是闭包对象，多实参时以除范围外的实参调用会产生按值绑定这些实参的闭包对象（部分应用）。",
+  "ref": "range.adaptor.object#6"
+ },
+ {
+  "id": "range-adaptor-closure-object",
+  "en": "range adaptor closure object",
+  "zh": "范围适配器闭包对象",
+  "def": "接受一个范围实参的一元函数对象 C，满足 `C(R)` 与 `R | C` 等价；两个闭包对象 `C | D` 组合成调用模式为 `d(c(arg))` 的新闭包。C++23 起用户类型可通过 CRTP 基类 `range_adaptor_closure` 成为闭包对象。",
+  "ref": "range.adaptor.object#1"
+ },
+ {
+  "id": "range-factory",
+  "en": "range factory",
+  "zh": "范围工厂",
+  "def": "不接受底层范围、直接创建视图的工具，如 `views::empty`、`views::single`、`views::iota`、`views::repeat`、`views::istream`；它们是管道的源头。",
+  "ref": "range.factories.general#1"
+ },
+ {
+  "id": "movable-box",
+  "en": "movable-box",
+  "zh": "可移动盒",
+  "def": "仅用于说明的类模板，行为同 `optional<T>`，但默认构造会构造一个值，且在 T 不可赋值时用\"析构后就地重建\"模拟赋值；适配器用它存放 lambda 等不可赋值的函数对象，从而保持视图可移动。C++23 前名为 copyable-box。",
+  "ref": "range.move.wrap#1"
+ },
+ {
+  "id": "non-propagating-cache",
+  "en": "non-propagating-cache",
+  "zh": "非传播缓存",
+  "def": "仅用于说明的类模板，行为同 `optional<T>`，但复制/移动时不传递所含值（目标与移动源都变为空）；视图用它暂存迭代器或 prvalue 内层范围，缓存只属于当前视图对象。",
+  "ref": "range.nonprop.cache#1"
+ },
+ {
+  "id": "begin-caching",
+  "en": "begin() caching",
+  "zh": "begin 缓存",
+  "def": "为满足 range 概念\"begin 摊还 O(1)\"的要求，`filter_view`、`drop_view`、`drop_while_view`、`reverse_view`、`split_view`、`chunk_by_view` 等在首次 `begin()` 时计算并缓存结果；后果是它们（通常）没有 const `begin()`，且缓存后修改底层会得到陈旧结果。",
+  "ref": "range.filter.view#5"
+ },
+ {
+  "id": "ranges-dangling",
+  "en": "ranges::dangling",
+  "zh": "悬垂占位类型",
+  "def": "可从任意实参构造、不支持任何操作的空类；返回迭代器或子范围的 ranges 算法在实参为非借用的右值范围时改为返回它，使悬垂迭代器的使用成为编译错误。",
+  "ref": "range.dangling#1"
+ },
+ {
+  "id": "range-generator",
+  "en": "generator",
+  "zh": "范围生成器",
+  "def": "`std::generator<Ref, Val, Alloc>`：协程返回类型，同时是建模 view 与 input_range 的只移动视图；每次 `co_yield` 产出一个元素，`co_yield ranges::elements_of(r)` 逐个产出 r 的元素（嵌套生成器以 O(1) 每步递归）。",
+  "ref": "coro.generator.class#3"
+ }
+]
