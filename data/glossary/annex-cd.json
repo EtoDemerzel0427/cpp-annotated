@@ -1,0 +1,30 @@
+[
+ {
+  "id": "deprecated",
+  "en": "deprecated",
+  "zh": "已弃用",
+  "def": "Annex D 对一类特性的定性：在当前版本中仍然是规范性的，但已被认定为将来版本中删除的候选。实现可以给相应的库名字加上 `[[deprecated]]` 属性。见 [[depr.general]]。",
+  "ref": "depr.general#2"
+ },
+ {
+  "id": "trigraph",
+  "en": "trigraph sequence",
+  "zh": "三字符组",
+  "def": "以 `??` 开头的三字符序列（如 `??=` 表示 `#`、`??/` 表示 `\\`），C++14 及以前在翻译阶段 1 被替换为单个字符；C++17 起不再是必须支持的特性。见 [[diff.cpp14]]。",
+  "ref": "diff.cpp14.lex#1"
+ },
+ {
+  "id": "tentative-definition",
+  "en": "tentative definition",
+  "zh": "暂定定义",
+  "def": "C 语言的概念：文件作用域上无初始化器、无 `extern`（或带 `static`）的对象声明；同一翻译单元中可以出现多次，最终合并为一个定义。C++ 没有这个概念，这样的每个声明都是定义。见 [[diff.iso]]。",
+  "ref": "diff.basic#1"
+ },
+ {
+  "id": "dynamic-exception-specification",
+  "en": "dynamic exception specification",
+  "zh": "动态异常说明",
+  "def": "C++98 的 `throw(T1, T2, ...)` 形式的异常说明，列出函数允许抛出的异常类型，违反时调用 `std::unexpected`。C++11 弃用，C++17 删除带类型的形式，C++20 删除 `throw()`；替代品是 `noexcept`。见 [[diff.cpp14]]、[[diff.cpp17]]。",
+  "ref": "diff.cpp14.except#1"
+ }
+]
