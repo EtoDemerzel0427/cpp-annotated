@@ -8,7 +8,7 @@ tags: 声明, 名字查找, 继承, 构造函数, 访问控制
 updated: 2026-10-17
 ---
 
-**using 声明**（using-declaration）`using N::name;` 做一件精确的事：**在当前作用域中让名字 `name` 指代"在 `N` 中查找 `name` 得到的那组声明"**。它与 using **指令**（`using namespace N;`，[[namespace.udir]]）的区别是根本性的：
+[[g:using-declaration|using 声明]]（using-declaration）`using N::name;` 做一件精确的事：**在当前作用域中让名字 `name` 指代"在 `N` 中查找 `name` 得到的那组声明"**。它与 using **指令**（`using namespace N;`，[[namespace.udir]]）的区别是根本性的：
 
 | | using 声明 `using N::f;` | using 指令 `using namespace N;` |
 |---|---|---|

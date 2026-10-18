@@ -31,7 +31,7 @@ namespace N3 { export int n; }   // N3 也导出（因为含导出声明）
 
 为什么命名空间不附属于模块？因为不同模块完全可能往同一个命名空间（比如 `std` 或公司的顶层命名空间）里添加成员；如果命名空间属于第一个声明它的模块，第二个模块就无法再打开它。
 
-¶3：存在一个**全局命名空间**（global namespace），它**没有声明**（[[basic.scope.namespace]]），属于全局作用域；它**不是**无名命名空间。注 2：既然没有声明，它不能被名字查找找到——`::x` 中的 `::` 是语法，不是查找。所以 [[namespace.alias#2]] 和 [[namespace.udir#1]] 都要求 *splice-specifier* 不得指代全局命名空间（反射可以得到 `^^::`，但不能用它来声明别名或 using 指令）。
+¶3：存在一个[[g:global-namespace|全局命名空间]]（global namespace），它**没有声明**（[[basic.scope.namespace]]），属于全局作用域；它**不是**无名命名空间。注 2：既然没有声明，它不能被名字查找找到——`::x` 中的 `::` 是语法，不是查找。所以 [[namespace.alias#2]] 和 [[namespace.udir#1]] 都要求 *splice-specifier* 不得指代全局命名空间（反射可以得到 `^^::`，但不能用它来声明别名或 using 指令）。
 
 ## 命名空间定义（[namespace.def.general]）
 
@@ -108,7 +108,7 @@ int main() {
 
 ## 内联命名空间（¶4、¶6–¶7）
 
-¶4：命名空间定义前带 `inline` 时，该命名空间被声明为**内联命名空间**（inline namespace）。扩展时也可以写 `inline`，但**只有当最初声明这个命名空间名的定义写了 `inline` 时**才可以。
+¶4：命名空间定义前带 `inline` 时，该命名空间被声明为[[g:inline-namespace|内联命名空间]]（inline namespace）。扩展时也可以写 `inline`，但**只有当最初声明这个命名空间名的定义写了 `inline` 时**才可以。
 
 ```cpp title="inline-reopen.cpp" error
 namespace N {}
@@ -143,7 +143,7 @@ void t() {
 }
 ```
 
-¶7：这些性质是**传递**的：N 含内联命名空间 M，M 又含内联命名空间 O，那么 O 的成员可以如同 M 或 N 的成员一样使用。N 的**内联命名空间集合**（inline namespace set）是 N 中所有内联命名空间的传递闭包。
+¶7：这些性质是**传递**的：N 含内联命名空间 M，M 又含内联命名空间 O，那么 O 的成员可以如同 M 或 N 的成员一样使用。N 的[[g:inline-namespace-set|内联命名空间集合]]（inline namespace set）是 N 中所有内联命名空间的传递闭包。
 
 ### 为什么需要内联命名空间：库版本化
 
@@ -274,7 +274,7 @@ namespace-alias-definition:
 ```
 
 - ¶2：*splice-specifier*（C++26 反射）必须指代一个**不是全局命名空间**的命名空间；
-- ¶3：标识符成为一个**命名空间别名**（namespace alias）；
+- ¶3：标识符成为一个[[g:namespace-alias|命名空间别名]]（namespace alias）；
 - ¶4：别名的**底层实体**（underlying entity，[[basic.pre]]）是所指的命名空间。注 1：查找 *namespace-name* 时只考虑命名空间名（[[basic.lookup.udir]]）。
 
 ```cpp title="namespace-alias.cpp" ok

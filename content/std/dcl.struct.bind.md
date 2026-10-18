@@ -12,7 +12,7 @@ updated: 2026-10-17
 auto [x, y] = point;
 ```
 
-这一行看起来像"声明两个变量 `x` 和 `y`，分别用 `point.x`、`point.y` 初始化"。标准说的完全不是这样：它**只声明了一个变量**——一个没有名字的变量 *e*，用 `point` 初始化；`x` 和 `y` 则是**结构化绑定**（structured binding），它们是"指向 *e* 的某个部分"的**名字**，本身既不是变量，也不是引用。
+这一行看起来像"声明两个变量 `x` 和 `y`，分别用 `point.x`、`point.y` 初始化"。标准说的完全不是这样：它**只声明了一个变量**——一个没有名字的变量 *e*，用 `point` 初始化；`x` 和 `y` 则是[[g:structured-binding|结构化绑定]]（structured binding），它们是"指向 *e* 的某个部分"的**名字**，本身既不是变量，也不是引用。
 
 理解这个"一个隐藏变量 + 若干别名"的模型，几乎所有关于结构化绑定的"怪现象"都能直接推出来：
 
@@ -136,7 +136,7 @@ void f() {
 
 ## 结构化绑定的个数（¶2–¶3）
 
-¶2 定义 E 的**结构化绑定大小**（structured binding size）：E 需要引入的绑定个数，由后面三种协议分别给出（数组元素数 / `tuple_size` / 数据成员数）。
+¶2 定义 E 的[[g:structured-binding-size|结构化绑定大小]]（structured binding size）：E 需要引入的绑定个数，由后面三种协议分别给出（数组元素数 / `tuple_size` / 数据成员数）。
 
 - 没有绑定包时，方括号里的名字个数必须**恰好等于**结构化绑定大小；
 - 有绑定包时，非包名字的个数**不能超过**它，剩下的全部归入包（可能为零个）。
@@ -160,7 +160,7 @@ int main() { now_i_know_my<int>(); }
 
 ### 结构化绑定包 {{c++26}}
 
-¶1 第二句：带省略号的 *sb-identifier* 引入**结构化绑定包**（structured binding pack，[[temp.variadic#4]]）。包的元素就是一个个结构化绑定，可以像函数参数包一样展开、用 `sizeof...` 计数、用于折叠表达式：
+¶1 第二句：带省略号的 *sb-identifier* 引入[[g:structured-binding-pack|结构化绑定包]]（structured binding pack，[[temp.variadic#4]]）。包的元素就是一个个结构化绑定，可以像函数参数包一样展开、用 `sizeof...` 计数、用于折叠表达式：
 
 ```cpp run title="sb-pack.cpp" ok
 #include <tuple>
@@ -247,7 +247,7 @@ void f() {
 
 ## 协议一：数组（¶6）
 
-¶6：E 不能是**未知边界数组**；E 是其他数组类型（元素类型 T）时，结构化绑定大小就是元素个数，每个 SB*ᵢ* 是一个**左值**的名字，指向数组的第 *i* 个元素，类型是 T；**被引用类型**（referenced type）也是 T。注 3：T 的顶层 cv 限定就是 *cv*。
+¶6：E 不能是**未知边界数组**；E 是其他数组类型（元素类型 T）时，结构化绑定大小就是元素个数，每个 SB*ᵢ* 是一个**左值**的名字，指向数组的第 *i* 个元素，类型是 T；[[g:referenced-type|被引用类型]]（referenced type）也是 T。注 3：T 的顶层 cv 限定就是 *cv*。
 
 ```cpp title="sb-array.cpp" ok
 #include <cstddef>

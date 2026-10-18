@@ -11,8 +11,8 @@ updated: 2026-10-17
 
 枚举（enumeration）是 C 继承来的最古老的用户定义类型之一，也是 C++ 中被修补次数最多的特性之一。C 的 `enum` 有三个毛病：枚举量**泄漏**到外层作用域、**隐式转换**为整数、**底层类型**和大小由实现决定（于是无法前置声明）。C++11 用两条正交的机制解决：
 
-- **有作用域枚举**（scoped enumeration，`enum class`/`enum struct`）：枚举量留在枚举自己的作用域里，不隐式转换为整数；
-- **固定底层类型**（fixed underlying type，`enum E : T`）：底层类型由程序员指定，枚举从此可以**不透明声明**（前置声明）。
+- [[g:scoped-enumeration|有作用域枚举]]（scoped enumeration，`enum class`/`enum struct`）：枚举量留在枚举自己的作用域里，不隐式转换为整数；
+- [[g:fixed-underlying-type|固定底层类型]]（fixed underlying type，`enum E : T`）：底层类型由程序员指定，枚举从此可以**不透明声明**（前置声明）。
 
 本页覆盖 [dcl.enum]（枚举声明）和 [enum.udecl]（`using enum` 声明）。读之前最好知道：枚举是**复合类型**（[[basic.compound]]），枚举量的作用域见 [[basic.scope.enum]]，整型提升见 [[conv.prom]]。
 
@@ -114,7 +114,7 @@ int main() { return static_cast<int>(X::In::b) - 1; }
 
 ## 底层类型与枚举量的类型（¶5–¶7）
 
-¶5：每个枚举都是与其他一切类型不同的类型，并且有一个**底层类型**（underlying type）。底层类型被称为**固定的**，如果：
+¶5：每个枚举都是与其他一切类型不同的类型，并且有一个[[g:underlying-type|底层类型]]（underlying type）。底层类型被称为**固定的**，如果：
 
 - 用 *enum-base* 显式指定了；或者
 - 是有作用域枚举（未指定时为 `int`）。
@@ -206,7 +206,7 @@ constexpr S s = static_cast<S>(255);      // OK
 
 ¶9：枚举与其底层类型有**相同的大小、值表示和对齐要求**；而且每个枚举值与底层类型对应值的表示相同。所以 `memcpy` 一个 `enum E : int` 到 `int` 得到的就是那个整数值。
 
-¶10：两个枚举是**布局兼容枚举**（layout-compatible enumerations），如果它们有相同的底层类型和相同的值集合。这被 [[basic.types.general]] 中"布局兼容类型"的定义引用，进而影响公共初始序列（common initial sequence）规则。
+¶10：两个枚举是[[g:layout-compatible-enumerations|布局兼容枚举]]（layout-compatible enumerations），如果它们有相同的底层类型和相同的值集合。这被 [[basic.types.general]] 中"布局兼容类型"的定义引用，进而影响公共初始序列（common initial sequence）规则。
 
 ## 向整数的转换（¶11）
 
