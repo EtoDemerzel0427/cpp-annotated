@@ -1,0 +1,177 @@
+[
+ {
+  "id": "preprocessing-translation-unit",
+  "en": "preprocessing translation unit",
+  "zh": "预处理翻译单元",
+  "def": "一个源文件连同经 `#include` 递归包含的全部头文件和源文件，减去被条件包含指令跳过的行。见 [[lex.separate]]。",
+  "ref": "lex.separate#1"
+ },
+ {
+  "id": "logical-source-line",
+  "en": "logical source line",
+  "zh": "逻辑源行",
+  "def": "阶段 2 删除“反斜杠 + 可选空白 + 换行”之后，由若干物理源行拼接而成的行。预处理指令以逻辑源行为单位。",
+  "ref": "lex.phases#1"
+ },
+ {
+  "id": "translation-character-set",
+  "en": "translation character set",
+  "zh": "翻译字符集",
+  "def": "由每个已分配码位的 Unicode 抽象字符、以及每个未分配的 Unicode 标量值各对应的一个字符组成；即与 Unicode 标量值一一对应。阶段 1 之后源码中的字符都是它的元素。",
+  "ref": "lex.charset#1"
+ },
+ {
+  "id": "basic-character-set",
+  "en": "basic character set",
+  "zh": "基本字符集",
+  "def": "翻译字符集的 99 个字符的子集：ASCII 的 95 个可打印字符加水平制表、垂直制表、换页和换行。C++26 起包含 `$`、`@`、`` ` ``。",
+  "ref": "lex.charset#2"
+ },
+ {
+  "id": "basic-literal-character-set",
+  "en": "basic literal character set",
+  "zh": "基本字面量字符集",
+  "def": "基本字符集加上 NUL、BEL、BS、CR 四个控制字符。每种字面量编码都必须把其中每个字符编码为单个非负 code unit。",
+  "ref": "lex.charset#3"
+ },
+ {
+  "id": "code-unit",
+  "en": "code unit",
+  "zh": "code unit（码元）",
+  "def": "字符类型的一个整数值。字面量中的字符按其字面量编码被编码为一个或多个 code unit。",
+  "ref": "lex.charset#4"
+ },
+ {
+  "id": "literal-encoding",
+  "en": "literal encoding",
+  "zh": "字面量编码",
+  "def": "由编码前缀决定、把字符字面量或字符串字面量中的字符编码为 code unit 序列的编码：普通字面量编码（无前缀）、宽字面量编码（`L`）、UTF-8/16/32（`u8`/`u`/`U`）。前两者由实现定义。",
+  "ref": "lex.charset#4"
+ },
+ {
+  "id": "universal-character-name",
+  "en": "universal-character-name",
+  "zh": "通用字符名（UCN）",
+  "def": "用基本字符命名任意翻译字符集元素的写法：`\\uXXXX`、`\\UXXXXXXXX`、`\\u{...}`（C++23）、`\\N{名字}`（C++23）。字面量之外不得指代基本字符或控制字符。",
+  "ref": "lex.universal.char#1"
+ },
+ {
+  "id": "preprocessing-token",
+  "en": "preprocessing token",
+  "zh": "预处理记号",
+  "def": "阶段 3–5 中的最小词法单元：头文件名、import/module/export 占位记号、标识符、预处理数字、字符/字符串字面量、预处理运算符或标点、以及其他单个非空白字符。阶段 6 转换为记号。",
+  "ref": "lex.pptoken#1"
+ },
+ {
+  "id": "maximal-munch",
+  "en": "maximal munch",
+  "zh": "最长匹配",
+  "def": "非正式术语：下一个预处理记号取能构成预处理记号的最长字符序列，即使这会导致后续分析失败（原始字符串、`<::`、`[::` 等情形除外）。",
+  "ref": "lex.pptoken#5"
+ },
+ {
+  "id": "pp-number",
+  "en": "preprocessing number",
+  "zh": "预处理数字",
+  "def": "以数字或“. 数字”开头、可继续包含标识符字符、`.`、`'`、以及 `e`/`E`/`p`/`P` 后接正负号的预处理记号。没有类型和值，直到阶段 6 转换为整数或浮点字面量。",
+  "ref": "lex.ppnumber#1"
+ },
+ {
+  "id": "alternative-token",
+  "en": "alternative token",
+  "zh": "替代记号",
+  "def": "某些运算符和标点的另一种拼写，如 `<%`（`{`）、`<:`（`[`）、`%:`（`#`）、`and`（`&&`）、`compl`（`~`）。除字符串化结果外与主记号完全相同。",
+  "ref": "lex.digraph#2"
+ },
+ {
+  "id": "identifier-with-special-meaning",
+  "en": "identifier with special meaning",
+  "zh": "特殊含义标识符",
+  "def": "在特定上下文中具有特殊含义、其他地方是普通标识符的 `final`、`override`、`import`、`module`、`pre`、`post`。有歧义时默认按普通标识符解释；不能作为宏名。",
+  "ref": "lex.name#2"
+ },
+ {
+  "id": "reserved-identifier",
+  "en": "reserved identifier",
+  "zh": "保留标识符",
+  "def": "作为记号出现时保留给实现的标识符：含 `__` 或以 `_` 加大写字母开头者处处保留；以 `_` 开头者在全局命名空间中保留。使用它们为 IFNDR。",
+  "ref": "lex.name#4"
+ },
+ {
+  "id": "keyword",
+  "en": "keyword",
+  "zh": "关键字",
+  "def": "表 5 中在阶段 6、7 无条件被当作关键字的标识符（属性记号中除外），以及无拼写的 import/module/export 占位关键字。",
+  "ref": "lex.key#1"
+ },
+ {
+  "id": "multicharacter-literal",
+  "en": "multicharacter literal",
+  "zh": "多字符字面量",
+  "def": "含多于一个 c-char 的字符字面量，如 `'ab'`。不得有编码前缀，有条件支持，类型为 `int`，值由实现定义。",
+  "ref": "lex.ccon#1"
+ },
+ {
+  "id": "numeric-escape-sequence",
+  "en": "numeric escape sequence",
+  "zh": "数值转义序列",
+  "def": "八进制（`\\101`、`\\o{101}`）或十六进制（`\\x41`、`\\x{41}`）转义序列；它直接给出一个 code unit 的值，而不是一个要编码的字符。",
+  "ref": "lex.ccon#3"
+ },
+ {
+  "id": "conditional-escape-sequence",
+  "en": "conditional escape sequence",
+  "zh": "条件转义序列",
+  "def": "反斜杠后跟一个没有被赋予含义的基本字符（如 `\\q`、`\\e`）。有条件支持，值由实现定义。",
+  "ref": "lex.ccon#3"
+ },
+ {
+  "id": "raw-string-literal",
+  "en": "raw string literal",
+  "zh": "原始字符串字面量",
+  "def": "前缀中带 `R` 的字符串字面量，如 `R\"d(...)d\"`：其中没有转义序列和 UCN，行拼接被撤销；分隔符至多 16 个字符。",
+  "ref": "lex.string#2"
+ },
+ {
+  "id": "narrow-string-literal",
+  "en": "narrow string literal",
+  "zh": "窄字符串字面量",
+  "def": "普通字符串字面量与 UTF-8 字符串字面量的合称。",
+  "ref": "lex.string#6"
+ },
+ {
+  "id": "string-literal-object",
+  "en": "string literal object",
+  "zh": "字符串字面量对象",
+  "def": "对字符串字面量求值所得的具有静态存储期的对象；它是可能不唯一的对象，多次求值是否得到同一对象未指定，修改它是 UB。",
+  "ref": "lex.string#9"
+ },
+ {
+  "id": "unevaluated-string",
+  "en": "unevaluated string",
+  "zh": "不求值字符串",
+  "def": "出现在 `static_assert` 消息、`[[deprecated]]`、`extern \"C\"` 等处、从不求值的字符串字面量（C++26）。不得有编码前缀或数值/条件转义，不经过字面量编码。",
+  "ref": "lex.string.uneval#1"
+ },
+ {
+  "id": "significand",
+  "en": "significand",
+  "zh": "有效数字",
+  "def": "浮点字面量中指数之前的数字部分（含小数点），按十进制或十六进制解释为实数 s；字面量的缩放值为 s×10^e 或 s×2^e。",
+  "ref": "lex.fcon#2"
+ },
+ {
+  "id": "user-defined-literal",
+  "en": "user-defined literal",
+  "zh": "用户定义字面量",
+  "def": "带 ud-suffix 的整数、浮点、字符或字符串字面量，如 `12_km`、`\"abc\"s`；被改写为对字面量运算符（模板）`operator\"\"X` 的调用。",
+  "ref": "lex.ext#2"
+ },
+ {
+  "id": "ud-suffix",
+  "en": "ud-suffix",
+  "zh": "用户定义字面量后缀",
+  "def": "用户定义字面量末尾的标识符。不以 `_` 开头的后缀保留给标准，含 `__` 的保留给实现。",
+  "ref": "lex.ext#1"
+ }
+]
