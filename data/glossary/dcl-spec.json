@@ -1,0 +1,18 @@
+[
+  {"id": "structured-binding-declaration", "en": "structured binding declaration", "zh": "结构化绑定声明", "def": "带有 *structured-binding-declaration* 的 *simple-declaration* 或条件，如 `auto [a, b] = e;`。说明符只能是 `constexpr`、`constinit`、`static`、`thread_local`、`auto` 与 cv 限定符，至多含一个包。", "ref": "dcl.pre#7"},
+  {"id": "typedef-declaration", "en": "typedef declaration", "zh": "typedef 声明", "def": "说明符序列中含有 `typedef` 的声明；其中每个 *declarator-id* 都被声明为 typedef 名（[[dcl.typedef]]）。", "ref": "dcl.pre#8"},
+  {"id": "function-declaration", "en": "function declaration", "zh": "函数声明", "def": "不是 typedef 声明、且与 *declarator-id* 关联的类型是函数类型的声明。分类逐声明符进行。", "ref": "dcl.pre#8"},
+  {"id": "object-declaration", "en": "object declaration", "zh": "对象声明", "def": "不是 typedef 声明、且与 *declarator-id* 关联的类型是对象类型或**引用类型**的声明。类型既非函数也非对象/引用（如 `void`）时程序非良构。", "ref": "dcl.pre#8"},
+  {"id": "static-assert-fails", "en": "static_assert-declaration fails", "zh": "静态断言失败", "def": "`static_assert` 的条件上下文转换为 `bool` 后为 `false`，且不处于模板定义的上下文中；此时程序非良构，C++26 起消息可以是计算出的字符串。", "ref": "dcl.pre#13"},
+  {"id": "type-alias", "en": "type alias", "zh": "类型别名", "def": "由 `typedef` 或 *alias-declaration*（`using X = T;`）声明的名字，即 *typedef-name*；它**不引入新类型**，其底层实体是所别名的类型。", "ref": "dcl.typedef#1"},
+  {"id": "typedef-name-for-linkage", "en": "typedef name for linkage purposes", "zh": "用于链接目的的 typedef 名", "def": "在 typedef 声明中定义的无名类或无名枚举，以该声明中第一个类型为它的 typedef 名作为链接名，如 `typedef struct { int x; } S;` 中的 `S`。C++20 起此类无名类必须是\"C 兼容\"的（无成员函数、基类、默认成员初始化器、lambda）。", "ref": "dcl.typedef#4"},
+  {"id": "constexpr-function", "en": "constexpr function", "zh": "constexpr 函数", "def": "声明中带 `constexpr` 或 `consteval` 的函数（所以立即函数也是 constexpr 函数）。它隐式 inline，可以出现在常量表达式中，除此之外行为与等价的普通函数相同。", "ref": "dcl.constexpr#2"},
+  {"id": "constexpr-suitable", "en": "constexpr-suitable", "zh": "constexpr 适用的", "def": "当前草案中，函数只要**不是协程**就是 constexpr-suitable 的；非模板化的 constexpr 函数必须满足这一点。其余限制都推迟到具体的常量求值时检查（[[expr.const.core]]）。", "ref": "dcl.constexpr#3"},
+  {"id": "inline-function", "en": "inline function", "zh": "inline 函数", "def": "用 `inline` 声明（或隐式 inline，如类内定义的成员函数、constexpr 函数）的函数。具有外部或模块链接时可在多个 TU 中定义，但仍是同一实体、同一地址；内联替换只是不具约束力的提示。", "ref": "dcl.inline#2"},
+  {"id": "inline-variable", "en": "inline variable", "zh": "inline 变量", "def": "用 `inline` 声明的变量（C++17），或首次声明带 `constexpr` 的静态数据成员。与 inline 函数一样享有 ODR 豁免：可在多个 TU 中定义，整个程序只有一个对象。", "ref": "dcl.inline#2"},
+  {"id": "deducible-template", "en": "deducible template", "zh": "可推导模板", "def": "可用作推导类类型占位符（CTAD）的模板：类模板、类型模板模板参数，或定义类型标识形如 `simple-template-id`（指向另一个可推导模板）的别名模板。", "ref": "dcl.type.simple#3"},
+  {"id": "deduced-class-type-placeholder", "en": "placeholder for a deduced class type", "zh": "推导类类型占位符", "def": "不带模板实参列表的可推导模板名（或拼接），如 `std::pair p(1, 2);` 中的 `std::pair`；它被 [[over.match.class.deduct]] 的重载决议结果替换。只能用于变量初始化声明（`cv T`）、`new`、函数式转换和模板参数。", "ref": "dcl.type.simple#3"},
+  {"id": "pack-index", "en": "index (of a pack-index-specifier)", "zh": "包索引", "def": "`P...[I]` 中常量表达式 `I` 的值 V，必须满足 0 ≤ V < `sizeof...(P)`，越界非良构。*pack-index-specifier* 表示包中第 V 个类型，且本身是一个包展开（C++26）。", "ref": "dcl.type.pack.index#2"},
+  {"id": "generic-parameter-type-placeholder", "en": "generic parameter type placeholder", "zh": "泛型参数类型占位符", "def": "函数参数、lambda 参数或模板参数中形如 `type-constraint(opt) auto` 的占位类型；函数有它即为简写函数模板，lambda 有它即为泛型 lambda。", "ref": "dcl.spec.auto.general#2"},
+  {"id": "placeholder-type-deduction", "en": "placeholder type deduction", "zh": "占位类型推导", "def": "把含占位类型的类型替换为推导类型的过程。`auto` 按从函数调用推导模板实参的规则（`= {…}` 时推导为 `std::initializer_list<U>`）；`decltype(auto)` 按 `decltype(E)` 的规则。", "ref": "dcl.type.auto.deduct#1"}
+]
