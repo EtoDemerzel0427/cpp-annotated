@@ -765,8 +765,9 @@ def coverage(e, by_id, ctx):
         for c in x["children"]:
             walk(c, inh)
 
+    own = ctx.std_pages.get(e["id"])
     for c in e["children"]:
-        walk(c, False)
+        walk(c, bool(own and "*" in own["covers"]))
     if not e["children"]:
         total, covered = 1, 1 if e["id"] in ctx.std_pages else 0
     return covered, total
