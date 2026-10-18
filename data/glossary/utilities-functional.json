@@ -1,0 +1,15 @@
+[
+ {"id": "function-object-type", "en": "function object type", "zh": "函数对象类型", "def": "可以作为函数调用表达式中 postfix-expression 类型的对象类型：函数指针、有成员 operator() 的类、可转换为函数指针的类。成员指针不是函数对象类型。", "ref": "function.objects.general#1"},
+ {"id": "call-signature", "en": "call signature", "zh": "调用签名", "def": "返回类型名后跟括号括起的、以逗号分隔的零个或多个实参类型，如 int(double, char)。", "ref": "func.def#2"},
+ {"id": "callable-type", "en": "callable type", "zh": "可调用类型", "def": "函数对象类型或成员指针类型；其对象称为可调用对象，统一经 INVOKE 调用。", "ref": "func.def#3"},
+ {"id": "call-wrapper", "en": "call wrapper", "zh": "调用包装器", "def": "持有一个目标对象并支持把调用转发给它的类型（调用包装器类型）的对象；至少满足 Cpp17MoveConstructible 与 Cpp17Destructible。", "ref": "func.def#5"},
+ {"id": "target-object", "en": "target object", "zh": "目标对象", "def": "调用包装器持有的可调用对象，或代表可调用对象的对象（如 reference_wrapper 中的指针）。", "ref": "func.def#5"},
+ {"id": "bound-argument-entities", "en": "bound argument entities", "zh": "绑定实参实体", "def": "调用包装器额外持有、调用时一并传给目标的一串对象和引用，如 bind_front(f, 1, 2) 中的 1、2。", "ref": "func.def#7"},
+ {"id": "state-entities", "en": "state entities", "zh": "状态实体", "def": "调用包装器的目标对象与绑定实参实体的合称；包装器的复制/移动按状态实体逐个进行。", "ref": "func.def#8"},
+ {"id": "argument-forwarding-call-wrapper", "en": "argument forwarding call wrapper", "zh": "参数转发调用包装器", "def": "可接受任意实参列表并以引用转发调用实参（右值作右值引用、左值作左值引用）的调用包装器，如 bind 的返回值。", "ref": "func.require#3"},
+ {"id": "perfect-forwarding-call-wrapper", "en": "perfect forwarding call wrapper", "zh": "完美转发调用包装器", "def": "连状态实体也随包装器自身的 cv 限定与值类别转发（左值调用给 cv T&，否则 cv T&&）的参数转发调用包装器；调用与其调用模式表达式等价。", "ref": "func.require#4"},
+ {"id": "call-pattern", "en": "call pattern", "zh": "调用模式", "def": "定义完美转发调用包装器调用语义的表达式，如 invoke(fd, bound_args..., call_args...)；实际调用与把其中实体替换为转发后引用的表达式表达式等价。", "ref": "func.require#5"},
+ {"id": "simple-call-wrapper", "en": "simple call wrapper", "zh": "简单调用包装器", "def": "满足 Cpp17CopyConstructible 与 Cpp17CopyAssignable、复制/移动构造与赋值都是不抛异常的 constexpr 函数的完美转发调用包装器，如 mem_fn 的返回值。", "ref": "func.require#6"},
+ {"id": "transparent-comparator", "en": "transparent comparator", "zh": "透明比较器", "def": "带有成员类型 is_transparent 的比较函数对象（如 less<>）；关联容器据此启用以非 key_type 实参查找的成员模板重载（异构查找）。", "ref": "associative.reqmts.general"},
+ {"id": "disabled-hash-specialization", "en": "disabled specialization of hash", "zh": "禁用的 hash 特化", "def": "库和用户都未提供特化时的 hash<Key>：类型存在，但不可默认构造、复制、移动或赋值，且不是函数对象类型，因而可被 SFINAE 安全探测。", "ref": "unord.hash#4"}
+]
