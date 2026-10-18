@@ -1,0 +1,17 @@
+[
+  {"id": "template-instantiation", "en": "template instantiation", "zh": "模板实例化", "def": "从模板（或类模板的成员定义、成员模板）代入模板实参、生成具体函数、变量、类或成员定义的行为。可以是隐式实例化或显式实例化。", "ref": "temp.spec.general#1"},
+  {"id": "specialization", "en": "specialization", "zh": "特化", "def": "从模板化实体实例化得到的、或作为其显式特化的类、变量、函数或类成员。`std::vector<int>` 是 `std::vector` 的特化，无论其定义来自何处。", "ref": "temp.spec.general#4"},
+  {"id": "implicit-instantiation", "en": "implicit instantiation", "zh": "隐式实例化", "def": "编译器在特化被以需要其定义（或类的完整类型）的方式使用时自动从模板生成定义；类模板实例化时只生成成员的声明，成员定义按需另行实例化。", "ref": "temp.inst#2"},
+  {"id": "declared-specialization", "en": "declared specialization", "zh": "已声明的特化", "def": "存在可达的显式实例化定义或显式特化声明的特化，或存在可达的显式实例化声明且不是内联函数、推导类型的实体、潜在常量变量或模板化类的特化。已声明的特化不被隐式实例化。", "ref": "temp.inst#1"},
+  {"id": "default-argument-instantiation", "en": "default argument instantiation", "zh": "默认实参实例化", "def": "模板化函数被以需要使用某个默认实参的方式调用时，对该默认实参做的查找、检查与实例化；每个默认实参独立实例化，未使用的默认实参即使非良构也无妨。", "ref": "temp.inst#14"},
+  {"id": "explicit-instantiation", "en": "explicit instantiation", "zh": "显式实例化", "def": "形如 `template declaration` 的声明，要求在此处从模板生成特化的定义（显式实例化定义）；带 `extern` 时为显式实例化声明。", "ref": "temp.explicit#2"},
+  {"id": "explicit-instantiation-declaration", "en": "explicit instantiation declaration", "zh": "显式实例化声明", "def": "以 `extern template` 开头的显式实例化，表示定义由别处的显式实例化定义提供，本翻译单元不生成；被使用时程序中必须有对应的显式实例化定义，否则 IFNDR。", "ref": "temp.explicit#2"},
+  {"id": "explicit-specialization", "en": "explicit specialization", "zh": "显式特化", "def": "以 `template<>` 引入、为某组模板实参提供完全替代定义的声明（俗称全特化）。它是普通实体，不继承模板的 inline/constexpr；其声明须在任何会引起隐式实例化的使用之前可达。", "ref": "temp.expl.spec#1"},
+  {"id": "function-template-specialization", "en": "function template specialization", "zh": "函数模板特化", "def": "从函数模板实例化出的函数，或函数模板的显式特化；其模板实参可显式指定、推导或取自默认模板实参。", "ref": "temp.fct.spec.general#1"},
+  {"id": "deduction-substitution-loci", "en": "deduction substitution loci", "zh": "推导代入位置", "def": "推导时模板实参被代入的位置：不含 noexcept 说明符的函数类型、explicit 说明符、模板形参声明、部分特化的模板实参列表。代入按词法顺序进行，遇失败即停。", "ref": "temp.deduct.general#7"},
+  {"id": "immediate-context", "en": "immediate context", "zh": "直接语境", "def": "推导代入位置本身，不含 lambda 体与单独实例化的构造。只有在直接语境中产生的无效类型或表达式才导致推导失败（SFINAE）；实例化类模板等副作用中的错误是硬错误。", "ref": "temp.deduct.general#8"},
+  {"id": "sfinae", "en": "SFINAE (Substitution Failure Is Not An Error)", "zh": "代入失败不是错误", "def": "非标准术语：模板实参代入在直接语境中产生无效类型或表达式时，推导失败，该函数模板被静默地排除出候选集，而不是使程序非良构。", "ref": "temp.deduct.general#8"},
+  {"id": "forwarding-reference", "en": "forwarding reference", "zh": "转发引用", "def": "对 cv 未限定的模板形参的右值引用 `T&&`（CTAD 中代表类模板形参者除外），以及 `auto&&`；实参为左值时 `T` 推导为左值引用类型，经引用折叠后绑定左值。俗称万能引用。", "ref": "temp.deduct.call#3"},
+  {"id": "at-least-as-specialized", "en": "at least as specialized as", "zh": "至少一样特殊", "def": "偏序中，若对用于定序的每一对类型，F 的类型都至少与 G 的一样特殊（以 F 变换后的类型推导 G 成功），则函数模板 F 至少与 G 一样特殊；反之不成立时 F 更特殊。", "ref": "temp.deduct.partial#10"},
+  {"id": "non-deduced-context", "en": "non-deduced context", "zh": "非推导语境", "def": "类型中不参与模板实参推导、只使用别处推导或显式指定的值的部分，如限定名的前缀（`typename A<T>::type`）、decltype 表达式、含模板形参的子表达式、非尾随的函数形参包。", "ref": "temp.deduct.type#5"}
+]
