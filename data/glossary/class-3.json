@@ -1,0 +1,12 @@
+[
+ {"id": "ctor-initializer", "en": "ctor-initializer", "zh": "构造函数初始化器", "def": "构造函数定义中冒号后的 *mem-initializer* 列表，为直接基类、虚基类与非静态数据成员指定初始化器，或委托给本类另一构造函数。它的书写顺序不影响初始化顺序。", "ref": "class.base.init#1"},
+ {"id": "delegating-constructor", "en": "delegating constructor", "zh": "委托构造函数", "def": "*mem-initializer-id* 指名本类自身的构造函数，该 *mem-initializer* 必须是唯一的一个；被选中的构造函数称为目标构造函数。目标构造函数返回时对象即初始化完成，此后委托构造函数体若抛出异常会调用对象的析构函数。", "ref": "class.base.init#6"},
+ {"id": "target-constructor", "en": "target constructor", "zh": "目标构造函数", "def": "委托构造函数通过重载决议选中、把初始化委托给它的那个构造函数。直接或间接委托给自己是 IFNDR。", "ref": "class.base.init#6"},
+ {"id": "copy-elision", "en": "copy elision", "zh": "复制消除", "def": "在 `return`/`throw` 局部对象、协程形参复制、`catch` 按值捕获四种场合，实现被允许省略从同类型源对象创建类对象，即使构造/析构函数有副作用。它是可选的，常量求值中禁止；C++17 起 prvalue 初始化同类型对象根本不产生复制，不属于此列。", "ref": "class.copy.elision#1"},
+ {"id": "defaulted-comparison-operator-function", "en": "defaulted comparison operator function", "zh": "预置比较运算符函数", "def": "类 `C` 的非模板成员或友元比较运算符，在 `C` 中或 `C` 完整处定义为 `= default`，且两个形参均为 `const C&` 或均为 `C`（隐式对象形参算第一个）。", "ref": "class.compare.default#1"},
+ {"id": "usable-comparison", "en": "usable (binary operator expression)", "zh": "可用（二元运算符表达式）", "def": "`a @ b` 可用：若有操作数是类或枚举类型，则对它的重载决议得到可用候选；否则它是合法表达式。预置比较的删除条件都以此表述。", "ref": "class.compare.default#3"},
+ {"id": "expanded-list-of-subobjects", "en": "expanded list of subobjects", "zh": "展开的子对象列表", "def": "按声明顺序排列的直接基类子对象，接着是直接非静态数据成员，其中数组递归展开为元素。预置 `==` 与 `<=>` 按此列表逐个比较。", "ref": "class.compare.default#5"},
+ {"id": "synthesized-three-way-comparison", "en": "synthesized three-way comparison", "zh": "合成三路比较", "def": "类型 `R` 的合成三路比较：`a <=> b` 可用且能 `static_cast` 为 `R` 时用它；否则若 `a <=> b` 存在可行候选则无定义；否则用 `==` 与 `<`（`partial_ordering` 时再加 `b < a`）合成 `R` 的值。", "ref": "class.spaceship#1"},
+ {"id": "common-comparison-type", "en": "common comparison type", "zh": "公共比较类型", "def": "一组比较类别中\"最弱\"者：有 `partial_ordering` 则为它，否则有 `weak_ordering` 则为它，否则（含空列表）为 `strong_ordering`。`auto` 返回类型的预置 `<=>` 推导为它。", "ref": "class.spaceship#4"},
+ {"id": "secondary-comparison-operator", "en": "secondary comparison operator", "zh": "次级比较运算符", "def": "关系运算符 `<` `>` `<=` `>=` 以及 `!=`。它们的预置版本返回经重写候选（`<=>` 或 `==`）得到的 `x @ y`。", "ref": "class.compare.secondary#1"}
+]

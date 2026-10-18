@@ -25,7 +25,7 @@ updated: 2026-10-17
 
 ¶1 在构造函数的**定义**中，可以用 *ctor-initializer* 为直接基类、虚基类和非静态数据成员指定初始化器：
 
-```
+```text
 ctor-initializer:
     : mem-initializer-list
 mem-initializer:
@@ -615,7 +615,7 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-```
+```text
 V from X
 R
 L::p

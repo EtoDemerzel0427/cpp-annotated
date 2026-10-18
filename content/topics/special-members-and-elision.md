@@ -263,7 +263,7 @@ int main() {
 
 **[1] `Tr a = factory();`**
 
-```
+```text
   #1 Tr()
 ```
 
@@ -271,7 +271,7 @@ int main() {
 
 **[2] `Tr b = pass(a);`**
 
-```
+```text
   #2 Tr(const Tr&) <- #1
   #3 Tr(Tr&&) <- #2
   #2 ~Tr()
@@ -283,7 +283,7 @@ int main() {
 
 **[3] `Holder h(Tr{});`**
 
-```
+```text
   #4 Tr()
   #5 Tr(Tr&&) <- #4
   #4 ~Tr()
@@ -295,7 +295,7 @@ int main() {
 
 **[4] `a = pass(Tr{});`**
 
-```
+```text
   #6 Tr()
   #7 Tr(Tr&&) <- #6
   #1 = move #7
@@ -311,7 +311,7 @@ int main() {
 
 **[5] `std::vector`**
 
-```
+```text
   #8 Tr(const Tr&) <- #3
   #9 Tr(Tr&&) <- #1
   #10 Tr(Tr&&) <- #8
@@ -323,7 +323,7 @@ int main() {
 
 **[6] `main` 结束**
 
-```
+```text
   #9 ~Tr()
   #10 ~Tr()
   #5 ~Tr()
