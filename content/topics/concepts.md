@@ -198,7 +198,7 @@ int main() {
 | `<concepts>` | 核心语言 | `same_as`、`derived_from`、`convertible_to`、`common_with`、`integral` ⊃ `signed_integral`/`unsigned_integral`、`floating_point`、`assignable_from`、`swappable`、`destructible` ⊃ `constructible_from` ⊃ `default_initializable`/`move_constructible` ⊃ `copy_constructible` |
 | `<concepts>` | 比较 | `equality_comparable`、`totally_ordered`（及 `_with` 版本） |
 | `<concepts>` | 对象 | `movable` ⊃ `copyable` ⊃ `semiregular` ⊃ `regular` |
-| `<concepts>` | 可调用 | `invocable` ⊃ `regular_invocable` ⊃ `predicate` ⊃ `relation` ⊃ `equivalence_relation`/`strict_weak_order` |
+| `<concepts>` | 可调用 | `invocable` ⊂ `predicate` ⊂ `relation`（⊂ 表示被包含 / subsume）；`regular_invocable`、`equivalence_relation`、`strict_weak_order` 只是**语义**细化，与 `invocable` / `relation` 互相 subsume，不能用来区分重载 |
 | `<iterator>` | 迭代器 | `input_or_output_iterator` ⊃ `input_iterator` ⊃ `forward_iterator` ⊃ `bidirectional_iterator` ⊃ `random_access_iterator` ⊃ `contiguous_iterator`；`sentinel_for`、`sized_sentinel_for` |
 | `<iterator>` | 算法要求 | `indirectly_readable`、`indirectly_copyable`、`sortable`、`mergeable`、`permutable` |
 | `<ranges>` | 范围 | `range` ⊃ `input_range` ⊃ ... ⊃ `contiguous_range`；`sized_range`、`view`、`borrowed_range`、`viewable_range` |
