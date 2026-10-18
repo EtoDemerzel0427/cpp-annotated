@@ -9,9 +9,9 @@ tags: 协程, co_yield
 updated: 2026-10-18
 ---
 
-`co_yield` 是 C++20 协程的三个关键字之一（另两个是 `co_await`、`co_return`）。从语言层面看，它几乎没有自己的语义：标准用一句话把它**改写**为一个 `co_await` 表达式。所以理解 `co_yield`，关键是理解 `co_await`（[[expr.await]]）和协程的承诺对象（promise object，[[dcl.fct.def.coroutine]]）。
+`co_yield` 是 C++20 协程的三个关键字之一（另两个是 `co_await`、`co_return`）。从语言层面看，它几乎没有自己的语义：标准用一句话把它改写为一个 `co_await` 表达式。所以要理解 `co_yield`，关键在于理解 `co_await`（[[expr.await]]）和协程的承诺对象（promise object，[[dcl.fct.def.coroutine]]）。
 
-本节只有一段，但这一段里有好几个值得注意的细节：它能出现在哪里、它的操作数能是什么、它为什么能有一个值、以及它和 `co_await` 的一处差别。
+本节只有一段，但其中有好几处细节值得注意：它能出现在哪里，操作数可以是什么，它为什么能有值，以及它和 `co_await` 的一处差别。
 
 ## 文法
 
@@ -23,7 +23,7 @@ yield-expression:
 
 *yield-expression* 出现在 [[expr.assign]] 的文法中，与 *throw-expression*、*conditional-expression* 并列，是 *assignment-expression* 的一种。由此推出两点：
 
-- `co_yield` 的**优先级很低**，与赋值、`throw` 同级：`co_yield a + b` 产出 `a + b`；`co_yield a, b` 是 `(co_yield a), b`；
+- `co_yield` 的优先级很低，与赋值、`throw` 同级：`co_yield a + b` 产出 `a + b`；`co_yield a, b` 是 `(co_yield a), b`；
 - 它不能直接作为 `+`、`*` 等运算符的操作数：`1 + co_yield 2` 是语法错误，要写 `1 + (co_yield 2)`。但它可以出现在赋值右边或初始化器中：`int got = co_yield v;`。
 
 ## 改写规则（¶1）
@@ -35,12 +35,12 @@ yield-expression:
 
     *yield-expression* 等价于表达式 `co_await p.yield_value(e)`。
 
-其中 `e` 是操作数，`p` 是指名外围协程承诺对象的 lvalue。换句话说：
+其中 `e` 是操作数，`p` 是指名外围协程承诺对象的 lvalue。换句话说，`co_yield` 做两件事：
 
 1. 把值交给承诺对象的 `yield_value` 成员函数（通常存起来供调用者读取）；
-2. 对 `yield_value` 的返回值做 `co_await`——通常返回 `std::suspend_always`，于是协程挂起，控制回到调用者/恢复者。
+2. 对 `yield_value` 的返回值做 `co_await`。这个返回值通常是 `std::suspend_always`，于是协程挂起，控制回到调用者或恢复者。
 
-`yield_value` 的返回类型决定了是否挂起、恢复后 `co_yield` 表达式的值是什么（由 awaiter 的 `await_resume` 给出）。`std::suspend_always::await_resume()` 返回 `void`，所以最常见的 `co_yield x;` 是一个 `void` 表达式；但如果 promise 返回一个自定义的 awaiter，`co_yield` 就可以**有值**，实现"双向通信"：
+`yield_value` 的返回类型决定了是否挂起，以及恢复后 `co_yield` 表达式的值是什么（由 awaiter 的 `await_resume` 给出）。`std::suspend_always::await_resume()` 返回 `void`，所以最常见的 `co_yield x;` 是一个 `void` 表达式；但如果 promise 返回自定义的 awaiter，`co_yield` 就可以有值，从而实现双向通信：
 
 ```cpp run title="yield-two-way.cpp" ok
 #include <coroutine>
@@ -93,17 +93,17 @@ int main() {
 
 ### 花括号初始化列表
 
-操作数可以是 *braced-init-list*：`co_yield {i, i};` 被改写为 `co_await p.yield_value({i, i})`，花括号列表作为函数实参去初始化 `yield_value` 的参数（[[dcl.init.list]]）。标准的例 1 正是用 `co_yield {i,i}` 产出 `pair<int,int>`。这是 `co_yield` 相对于普通表达式的一个便利：`co_await {1, 2}` 是不合法的（*await-expression* 的操作数是 *cast-expression*）。
+操作数可以是 *braced-init-list*：`co_yield {i, i};` 被改写为 `co_await p.yield_value({i, i})`，花括号列表作为函数实参去初始化 `yield_value` 的参数（[[dcl.init.list]]）。标准的例 1 正是用 `co_yield {i,i}` 产出 `pair<int,int>`。这是 `co_yield` 比普通表达式方便的地方，`co_await {1, 2}` 就不合法（*await-expression* 的操作数是 *cast-expression*）。
 
 ### 不经过 `await_transform`
 
-`co_await expr` 在求值时，若承诺类型声明了 `await_transform`，会先把操作数变成 `p.await_transform(expr)`（[[expr.await#3]]）。但 [[expr.await]] ¶3.2 明确把"由 *yield-expression* 隐式产生的 *await-expression*"排除在外：`co_yield` 改写出的 `co_await p.yield_value(e)` **不会**再调用 `await_transform`。
+求值 `co_await expr` 时，若承诺类型声明了 `await_transform`，会先把操作数变成 `p.await_transform(expr)`（[[expr.await#3]]）。但 [[expr.await]] ¶3.2 明确排除了由 *yield-expression* 隐式产生的 *await-expression*：`co_yield` 改写出的 `co_await p.yield_value(e)` **不会**再调用 `await_transform`。
 
-这是有意的：`await_transform` 常被用来**禁止**协程内部随意 `co_await`（例如 `std::generator` 的承诺类型声明了一个被删除的无参 `void await_transform() = delete;`（[[coro.generator.promise]]）：查找总能找到这个名字，于是生成器里的任何 `co_await x` 都会因无法调用 `p.await_transform(x)` 而非良构），而 `co_yield` 必须照常工作。把上例的 promise 加上 `void await_transform(int) = delete;` 之后，`co_yield` 仍能编译。
+这是有意为之。`await_transform` 常被用来禁止协程内部随意 `co_await`，而 `co_yield` 必须照常工作。例如 `std::generator` 的承诺类型声明了一个被删除的无参 `void await_transform() = delete;`（[[coro.generator.promise]]）。由于查找总能找到这个名字，生成器里的任何 `co_await x` 都会因无法调用 `p.await_transform(x)` 而非良构。给上例的 promise 加上 `void await_transform(int) = delete;` 之后，`co_yield` 仍能编译。
 
 ## 只能出现在挂起语境中
 
-¶1 第一句：*yield-expression* 只能出现在函数的**挂起语境**（suspension context）中。挂起语境由 [[expr.await#2]] 定义：函数体或 lambda 体的复合语句之内、**异常处理器（`catch` 块）之外**，并且不能在默认实参、静态/线程存储期的块变量初始化器、契约断言的谓词中。标准例子中的两个错误：
+¶1 第一句规定，*yield-expression* 只能出现在函数的**挂起语境**（suspension context）中。挂起语境由 [[expr.await#2]] 定义：在函数体或 lambda 体的复合语句之内、异常处理器（`catch` 块）之外，并且不在默认实参、静态/线程存储期块变量的初始化器、契约断言的谓词中。标准例子给出了两个错误：
 
 ```cpp title="yield-context.cpp" error
 #include <coroutine>
@@ -112,7 +112,7 @@ auto f(int x = co_yield 5);     // error: 默认实参不是挂起语境
 int a[] = { co_yield 1 };       // error: 不在函数体内
 ```
 
-此外，`co_yield` 出现在函数体中会使该函数**成为协程**（[[dcl.fct.def.coroutine]]），于是它必须满足协程的所有要求（返回类型有合适的 `promise_type`、不能是 `constexpr`/`consteval` 函数、不能是 `main`、不能用普通 `return` 等）。
+此外，函数体中出现 `co_yield` 会使该函数成为协程（[[dcl.fct.def.coroutine]]），于是它必须满足协程的所有要求（返回类型有合适的 `promise_type`、不能是 `constexpr`/`consteval` 函数、不能是 `main`、不能用普通 `return` 等）。
 
 ```cpp title="yield-in-handler.cpp" error
 #include <coroutine>
@@ -124,20 +124,20 @@ Gen g() {
 }
 ```
 
-不能在 `catch` 中挂起的原因是：处理器执行期间存在"当前正被处理的异常"，它的状态与线程绑定（`std::current_exception`、`throw;`）；如果协程在这里挂起、之后在**另一个线程**上恢复，异常处理的状态就无法正确维护。
+不能在 `catch` 中挂起，是因为处理器执行期间存在一个当前正被处理的异常，它的状态与线程绑定（`std::current_exception`、`throw;`）。如果协程在这里挂起，之后又在另一个线程上恢复，异常处理的状态就无法正确维护。
 
 ## 常量求值
 
 *yield-expression* 永远不能出现在常量表达式的求值中（[[expr.const.core]] ¶2.27），这与协程本身不能是 `constexpr` 函数一致。
 
 !!! impl "实现视角"
-    编译器把协程拆成一个"协程帧"（通常堆分配，可被优化省略——即 HALO）和若干个恢复点。每个 `co_yield` 都是一个挂起点：它先调用 `yield_value`，再按 awaiter 的 `await_ready`/`await_suspend` 决定是否挂起，把"恢复后从这里继续"的状态编号写入协程帧。生成器的每次迭代因此只是一次间接跳转，开销与手写状态机相当。
+    编译器把协程拆成一个协程帧（通常在堆上分配，可以被优化省略，即 HALO）和若干个恢复点。每个 `co_yield` 都是一个挂起点：它先调用 `yield_value`，再按 awaiter 的 `await_ready`/`await_suspend` 决定是否挂起，并把标识这个恢复点的状态编号写入协程帧。因此生成器的每次迭代只是一次间接跳转，开销与手写状态机相当。
 
 ## 历史与演进
 
 !!! history
     - 协程最初作为 Coroutines TS 发布，C++20 由 [[P0912R5]] 合并进标准，`co_yield` 随之进入。
-    - C++23 加入了标准生成器 `std::generator`（[[coro.generator]]），它正是基于 `co_yield` 的；其承诺类型的 `yield_value` 只保存被产出对象的**地址**（产出在挂起期间一直存活，无需复制）；当产出类型是右值引用而 `co_yield` 的是左值时，另有一个重载先复制一份；`co_yield std::ranges::elements_of(r)` 则用于递归地产出另一个范围或生成器的全部元素（[[coro.generator.promise]]）。
+    - C++23 加入了标准生成器 `std::generator`（[[coro.generator]]），它正是基于 `co_yield` 构建的。其承诺类型的 `yield_value` 只保存被产出对象的地址（被产出的对象在挂起期间一直存活，无需复制）；当产出类型是右值引用而 `co_yield` 的是左值时，另有一个重载先复制一份；`co_yield std::ranges::elements_of(r)` 则用于递归地产出另一个范围或生成器的全部元素（[[coro.generator.promise]]）。
 
 ## 陷阱
 
@@ -158,7 +158,7 @@ Gen g() {
 <details markdown="1">
 <summary>答案</summary>
 
-不完全相同。前者是由 *yield-expression* 隐式产生的 *await-expression*，[[expr.await]] ¶3.2 规定不查找 `await_transform`；后者是用户写的 `co_await`，会查找并调用 `p.await_transform(p.yield_value(1))`（若 `await_transform` 接受 `yield_value` 的返回类型）。标准说的"等价于 `co_await p.yield_value(e)`"应理解为"按该 *await-expression* 求值，但它带有'由 yield 产生'的身份"。
+不完全相同。前者是由 *yield-expression* 隐式产生的 *await-expression*，[[expr.await]] ¶3.2 规定不查找 `await_transform`；后者是用户写的 `co_await`，会查找并调用 `p.await_transform(p.yield_value(1))`（若 `await_transform` 接受 `yield_value` 的返回类型）。标准所说的等价于 `co_await p.yield_value(e)`，应理解为按该 *await-expression* 求值，但这个表达式带着由 yield 产生的身份。
 </details>
 
 ## 小结
