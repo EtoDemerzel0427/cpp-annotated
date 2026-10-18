@@ -1,0 +1,16 @@
+[
+  {"id": "substatement", "en": "substatement", "zh": "子语句", "def": "语句直接包含的语句：标号后的语句、复合语句中的各语句、选择/迭代语句的分支或循环体、展开语句的复合语句；不含 *init-statement*，也不含 lambda 体。见 [[stmt.pre#2]]。", "ref": "stmt.pre#2"},
+  {"id": "enclose-statement", "en": "encloses (statement)", "zh": "包围（语句）", "def": "在子语句关系之上加入 *init-statement*、try 块与 handler 的复合语句后取传递闭包得到的关系；`break`、`case`、`continue` 等的合法性都用它来判断。不穿透 lambda 体。", "ref": "stmt.pre#3"},
+  {"id": "decision-variable", "en": "decision variable", "zh": "判定变量", "def": "声明形式的条件中被测试的变量：普通声明时是所声明的变量；结构化绑定声明（C++26）时是背后的无名变量 *e*。", "ref": "stmt.pre#5"},
+  {"id": "control-flow-limited-statement", "en": "control-flow-limited statement", "zh": "控制流受限语句", "def": "其中的 `case`/`default` 标号必须属于其内部的 `switch`、其中的标号只能被其内部的语句引用的语句。即不能从外部跳入。`if constexpr`、`if consteval` 的分支与展开语句的体都是这种语句。", "ref": "stmt.label#3"},
+  {"id": "null-statement", "en": "null statement", "zh": "空语句", "def": "省略了表达式的表达式语句 `;`。常用作循环的空体，也是 `[[fallthrough]]` 所作用的语句。", "ref": "stmt.expr#1"},
+  {"id": "compound-statement", "en": "compound statement (block)", "zh": "复合语句（块）", "def": "`{ ... }` 把一串语句组合为一条语句并引入块作用域；C++23 起末尾可以有标号。", "ref": "stmt.block#1"},
+  {"id": "constexpr-if", "en": "constexpr if statement", "zh": "constexpr if 语句", "def": "形如 `if constexpr (c)` 的 if 语句；条件按语境转换为 bool 后须为常量表达式，未选中的分支是弃置语句。", "ref": "stmt.if#2"},
+  {"id": "discarded-statement", "en": "discarded statement", "zh": "弃置语句", "def": "constexpr if 语句中未被选中的子语句。在模板中（条件实例化后不依赖值时）不被实例化；其中的 odr-use 不要求定义；其中的 `return` 不参与返回类型推导。", "ref": "stmt.if#2"},
+  {"id": "consteval-if", "en": "consteval if statement", "zh": "consteval if 语句", "def": "形如 `if consteval { ... }` 的 if 语句（C++23）：在明显常量求值的语境中执行第一个分支（它是即时函数语境），否则执行 else 分支；分支必须是复合语句。", "ref": "stmt.if#4"},
+  {"id": "trivially-empty-iteration-statement", "en": "trivially empty iteration statement", "zh": "平凡空迭代语句", "def": "循环体为 `;` 或 `{ }`、条件是表达式、且（对 for 而言）没有迭代表达式的 while/do/for 语句。", "ref": "stmt.iter.general#3"},
+  {"id": "expansion-statement", "en": "expansion statement", "zh": "展开语句", "def": "C++26 的 `template for (decl : init) { ... }`：在编译期把复合语句按元素实例化 N 份，每份循环变量可以有不同类型。分为枚举式、迭代式、解构式三种。", "ref": "stmt.expand#1"},
+  {"id": "expansion-iterable", "en": "expansion-iterable", "zh": "可展开迭代的", "def": "非数组类型、且 begin/end 为成员形式或 ADL 能找到可行 begin/end 候选的表达式；以它为初始化器的展开语句是迭代式展开语句。", "ref": "stmt.expand#3"},
+  {"id": "active-variable", "en": "active (block variable)", "zh": "活跃（块变量）", "def": "自动存储期的块变量在其作用域中、其 *init-declarator* 之后的位置是活跃的。控制从 P 转到 Q 时销毁在 P 活跃而在 Q 不活跃的变量，并初始化反之的变量；后者非 vacuous 时转移不得是跳转。", "ref": "stmt.dcl#2"},
+  {"id": "declaration-statement", "en": "declaration statement", "zh": "声明语句", "def": "出现在块中的 *block-declaration*，在块中引入新名字。", "ref": "stmt.dcl#1"}
+]
