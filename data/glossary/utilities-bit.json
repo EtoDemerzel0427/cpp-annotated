@@ -1,0 +1,10 @@
+[
+ {"id": "proxy-reference", "en": "proxy reference", "zh": "代理引用", "def": "无法返回真引用时（如单个位不可寻址）由 `operator[]` 返回的类对象，通过转换函数读、通过赋值运算符写所指元素，如 `bitset<N>::reference`、`vector<bool>::reference`。`auto` 推导会得到代理本身。", "ref": "template.bitset.general#3"},
+ {"id": "bit-value", "en": "bit value", "zh": "位值", "def": "`bitset` 与整数互转时位置 `pos` 对应的整数值 `1 << pos`；多位对应的整数值是各位位值之和。bit 0 即最低有效位。", "ref": "template.bitset.general#2"},
+ {"id": "toggle", "en": "toggle", "zh": "切换（翻转）", "def": "把一个位的值从 0 变 1 或从 1 变 0；`bitset::flip` 与 `^=` 用它表述。", "ref": "template.bitset.general#2"},
+ {"id": "type-punning", "en": "type punning", "zh": "类型双关", "def": "把一个对象的比特当作另一种类型的值来解释。经 `reinterpret_cast` 指针或联合体非活跃成员进行通常是 UB；可移植的写法是 `std::memcpy` 或 `std::bit_cast`。", "ref": "bit.cast#3"},
+ {"id": "big-endian", "en": "big-endian", "zh": "大端", "def": "多字节标量在存储中最高有效字节在前、其余字节依次降序的字节序。", "ref": "bit.endian#1"},
+ {"id": "little-endian", "en": "little-endian", "zh": "小端", "def": "多字节标量在存储中最低有效字节在前、其余字节依次升序的字节序。x86 与常见 ARM 配置均为小端。", "ref": "bit.endian#1"},
+ {"id": "mixed-endian", "en": "mixed-endian", "zh": "混合字节序", "def": "并非所有标量类型都是大端、也并非都是小端的执行环境（如 PDP-11 的 32 位整数）。此时 `std::endian::native` 既不等于 `big` 也不等于 `little`。", "ref": "bit.endian#2"},
+ {"id": "constant-when", "en": "Constant When", "zh": "常量条件（规格元素）", "def": "库函数规格元素，列出调用成为常量子表达式所需的条件；如 `bit_cast` 要求 `To`、`From` 都不具有 constexpr 未知表示。", "ref": "structure.specifications#3"}
+]
