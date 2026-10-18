@@ -9,7 +9,7 @@ tags: 短路求值, 求值顺序, 布尔
 updated: 2026-10-17
 ---
 
-[[expr.log.and]]（`&&`）和 [[expr.log.or]]（`||`）是 C++ 中仅有的三个"**内置控制流**"二元运算符中的两个（另一个是逗号，[[expr.comma]]；三元的 `?:` 见 [[expr.cond]]）：它们不仅计算一个值，还决定**是否求值**右操作数，并保证求值**顺序**——即[[g:short-circuit-evaluation|短路求值]]。这让 `p && p->ok()`、`i < n && a[i] != x` 这类"守卫"写法成为可能。
+[[expr.log.and]]（`&&`）和 [[expr.log.or]]（`||`）是 C++ 中仅有的三个带内置控制流的二元运算符中的两个（另一个是逗号，[[expr.comma]]；三元的 `?:` 见 [[expr.cond]]）。它们不仅计算一个值，还决定是否求值右操作数，并保证求值顺序，这就是[[g:short-circuit-evaluation|短路求值]]。`p && p->ok()`、`i < n && a[i] != x` 这类先检查再访问的写法正依赖于此。
 
 两节的结构完全对称，各两段：¶1 讲转换与短路，¶2 讲结果类型与顺序。
 
@@ -20,7 +20,7 @@ updated: 2026-10-17
 
     与 `&` 不同，`&&` 保证从左往右求值：若第一操作数为 `false`，第二操作数不被求值。
 
-`||` 对称：第一操作数为 `true` 时第二操作数不被求值。两者都**从左往右结合**，`a && b && c` 是 `(a && b) && c`——于是一串 `&&` 从左往右逐个检查，遇到第一个 `false` 即停。
+`||` 与之对称：第一操作数为 `true` 时不求值第二操作数。两者都从左往右结合，`a && b && c` 是 `(a && b) && c`，于是一串 `&&` 从左往右逐个检查，遇到第一个 `false` 即停止。
 
 两个操作数都**语境转换为 `bool`**（contextually converted to `bool`，[[conv]]），即进行直接初始化 `bool t(e);`。这意味着带 `explicit operator bool` 的类型（智能指针、`std::optional`、流对象）可以直接作为操作数，就像在 `if` 条件中一样：
 
@@ -51,7 +51,7 @@ int main() {
 
     若第二个表达式被求值，第一个表达式先于它求值。
 
-"先于"（sequenced before，[[intro.execution#8]]）意味着第一操作数的**所有值计算和副作用**都在第二操作数的任何求值之前完成。所以下面的代码有定义：
+先于（sequenced before，[[intro.execution#8]]）意味着第一操作数的所有值计算和副作用都在第二操作数的任何求值之前完成。所以下面的代码有定义：
 
 ```cpp run title="logand-sequencing.cpp" ok
 int main() {
@@ -63,11 +63,11 @@ int main() {
 }
 ```
 
-C++98 用"第一操作数之后有一个**序列点**"表达同一件事；C++11 起改用 sequenced-before 关系描述（见 [[topics/order-of-evaluation]]）。
+C++98 用第一操作数之后有一个序列点来表达同一件事；C++11 起改用 sequenced-before 关系描述（见 [[topics/order-of-evaluation]]）。
 
 ## 重载的 `&&` 与 `||`：失去短路
 
-`&&` 和 `||` 可以重载（[[over.binary]]），但重载版本是**普通函数调用**：调用之前两个实参都要求值，于是**短路消失**。C++17 之前，连"左先右后"的顺序也没有保证（函数实参之间顺序不确定）；C++17 起，[[over.match.oper]] 规定用运算符语法调用的重载运算符，其操作数按**内置运算符**规定的顺序求值，于是左操作数仍然先于右操作数——但**两个都会求值**：
+`&&` 和 `||` 可以重载（[[over.binary]]），但重载版本是普通函数调用：调用之前两个实参都要求值，于是**短路消失**。C++17 之前，连先左后右的顺序也没有保证（函数实参之间顺序不确定）；C++17 起，[[over.match.oper]] 规定用运算符语法调用重载运算符时，操作数按内置运算符规定的顺序求值，于是左操作数仍然先于右操作数，但两个都会求值：
 
 ```cpp run title="logand-overload.cpp" ok
 #include <cstdio>
@@ -87,7 +87,7 @@ int main() {
 }
 ```
 
-这就是为什么几乎所有编码规范都建议**不要重载 `&&`、`||` 和逗号**：用户无法从调用点看出语义已经改变。重载它们的合理场景只有**表达式模板**（expression templates）这类领域特定语言，例如构造查询条件、`std::valarray<bool>` 的逐元素与运算——在那里本来就不存在"短路"的概念。
+因此几乎所有编码规范都建议**不要重载 `&&`、`||` 和逗号**：用户无法从调用点看出语义已经改变。重载它们的合理场景只有表达式模板（expression templates）这类领域特定语言，例如构造查询条件、`std::valarray<bool>` 的逐元素与运算，在这些场景中本来就不存在短路的概念。
 
 ## 短路与编译期
 
@@ -103,11 +103,11 @@ constexpr bool b = true  || runtime_only();   // OK
 constexpr bool c = true  && runtime_only();   // error: 求值了非 constexpr 函数
 ```
 
-不过，未求值的操作数仍然必须**良构**——它仍然会被编译、名字仍然被查找和 odr-use（[[basic.def.odr]]）。短路是**求值**层面的概念，不是**编译**层面的概念。
+不过，未求值的操作数仍然必须良构：它仍然会被编译，其中的名字仍然要查找，也构成 odr-use（[[basic.def.odr]]）。**短路是求值层面的概念，不是编译层面的概念。**
 
 ### 模板：`&&` 不会阻止实例化
 
-最常见的误用是在模板中用 `&&` "保护"后面的表达式：
+最常见的误用是在模板中用 `&&` 来保护后面的表达式：
 
 ```cpp title="logand-template.cpp" error
 #include <type_traits>
@@ -120,7 +120,7 @@ constexpr bool has_true_value() {
 constexpr bool x = has_true_value<int>();    // error: int::value 非良构
 ```
 
-`T::value` 在实例化时就必须有意义，与运行期是否求值无关。正确的做法是 `if constexpr`（[[stmt.if]]）、`std::conjunction`（它的特化会在遇到第一个 `false` 时停止实例化后续的 `::value`），或者用**约束**：
+`T::value` 在实例化时就必须有意义，与运行期是否求值无关。正确的做法是使用 `if constexpr`（[[stmt.if]]）、`std::conjunction`（它的特化在遇到第一个 `false` 时就不再实例化后续的 `::value`），或者使用约束：
 
 ```cpp run title="logand-concept.cpp" ok
 #include <type_traits>
@@ -133,7 +133,7 @@ static_assert(!HasTrueValue<int>);   // OK: 第一个原子约束不满足，第
 int main() {}
 ```
 
-在 *constraint-expression* 中，顶层的 `&&` 和 `||` 不是运算符，而是约束的**合取**（conjunction）与**析取**（disjunction）（[[temp.constr.op]]）：满足性检查从左往右，合取的左操作数不满足时，右操作数**不做替换**，因此不会触发硬错误。这与 `bool` 表达式里的 `&&` 是两套规则。
+在 *constraint-expression* 中，顶层的 `&&` 和 `||` 不是运算符，而是约束的**合取**（conjunction）与**析取**（disjunction）（[[temp.constr.op]]）。满足性检查从左往右进行，合取的左操作数不满足时，右操作数不做替换，因此不会触发硬错误。这与 `bool` 表达式里的 `&&` 是两套不同的规则。
 
 ### 折叠表达式
 
@@ -141,10 +141,10 @@ int main() {}
 
 ## 优先级
 
-`&&` 的优先级高于 `||`：`a || b && c` 是 `a || (b && c)`。这在数学上与"乘法优先于加法"类似（布尔代数中与对应乘、或对应加），但混用时可读性差，Clang 的 `-Wlogical-op-parentheses`（`-Wparentheses` 的一部分）会建议加括号。两者都低于位运算 `|`，高于 `?:` 和赋值。替代记号分别是 `and`、`or`（[[lex.digraph]]）。
+`&&` 的优先级高于 `||`：`a || b && c` 是 `a || (b && c)`。这与数学中乘法优先于加法类似（布尔代数中与对应乘、或对应加），但混用时可读性差，Clang 的 `-Wlogical-op-parentheses`（`-Wparentheses` 的一部分）会建议加括号。两者都低于位运算 `|`，高于 `?:` 和赋值。替代记号分别是 `and`、`or`（[[lex.digraph]]）。
 
 !!! impl "实现视角"
-    短路通常编译为条件跳转。但 as-if 规则（[[intro.abstract]]）允许编译器在右操作数**没有副作用、不会出错且代价低**时，把 `a && b` 编译为无分支的 `a & b`（例如两个整数比较），以避免分支预测失败。反过来，`a & b` 写法的"无分支"意图也不一定能保留——优化器可能为了跳过昂贵的右操作数而引入分支。想要可靠的无分支代码，应检查生成的汇编。
+    短路通常编译为条件跳转。但 as-if 规则（[[intro.abstract]]）允许编译器在右操作数没有副作用、不会出错且代价低时，把 `a && b` 编译为无分支的 `a & b`（例如两个整数比较），以避免分支预测失败。反过来，用 `a & b` 表达的无分支意图也不一定能保留，优化器可能为了跳过昂贵的右操作数而引入分支。想要可靠的无分支代码，应检查生成的汇编。
 
 ## 陷阱
 
@@ -157,7 +157,7 @@ int main() {}
 !!! pitfall "以为 `a || b && c` 是 `(a || b) && c`"
     `&&` 优先级更高。
 
-!!! pitfall "把 `&&` 换成 `&` 以'优化'"
+!!! pitfall "为了优化把 `&&` 换成 `&`"
     失去短路后，依赖左操作数做守卫的右操作数可能出错（空指针、越界）；而且两边的求值变成无序的。
 
 ## 思考题
@@ -177,7 +177,7 @@ int main() {}
 <details markdown="1">
 <summary>答案</summary>
 
-C++14：`a && b` 被改写为函数调用 `operator&&(a, b)`，两个实参的求值顺序未指定（且在 C++14 中实参的求值甚至可以交错），没有保证。C++17：[[over.match.oper#2]] 规定"操作数按内置运算符规定的顺序求值"，内置 `&&` 左先右后，所以 `make("left")` 先于 `make("right")`；但两者都会被调用。注意，如果写成显式的函数调用 `operator&&(make("left"), make("right"))`，就不适用这条规则，两个实参之间只是**不确定顺序**（indeterminately sequenced，[[expr.call]]）。
+C++14：`a && b` 被改写为函数调用 `operator&&(a, b)`，两个实参的求值顺序未指定（且在 C++14 中实参的求值甚至可以交错），没有保证。C++17：[[over.match.oper#2]] 规定操作数按内置运算符规定的顺序求值，内置 `&&` 先左后右，所以 `make("left")` 先于 `make("right")`，但两者都会被调用。如果写成显式的函数调用 `operator&&(make("left"), make("right"))`，就不适用这条规则，两个实参之间只是不确定顺序（indeterminately sequenced，[[expr.call]]）。
 </details>
 
 ## 小结
