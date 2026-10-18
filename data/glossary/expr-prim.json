@@ -1,0 +1,19 @@
+[
+ {"id": "current-class", "en": "current class", "zh": "当前类", "def": "某程序点处，包含该点的最内层类作用域所关联的类。lambda 不引入类作用域，局部类会；`this` 的类型与隐式成员访问都以它为准。", "ref": "expr.prim.this#2"},
+ {"id": "implicitly-movable-entity", "en": "implicitly movable entity", "zh": "可隐式移动的实体", "def": "自动存储期的非 volatile 对象变量，或指向非 volatile 对象类型的右值引用变量。", "ref": "expr.prim.id.unqual#15"},
+ {"id": "move-eligible", "en": "move-eligible", "zh": "可隐式移动的（表达式）", "def": "指代可隐式移动实体、作为 `return`/`co_return`/`throw` 的（可带括号）操作数、且中间只隔着块作用域的 id 表达式或 splice 表达式；它是 xvalue（C++23 起）。", "ref": "expr.prim.id.unqual#15"},
+ {"id": "component-name", "en": "component name", "zh": "组成名字", "def": "一个构造中需要查找的各个名字，如 `N::C<int>::f` 中的 `N`、`C`、`f`；用于统一描述限定名查找。", "ref": "expr.prim.id.unqual#2"},
+ {"id": "terminal-name", "en": "terminal name", "zh": "终端名字", "def": "一个构造的组成名字中词法上最后出现的那个，如 `N::C<int>::f` 的终端名字是 `f`。", "ref": "expr.prim.id.unqual#2"},
+ {"id": "declarative-nested-name-specifier", "en": "declarative nested-name-specifier", "zh": "声明性嵌套名说明符", "def": "出现在类头名、枚举头名、声明符 id 或显式实例化中的 *nested-name-specifier*（如 `void N::f() {}` 中的 `N::`）；不能含 `decltype` 或 splice，所在声明须位于包含目标实体的作用域中（友元除外）。", "ref": "expr.prim.id.qual#3"},
+ {"id": "pseudo-destructor", "en": "pseudo-destructor", "zh": "伪析构函数", "def": "对非类类型（必须是标量类型）`T` 写出的析构函数名 `~T`；只能以 `p->~T()`/`obj.~T()` 的调用形式出现，C++20 起结束对象的生命周期。", "ref": "expr.prim.id.dtor#1"},
+ {"id": "closure-type", "en": "closure type", "zh": "闭包类型", "def": "lambda 表达式的类型：独一无二的无名非联合体类，不是聚合、不是 final；含函数调用运算符及按值捕获对应的无名数据成员。", "ref": "expr.prim.lambda.closure#1"},
+ {"id": "closure-object", "en": "closure object", "zh": "闭包对象", "def": "lambda 表达式（一个 prvalue）的结果对象，即闭包类型的实例。", "ref": "expr.prim.lambda.general#2"},
+ {"id": "generic-lambda", "en": "generic lambda", "zh": "泛型 lambda", "def": "形参中有 `auto` 占位符（含 `this auto`）或带模板形参列表的 lambda；其调用运算符是一个模板。", "ref": "expr.prim.lambda.general#6"},
+ {"id": "explicitly-captured", "en": "explicitly captured", "zh": "显式捕获", "def": "被捕获列表中的 *simple-capture*（`x`、`&x`、`this`、`*this`）直接指名的实体。", "ref": "expr.prim.lambda.capture#4"},
+ {"id": "implicitly-captured", "en": "implicitly captured", "zh": "隐式捕获", "def": "在实体 odr-usable 的作用域中被潜在引用、且（忽略 typeid 后）潜在求值时，被每个带默认捕获而未显式捕获它的中间 lambda 捕获；由语法决定，不要求 odr-use。", "ref": "expr.prim.lambda.capture#7"},
+ {"id": "captured-by-copy", "en": "captured by copy", "zh": "按值捕获", "def": "`[=]` 隐式捕获的非 `*this` 实体，或以非 `&`、非 `this` 形式显式捕获的实体；为其在闭包中声明一个无名非静态数据成员。", "ref": "expr.prim.lambda.capture#10"},
+ {"id": "captured-by-reference", "en": "captured by reference", "zh": "按引用捕获", "def": "被捕获但不是按值捕获的实体；闭包中是否为其声明成员是未指定的。位域与匿名联合体成员不能按引用捕获。", "ref": "expr.prim.lambda.capture#12"},
+ {"id": "unary-fold", "en": "unary fold", "zh": "一元折叠", "def": "形如 `(... op e)`（一元左折叠）或 `(e op ...)`（一元右折叠）的折叠表达式；空包时只有 `&&`、`||`、`,` 有定义的值。", "ref": "expr.prim.fold#2"},
+ {"id": "binary-fold", "en": "binary fold", "zh": "二元折叠", "def": "形如 `(e1 op ... op e2)` 的折叠表达式，两个运算符相同且恰好一侧含包；包在右为二元左折叠，包在左为二元右折叠，空包时结果为初值。", "ref": "expr.prim.fold#3"},
+ {"id": "requires-expression", "en": "requires-expression", "zh": "requires 表达式", "def": "`requires (形参) { 要求... }`，一个 `bool` prvalue；直接语境中的替换失败使其为 `false` 而非错误。", "ref": "expr.prim.req.general#2"}
+]
