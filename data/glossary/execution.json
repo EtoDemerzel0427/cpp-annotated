@@ -1,0 +1,198 @@
+[
+ {
+  "id": "execution-resource",
+  "en": "execution resource",
+  "zh": "执行资源",
+  "def": "管理一组（可能动态变化的）执行代理、替调用者执行并行工作的程序实体，如当前线程、系统线程池、外部加速器。执行资源执行异步操作，可以有效或失效。",
+  "ref": "exec.async.ops#1"
+ },
+ {
+  "id": "asynchronous-operation",
+  "en": "asynchronous operation",
+  "zh": "异步操作",
+  "def": "显式创建、至多显式启动一次、启动后终将恰好完成一次的程序执行单元；完成时带一组结果数据，处置为成功（value）、失败（error）、取消（stopped）三者之一。可以在别的执行资源上完成，也可以创建子操作。",
+  "ref": "exec.async.ops#2"
+ },
+ {
+  "id": "async-result",
+  "en": "async result",
+  "zh": "异步结果",
+  "def": "异步操作的完成处置（value / error / stopped）加上它的结果数据（result datums）。value 完成可带任意多个数据，error 完成恰带一个，stopped 完成不带数据。",
+  "ref": "exec.async.ops#2"
+ },
+ {
+  "id": "child-operation",
+  "en": "child operation",
+  "zh": "子操作",
+  "def": "由某个异步操作（父操作）创建的异步操作；若被启动，必定在父操作完成之前完成。这是 std::execution 结构化并发的基础。",
+  "ref": "exec.async.ops#2"
+ },
+ {
+  "id": "operation-state",
+  "en": "operation state",
+  "zh": "操作状态",
+  "def": "异步操作所关联的状态对象，由 connect(sender, receiver) 产生，拥有接收器。它必须活到异步操作完成；完成操作执行后它即失效，此后访问它的任何部分都是 UB。",
+  "ref": "exec.async.ops#3"
+ },
+ {
+  "id": "execution-environment",
+  "en": "environment (of an asynchronous operation)",
+  "zh": "环境",
+  "def": "表示异步操作调用者执行期属性的可查询对象（如停止令牌、分配器、调度器）。异步操作的环境等于其接收器的环境，用 get_env(rcvr) 取得。",
+  "ref": "exec.async.ops#4"
+ },
+ {
+  "id": "receiver",
+  "en": "receiver",
+  "zh": "接收器",
+  "def": "三个完成处理器（value、error、stopped）的聚合，代表异步操作的后续（continuation）；带有一个环境。由操作状态拥有。类型须派生出 receiver_concept、可无异常移动、不能是 final 类。",
+  "ref": "exec.async.ops#5"
+ },
+ {
+  "id": "completion-function",
+  "en": "completion function",
+  "zh": "完成函数",
+  "def": "set_value、set_error、set_stopped 三个定制点对象，第一个实参是接收器（必须是非 const 右值），其余实参是结果数据；调用它即通知接收器异步操作已完成。对它的有效调用称为完成操作。",
+  "ref": "exec.async.ops#6"
+ },
+ {
+  "id": "completion-tag",
+  "en": "completion tag",
+  "zh": "完成标签",
+  "def": "完成函数的无限定类型：set_value_t、set_error_t、set_stopped_t。完成签名用它作返回类型，如 set_value_t(int)。",
+  "ref": "exec.async.ops#6"
+ },
+ {
+  "id": "async-lifetime",
+  "en": "async lifetime",
+  "zh": "异步生存期",
+  "def": "异步操作的生存期：从其启动操作开始执行起，到其完成操作开始执行止。操作状态的生存期若先于它结束，行为未定义；操作状态可以在完成操作执行期间被销毁。",
+  "ref": "exec.async.ops#7"
+ },
+ {
+  "id": "sender",
+  "en": "sender",
+  "zh": "发送器",
+  "def": "一个或多个异步操作的工厂：与接收器 connect 得到操作状态，启动后通过完成函数把结果“发送”给接收器。发送器本身只是描述工作，不执行工作；它有一个称为属性（attributes）的可查询对象。",
+  "ref": "exec.async.ops#9"
+ },
+ {
+  "id": "scheduler",
+  "en": "scheduler",
+  "zh": "调度器",
+  "def": "执行资源的轻量句柄，提供统一的 schedule 接口；schedule(sch) 返回一个调度发送器，其操作在该资源的执行代理上以空的 value 完成。可复制、可比较相等，相等意味着同一执行资源。",
+  "ref": "exec.async.ops#10"
+ },
+ {
+  "id": "schedule-sender",
+  "en": "schedule sender",
+  "zh": "调度发送器",
+  "def": "schedule 表达式的结果。它的异步操作成功时在调度器关联执行资源的执行代理上执行一个不带数据的 value 完成，并且它的 value 完成调度器属性等于产生它的调度器。",
+  "ref": "exec.async.ops#10"
+ },
+ {
+  "id": "completion-scheduler",
+  "en": "completion scheduler",
+  "zh": "完成调度器",
+  "def": "其执行资源用于执行某种处置的完成操作的调度器。发送器可以通过属性上的 get_completion_scheduler<set_value_t> 等查询报告它；一旦报告，在别处完成即为 UB。",
+  "ref": "exec.async.ops#11"
+ },
+ {
+  "id": "sender-attributes",
+  "en": "attributes (of a sender)",
+  "zh": "发送器属性",
+  "def": "与发送器关联、描述发送器及其产生的异步操作特性的可查询对象，用 get_env(sndr) 取得，如完成调度器、完成 domain。注意它不是接收器那一侧的环境。",
+  "ref": "exec.async.ops#12"
+ },
+ {
+  "id": "completion-signature",
+  "en": "completion signature",
+  "zh": "完成签名",
+  "def": "描述一种完成操作的函数类型，形如 set_value_t(Vs...)、set_error_t(E)、set_stopped_t()。发送器类型与环境类型一起决定异步操作所有可能完成签名的集合，用 completion_signatures<...> 表示。",
+  "ref": "exec.async.ops#13"
+ },
+ {
+  "id": "non-dependent-sender",
+  "en": "non-dependent sender",
+  "zh": "非依赖发送器",
+  "def": "完成签名不依赖执行环境就能确定的发送器类型；即 get_completion_signatures<Sndr>() 不以 dependent_sender_error 退出。反之是 dependent_sender，如 read_env(get_scheduler)。",
+  "ref": "exec.async.ops#13"
+ },
+ {
+  "id": "sender-adaptor",
+  "en": "sender adaptor",
+  "zh": "发送器适配器",
+  "def": "以一个或多个子发送器（及其他实参）构造并返回父发送器的发送器算法，如 then、let_value、when_all。父发送器的异步操作是子发送器所创建操作的父操作。另两类发送器算法是发送器工厂（如 just）和发送器消费者（如 sync_wait）。",
+  "ref": "exec.async.ops#14"
+ },
+ {
+  "id": "queryable-object",
+  "en": "queryable object",
+  "zh": "可查询对象",
+  "def": "只读的键值集合，键是称为查询对象的定制点对象（如 get_stop_token）。查询 q(env, args...) 保持相等性、不修改实参，且等价于 env.query(q, args...)（若后者良构）。",
+  "ref": "exec.queryable.general#1"
+ },
+ {
+  "id": "forwarding-query",
+  "en": "forwarding query",
+  "zh": "转发查询",
+  "def": "forwarding_query(q) 为 true 的查询对象 q：适配器在把接收器环境传给子操作（FWD-ENV）时只转发这类查询。派生自 forwarding_query_t 或成员 query(forwarding_query) 返回 true 即可。",
+  "ref": "exec.fwd.env#1"
+ },
+ {
+  "id": "permissible-completion",
+  "en": "permissible completion",
+  "zh": "允许的完成",
+  "def": "完成签名出现在 completion_signatures_of_t<Sndr, Env> 中的完成操作。sender_in<Sndr, Env> 的语义要求是：连接并启动后所有潜在求值的完成操作都是允许的完成。",
+  "ref": "exec.snd.concepts#3"
+ },
+ {
+  "id": "pipeable-sender-adaptor-closure-object",
+  "en": "pipeable sender adaptor closure object",
+  "zh": "可管道化发送器适配器闭包对象",
+  "def": "接受发送器、返回发送器的函数对象 c，使 c(sndr) 与 sndr | c 等价；两个闭包可用 c | d 组合。then(f) 这类“缺第一个实参”的调用就返回这样的闭包。",
+  "ref": "exec.adapt.obj#1"
+ },
+ {
+  "id": "execution-domain",
+  "en": "execution domain",
+  "zh": "执行 domain",
+  "def": "与执行资源关联的空标签类型（domain tag），用于选择发送器算法的实现：connect 前，transform_sender 按完成 domain 与启动 domain 调用其 transform_sender 改写发送器。默认是 default_domain。",
+  "ref": "exec.get.domain#1"
+ },
+ {
+  "id": "inlines-the-receiver",
+  "en": "inlines the receiver",
+  "zh": "内联接收器",
+  "def": "connect(sndr, rcvr) 求值期间从 rcvr 传递构造出的所有对象都在该求值内结束生存期，即操作状态不存储接收器，需要时用 Rcvr::make_receiver_for(addressof(op)) 现场重建（inlinable_receiver）。",
+  "ref": "exec.recv.concepts#6"
+ },
+ {
+  "id": "async-scope",
+  "en": "async scope",
+  "zh": "异步作用域",
+  "def": "跟踪一组与之关联（association）的异步操作的对象，如 counting_scope；可以 join 等待所有关联操作结束，可以 close 拒绝新关联。spawn、spawn_future、associate 通过 scope 令牌与它建立关联。",
+  "ref": "exec.scope.concepts#3"
+ },
+ {
+  "id": "scope-token",
+  "en": "scope token",
+  "zh": "作用域令牌",
+  "def": "满足 scope_token 的可复制句柄：try_associate() 尝试在其关联 scope 中获取一个关联（返回 scope_association 对象，engaged 即成功），wrap(sndr) 包装发送器而不改变完成签名。",
+  "ref": "exec.scope.concepts#3"
+ },
+ {
+  "id": "scope-association",
+  "en": "scope association",
+  "zh": "作用域关联",
+  "def": "满足 scope_association 的只移动 RAII 对象：engaged 时拥有与某 async scope 的一个关联，析构时释放它（使 scope 计数减一）。默认构造与被移走的对象不 engaged。",
+  "ref": "exec.scope.concepts#1"
+ },
+ {
+  "id": "exec-awaitable",
+  "en": "awaitable (in [exec])",
+  "zh": "可等待体（执行库意义）",
+  "def": "在给定上下文中可以作为 co_await 操作数的表达式。发送器概念把可等待体识别为发送器，其完成签名为 set_value_t(await 结果)、set_error_t(exception_ptr)、set_stopped_t()。",
+  "ref": "exec.awaitable#1"
+ }
+]
