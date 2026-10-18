@@ -1,0 +1,11 @@
+[
+ {"id": "parallel-algorithm", "en": "parallel algorithm", "zh": "并行算法", "def": "标准中列出的、带有名为 `ExecutionPolicy` 的模板形参或受仅用于说明的概念 *execution-policy* 约束的算法函数模板。其第一个函数形参是执行策略，元素访问函数在何处、以何种顺序执行由策略决定。", "ref": "algorithms.parallel.defns#2"},
+ {"id": "execution-policy-template-parameter", "en": "execution policy template parameter", "zh": "执行策略模板形参", "def": "并行算法中名为 `ExecutionPolicy` 或受 *execution-policy* 约束的模板形参；只有当它满足 `is_execution_policy_v<remove_cvref_t<Ep>>` 时该重载才参与重载决议。", "ref": "algorithms.parallel.defns#2"},
+ {"id": "projection", "en": "projection", "zh": "投影", "def": "`std::ranges` 算法的可选可调用实参 `proj`（默认 `identity`）：算法先以 `invoke(proj, *i)` 变换元素，再交给谓词或比较器。可以是成员指针，如 `ranges::sort(v, {}, &T::key)`。", "ref": "algorithms.requirements"},
+ {"id": "sorted-with-respect-to", "en": "sorted with respect to comp and proj", "zh": "相对 comp 与 proj 有序", "def": "对序列中任意位置 `i` 与其后任意位置 `i + n`，`invoke(comp, invoke(proj, *(i + n)), invoke(proj, *i))` 都为 false——即不存在逆序，允许等价元素相邻。", "ref": "alg.sorting.general#5"},
+ {"id": "partitioned-with-respect-to", "en": "partitioned with respect to an expression", "zh": "相对表达式划分", "def": "序列 `[start, finish)` 存在分界 `n`，使 `f(*(start + i))` 为真当且仅当 `i < n`；即使表达式为真的元素全部排在前面。这是二分查找系列算法真正的前置条件。", "ref": "alg.sorting.general#7"},
+ {"id": "heap-with-respect-to", "en": "heap with respect to comp and proj", "zh": "相对 comp 与 proj 的堆", "def": "随机访问区间 `[a, b)` 中，对所有 0 < i < N，父元素 `a[(i−1)/2]` 都不“小于” `a[i]`，并且可以 O(log N) 地由 `pop_heap` 取出首元素、由 `push_heap` 加入新元素。默认 `less` 下是最大堆。", "ref": "alg.heap.operations.general#1"},
+ {"id": "generalized-noncommutative-sum", "en": "GENERALIZED_NONCOMMUTATIVE_SUM", "zh": "广义非交换和", "def": "`<numeric>` 中用来定义 scan 系列的数学记号：保持元素顺序、但允许任意加括号的 `op` 归约。只有当 `op` 满足结合律时结果唯一。", "ref": "numerics.defns#1"},
+ {"id": "generalized-sum", "en": "GENERALIZED_SUM", "zh": "广义和", "def": "对元素的任意排列求 *GENERALIZED_NONCOMMUTATIVE_SUM*：顺序与括号都可任意。`reduce`、`transform_reduce` 以它定义，只有当 `op` 既结合又交换时结果唯一（浮点加法不满足）。", "ref": "numerics.defns#2"},
+ {"id": "saturation-arithmetic", "en": "saturation arithmetic", "zh": "饱和算术", "def": "先按无限精度计算整数运算的数学结果，若无法表示为结果类型，则取该类型最大值与最小值中更接近数学结果的那个，而非回绕或 UB。C++26 的 `saturating_add` 等提供此语义。", "ref": "numeric.sat.func#1"}
+]
