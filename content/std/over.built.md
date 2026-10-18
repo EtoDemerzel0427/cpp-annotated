@@ -8,7 +8,7 @@ tags: 重载决议, 运算符, 内建运算符
 updated: 2026-10-17
 ---
 
-[[over.match.oper]] 说：只要运算符有一个操作数是类或枚举类型，就做一次重载决议，候选集里除了用户写的 `operator@`，还有一类**内建候选**（[[g:built-in-candidate|built-in candidate]]）。本节就是那份清单——一族"假想的"函数声明，如 `int operator+(int, int)`、`T& operator*(T*)`、`bool operator<(T, T)`（`T` 为指针）。
+[[over.match.oper]] 说：只要运算符有一个操作数是类或枚举类型，就做一次重载决议，候选集里除了用户写的 `operator@`，还有一类**内建候选**（built-in candidate）。本节就是那份清单——一族"假想的"函数声明，如 `int operator+(int, int)`、`T& operator*(T*)`、`bool operator<(T, T)`（`T` 为指针）。
 
 为什么需要它们？考虑：
 
@@ -85,7 +85,7 @@ int main() {
 
 几处细节：
 
-- ¶9 的返回类型"仅作说明"，真正的结果类型由 [[expr.mptr.oper]] 决定（例如对右值对象应用 `->*`… 这里左操作数是指针，结果总是左值）。
+- ¶9 的返回类型"仅作说明"，真正的结果类型与值类别由 [[expr.mptr.oper]] 决定（例如 `T` 是函数类型时，结果只能立即用作函数调用的左操作数）。
 - ¶11–¶12：三路比较的内建候选要用 `std::strong_ordering`/`std::partial_ordering`，所以需要 `#include <compare>`，否则 Clang 报 "cannot use builtin operator '<=>' because type 'std::strong_ordering' was not found"。¶15 中 `R` 由 [[expr.spaceship]] 决定。
 - ¶16 的 `std::meta::info` 是 C++26 静态反射加入的 {{c++26}}：反射值只能比较相等，不能排序。
 - ¶24 注 3：`?:` 不能重载，这里的"`operator?:`"只是为 [[expr.cond#6]] 的重载决议而写的描述。¶24 没有列出无作用域枚举，因为它们可经提升匹配 `L`、`R`；¶25 才补上有作用域枚举（它们不能提升）。
@@ -316,9 +316,9 @@ int main(int argc, char**) {
 
 !!! history
     - **C++98**：本节框架确立，包括 ¶24 的"`operator?:`"描述手法。
-    - **C++11**：加入 `std::nullptr_t` 的比较候选；有作用域枚举出现，¶25 为其补上 `?:` 候选（有作用域枚举不能提升，不被 ¶24 覆盖）。
+    - **C++11**：`std::nullptr_t` 与有作用域枚举进入语言；本节相应地有了 `nullptr_t` 的相等比较候选，以及有作用域枚举的 `?:` 候选（¶25；有作用域枚举不能提升，不被 ¶24 覆盖）。
     - **C++17**：删除 `bool` 的 `++`（¶4 中"除 `bool` 外"）。
-    - **C++20**：三路比较 `<=>` 的候选（¶11、¶12、¶15）；对 `volatile` 的部分复合操作的弃用不影响候选本身。
+    - **C++20**：三路比较 `<=>` 的候选（¶11、¶12、¶15）。
     - **C++26**：`std::meta::info` 的相等比较（¶16）；枚举与浮点/其他枚举的混合算术非良构，使部分经 ¶10 选中的组合在随后检查中失败。
 
 ## 陷阱

@@ -296,7 +296,7 @@ int main() {
 
 对 `postfix-expression ( expression-list_opt )`（*postfix-expression* 是类类型），由 [[over.call.object]] 进行重载决议：
 
-- 若选中**代理调用函数**（[[g:surrogate-call-function|surrogate call function]]，由转换到函数指针/引用的转换函数生成），设 `e` 为对 *postfix-expression* 调用对应转换函数的结果，表达式解释为 `e(expression-list)`；
+- 若选中**代理调用函数**（surrogate call function，由转换到函数指针/引用的转换函数生成），设 `e` 为对 *postfix-expression* 调用对应转换函数的结果，表达式解释为 `e(expression-list)`；
 - 否则解释为 `postfix-expression.operator()(expression-list)`。
 
 注意措辞是"成员函数"而不是"非静态成员函数"：这正是 C++23 [[P1169R4]] 引入 **`static operator()`** 的方式。无捕获 lambda 也可以声明为 `static`。静态的 `operator()` 不需要传递 `this`，对于无状态函数对象（比较器、哈希、投影）可以省掉一个寄存器和一次间接。

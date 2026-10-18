@@ -1,0 +1,13 @@
+[
+  {"id": "operator-function", "en": "operator function", "zh": "运算符函数", "def": "以 operator-function-id（`operator` 加一个可重载运算符）为名声明的函数，或运算符函数模板的特化；它“实现”其名字中的运算符，通常经运算符表达式隐式调用。", "ref": "over.oper.general#1"},
+  {"id": "prefix-unary-operator-function", "en": "prefix unary operator function", "zh": "前缀一元运算符函数", "def": "名为 `operator@`（`@` 为前缀一元运算符）的函数：要么是没有非对象形参的非静态成员函数，要么是恰有一个形参的非成员函数。", "ref": "over.unary#1"},
+  {"id": "binary-operator-function", "en": "binary operator function", "zh": "二元运算符函数", "def": "名为 `operator@`（`@` 为二元运算符）的函数：要么是恰有一个非对象形参的非静态成员函数，要么是恰有两个形参的非成员函数。", "ref": "over.binary.general#1"},
+  {"id": "comparison-operator-function", "en": "comparison operator function", "zh": "比较运算符函数", "def": "相等运算符函数（`==`、`!=`）、关系运算符函数（`<`、`>`、`<=`、`>=`）或三路比较运算符函数（`<=>`）的统称；它们可以被预置。", "ref": "over.binary.general#2"},
+  {"id": "promoted-integral-type", "en": "promoted integral type", "zh": "提升后的整型", "def": "经整型提升后保持不变的 cv 无限定整型，如 `int`、`long`，不包括 `char`、`short`、`bool` 等。内建候选中的算术候选只针对这类类型生成。", "ref": "over.built#2"},
+  {"id": "literal-suffix-identifier", "en": "literal suffix identifier", "zh": "字面量后缀标识符", "def": "literal-operator-id 中的 ud-suffix 或标识符，即 `operator\"\"_km` 中的 `_km`。不以下划线开头或含 `__` 的保留，使用它们的声明 IFNDR。", "ref": "over.literal#1"},
+  {"id": "literal-operator", "en": "literal operator", "zh": "字面量运算符", "def": "以 literal-operator-id 为名声明的命名空间作用域函数；形参列表必须是 13 种固定形式之一，用于实现用户定义字面量。", "ref": "over.literal#2"},
+  {"id": "literal-operator-template", "en": "literal operator template", "zh": "字面量运算符模板", "def": "以 literal-operator-id 为名声明的函数模板；函数形参列表必须为空，且必须是数值字面量运算符模板或字符串字面量运算符模板。", "ref": "over.literal#2"},
+  {"id": "raw-literal-operator", "en": "raw literal operator", "zh": "原始字面量运算符", "def": "只有一个 `const char*` 形参的字面量运算符；接收整数或浮点字面量未经解释的拼写。", "ref": "over.literal#4"},
+  {"id": "numeric-literal-operator-template", "en": "numeric literal operator template", "zh": "数值字面量运算符模板", "def": "模板形参列表只有一个元素类型为 `char` 的常量模板形参包（`template<char...>`）的字面量运算符模板；整数或浮点字面量的各字符作为模板实参传入。", "ref": "over.literal#5"},
+  {"id": "string-literal-operator-template", "en": "string literal operator template", "zh": "字符串字面量运算符模板", "def": "模板形参列表只有一个类类型常量模板形参的字面量运算符模板（C++20）；字符串字面量本身作为该形参的模板实参。", "ref": "over.literal#5"}
+]
