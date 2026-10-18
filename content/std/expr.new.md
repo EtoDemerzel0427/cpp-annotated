@@ -1,6 +1,6 @@
 ---
 title: new 表达式
-summary: new-expression 创建动态存储期对象的全过程：被分配类型与 auto/CTAD 推导、数组边界与 bad_array_new_length、分配函数的查找与实参（大小、对齐、placement 实参）、数组开销（cookie）、分配省略与合并、初始化（默认初始化 vs 值初始化）与求值顺序、初始化抛异常时匹配的释放函数
+summary: new-expression 创建动态存储期对象的全过程：被分配类型与 auto/CTAD 推导、数组边界与 bad_array_new_length、分配函数的查找与实参（大小、对齐、placement 实参）、数组开销（cookie）、分配省略与合并、初始化（默认初始化与值初始化）与求值顺序、初始化抛出异常时匹配的释放函数
 status: draft
 papers: N3664, P0035R4, P0145R3, P0784R7, P1009R2, P2747R2
 related: expr.delete, basic.stc.dynamic, basic.life, intro.object, class.free, new.delete, dcl.init, expr.const.core, basic.align
@@ -8,18 +8,18 @@ tags: new, operator new, 动态内存, placement new, 对齐, 分配省略
 updated: 2026-10-17
 ---
 
-`new T(args)` 看起来像一次函数调用，实际上是**两件事**的组合：
+`new T(args)` 看起来像一次函数调用，实际上是**两件事的组合**：
 
-1. 调用一个**分配函数**（allocation function，名为 `operator new` 或 `operator new[]`）取得原始存储；
-2. 在这块存储上**初始化**一个对象。
+1. 调用一个分配函数（allocation function，名为 `operator new` 或 `operator new[]`）取得原始存储；
+2. 在这块存储上初始化一个对象。
 
-两件事之间还夹着一大堆规则：分配函数怎么选、传什么实参、数组要不要额外开销、初始化抛异常时谁来释放内存、编译器能不能干脆不分配……[expr.new] 是标准中段落最多的表达式条款之一（32 段），本页逐段讲解。
+两件事之间还夹着大量规则：分配函数怎么选、传什么实参、数组要不要额外开销、初始化抛出异常时由谁释放内存、编译器能不能干脆不分配，等等。[expr.new] 是标准中段落最多的表达式条款之一（32 段），本页逐段讲解。
 
-与本节配合阅读：分配/释放函数本身的约束在 [[basic.stc.dynamic]]，标准库提供的版本在 [[new.delete]]，类专属版本在 [[class.free]]，配对的 [[expr.delete]]；对象何时开始存在见 [[intro.object]]、[[basic.life]]；初始化语义见 [[dcl.init]]。
+建议配合阅读：分配/释放函数本身的约束在 [[basic.stc.dynamic]]，标准库提供的版本在 [[new.delete]]，类专属版本在 [[class.free]]，与之配对的是 [[expr.delete]]；对象何时开始存在见 [[intro.object]]、[[basic.life]]；初始化语义见 [[dcl.init]]。
 
 ## 被分配类型（¶1）
 
-¶1 *new-expression* 试图创建一个由 *new-type-id* 或 *nofun-type-id* 指定类型的对象，这个类型称为**被分配类型**（[[g:allocated-type]]）。它必须是**完整对象类型**，但**不能是抽象类**或抽象类的数组。
+¶1 *new-expression* 试图创建一个由 *new-type-id* 或 *nofun-type-id* 指定类型的对象，这个类型称为**被分配类型**（[[g:allocated-type]]）。它必须是完整对象类型，但不能是抽象类或抽象类的数组。
 
 - 注 1：引用不是对象，所以不能 `new` 一个引用。
 - 注 2：类型可以带 cv 限定，此时创建的对象就是 cv 限定的：`new const int(5)` 创建一个 `const int` 对象，结果类型是 `const int*`。
@@ -55,7 +55,7 @@ void g(int n) {
 
 ## 占位符类型的推导（¶2）
 
-¶2 如果 *new-type-id*（或 *nofun-type-id*）的类型说明符里有占位符（`auto`、`decltype(auto)`）或类模板名（CTAD 的占位符），被分配类型按**虚构声明** `T x init;` 推导，其中 `init` 是 *new-initializer*。
+¶2 如果 *new-type-id*（或 *nofun-type-id*）的类型说明符里有占位符（`auto`、`decltype(auto)`）或类模板名（CTAD 的占位符），被分配类型按虚构的声明 `T x init;` 推导，其中 `init` 是 *new-initializer*。
 
 ```cpp title="new-auto.cpp" ok
 #include <type_traits>
@@ -79,9 +79,9 @@ auto c = new auto{1, 2};    // error: auto x{1, 2}; 非良构（直接列表初�
 
 ## 文法歧义（¶3–¶5）
 
-¶3 *new-type-id* 取**尽可能长**的 *new-declarator* 序列。于是 `new int * i` 被解析为 `(new int*) i`——语法错误，而不是 `(new int) * i`。
+¶3 *new-type-id* 取尽可能长的 *new-declarator* 序列。于是 `new int * i` 解析为 `(new int*) i`，这是语法错误，而不会解析为 `(new int) * i`。
 
-¶4（注）括号在 *new-type-id* 中可能有出人意料的效果：`new int(*[10])()` 会被解析为 `(new int)(*[10])()`——把 `(*[10])` 当成 `int` 的初始化器，非良构。要分配复合类型（如函数指针数组），使用带括号的 `new ( nofun-type-id )` 形式。
+¶4（注）括号在 *new-type-id* 中可能产生出人意料的效果：`new int(*[10])()` 会解析为 `(new int)(*[10])()`，即把 `(*[10])` 当成 `int` 的初始化器，这是非良构的。要分配复合类型（如函数指针数组），应使用带括号的 `new ( nofun-type-id )` 形式。
 
 ¶5 *noptr-new-declarator* 中的属性说明符属于相应的数组类型。
 
@@ -96,16 +96,16 @@ void f(int i) {
 
 ### 第一维可以是运行期值，其余维必须是正常量（¶6）
 
-¶6 *noptr-new-declarator* 中的 *constant-expression*（第二维及以后）必须是 `std::size_t` 类型的**转换后的常量表达式**（[[expr.const.const]]），且值**大于零**。第一维是普通的 *expression*，可以是运行期值，也可以是 0。
+¶6 *noptr-new-declarator* 中的 *constant-expression*（第二维及以后）必须是 `std::size_t` 类型的转换后的常量表达式（[[expr.const.const]]），且值大于零。第一维是普通的 *expression*，可以是运行期值，也可以是 0。
 
 | 写法（`int n = 42;`） | 结果 |
 |---|---|
 | `new float[n][5]` | OK：第一维是表达式；结果类型 `float(*)[5]` |
 | `new float[5][n]` | 非良构：第二维不是常量 |
-| `new float[0]` | OK：分配一个**零元素数组** |
+| `new float[0]` | OK：分配一个零元素数组 |
 | `new float[n][0]` | 非良构：第二维必须 > 0 |
 
-为什么只有第一维能是运行期值？因为 *new-expression* 的结果是指向**首元素**的指针（¶11），而首元素的类型 `float[5]` 必须是编译期已知的完整类型，指针运算才有意义。C++ 没有 C99 的 VLA 类型。
+为什么只有第一维能是运行期值？因为 *new-expression* 的结果是指向首元素的指针（¶11），而首元素的类型 `float[5]` 必须是编译期已知的完整类型，指针运算才有意义。C++ 没有 C99 的 VLA 类型。
 
 ```cpp title="array-bounds.cpp" ok
 #include <type_traits>
@@ -124,11 +124,11 @@ void f(int n) {
 }
 ```
 
-（`new float[n][0]` 按 ¶6 非良构；Clang 23 只在 `-pedantic` 下给出"zero size arrays are an extension"的警告——警告也算诊断，满足"必须诊断"的要求，但默认配置下它会被接受为扩展。）
+（按 ¶6，`new float[n][0]` 是非良构的；Clang 23 只在 `-pedantic` 下给出 “zero size arrays are an extension” 的警告。警告也算诊断，满足必须诊断的要求，但在默认配置下它会作为扩展被接受。）
 
 ### 未知边界数组（¶7）{{c++20}}
 
-¶7 如果类型是**未知边界数组**，*new-initializer* 不能省略；元素个数 *n* 由初始化器提供的初始元素个数确定（[[dcl.init.aggr]]、[[dcl.init.string]]）。
+¶7 如果类型是未知边界数组，*new-initializer* 不能省略；元素个数 *n* 由初始化器提供的初始元素个数确定（[[dcl.init.aggr]]、[[dcl.init.string]]）。
 
 ```cpp title="unknown-bound.cpp" ok
 auto a = new int[]{1, 2, 3};      // n = 3
@@ -140,22 +140,22 @@ auto c = new int[](1, 2);         // n = 2（C++20 的括号聚合初始化）
 auto a = new int[];               // error: 未知边界必须有初始化器
 ```
 
-在 C++20 之前，`new int[]{1, 2, 3}` 是非良构的（只允许显式边界），由 [[P1009R2]] 修正，作为对 C++11 的缺陷报告。
+在 C++20 之前，`new int[]{1, 2, 3}` 是非良构的（只允许显式边界）。[[P1009R2]] 修正了这一点，并作为对 C++11 的缺陷报告。
 
 ### 无效的数组大小（¶8）
 
-¶8 第一维表达式隐式转换为 `std::size_t`。以下情况其值**无效**：
+¶8 第一维表达式隐式转换为 `std::size_t`。以下情况下其值**无效**：
 
-- ¶8.1 非类类型，转换**之前**的值小于 0；
-- ¶8.2 类类型，在应用第二次标准转换**之前**的值小于 0（脚注 53：若转换函数返回有符号整数，第二次标准转换会把它转成 `size_t`，负数就"消失"了——所以必须在那之前检查）；
-- ¶8.3 分配对象的大小会超过实现定义的上限（例如 `n * sizeof(T)` 溢出）；
-- ¶8.4 *new-initializer* 是花括号列表或括号表达式列表，而提供的初始化器个数（字符串字面量含 `'\0'`）**多于**元素个数。
+- ¶8.1 非类类型，转换之前的值小于 0；
+- ¶8.2 类类型，在应用第二次标准转换之前的值小于 0（脚注 53：如果转换函数返回有符号整数，第二次标准转换会把它转成 `size_t`，负数就看不出来了，所以必须在那之前检查）；
+- ¶8.3 所分配对象的大小会超过实现定义的上限（例如 `n * sizeof(T)` 溢出）；
+- ¶8.4 *new-initializer* 是花括号列表或括号表达式列表，而提供的初始化器个数（字符串字面量包括 `'\0'`）多于元素个数。
 
 值无效时：
 
-- ¶8.5 若该表达式是潜在求值的**核心常量表达式**，程序**非良构**；
-- ¶8.6 否则**不调用**分配函数，而是：
-    - ¶8.6.1 若本应调用的分配函数有**不抛出**的异常规约（如 `std::nothrow` 版本），*new-expression* 的值是**空指针**；
+- ¶8.5 如果该表达式是潜在求值的核心常量表达式，程序**非良构**；
+- ¶8.6 否则不调用分配函数，而是：
+    - ¶8.6.1 如果本应调用的分配函数具有不抛出的异常规约（如 `std::nothrow` 版本），*new-expression* 的值是空指针；
     - ¶8.6.2 否则抛出一个能被 `std::bad_array_new_length` 类型的 handler 捕获的异常。
 
 值为 0 时照常调用分配函数，分配一个零元素数组。
@@ -184,16 +184,16 @@ auto b = new int[2]{1, 2, 3};  // error: ¶8.4 + ¶8.5，初始化器多于元�
 ```
 
 !!! warning "Clang 的偏差"
-    按 ¶8.6.2，运行期负数边界应抛出 `std::bad_array_new_length`（它派生自 `std::bad_alloc`）。本地验证 Clang 23 的做法是把大小**饱和**为 `SIZE_MAX` 再照常调用 `operator new[]`，于是抛出的是普通的 `std::bad_alloc`——只捕获 `bad_array_new_length` 的代码会漏掉它。（在 AddressSanitizer 下还会直接报告"requested allocation size exceeds maximum"。）这还违反了"不调用分配函数"的要求：用户替换的 `operator new[]` 会看到一个 `SIZE_MAX` 的请求。初始化器过多的情形（¶8.4）同样如此。Itanium C++ ABI 为此提供了运行时函数 `__cxa_throw_bad_array_new_length`，GCC 使用它来实现 ¶8.6.2。
+    按 ¶8.6.2，运行期的负数边界应抛出 `std::bad_array_new_length`（它派生自 `std::bad_alloc`）。本地验证发现，Clang 23 的做法是把大小饱和为 `SIZE_MAX`，再照常调用 `operator new[]`，于是抛出的是普通的 `std::bad_alloc`，只捕获 `bad_array_new_length` 的代码会漏掉它。（在 AddressSanitizer 下还会直接报告 “requested allocation size exceeds maximum”。）这还违反了不调用分配函数的要求：用户替换的 `operator new[]` 会看到一个大小为 `SIZE_MAX` 的请求。初始化器过多的情形（¶8.4）同样如此。Itanium C++ ABI 为此提供了运行时函数 `__cxa_throw_bad_array_new_length`，GCC 用它来实现 ¶8.6.2。
 
 ### 部分初始化的数组：假想元素检查（¶9）
 
-¶9 若被分配类型是数组，初始化器是花括号或括号列表，而边界表达式**不是**核心常量表达式，编译器不知道列表会不会填满整个数组，于是要**检查一个假想元素**的初始化是否合法：
+¶9 如果被分配类型是数组，初始化器是花括号列表或括号列表，而边界表达式不是核心常量表达式，那么编译器不知道列表会不会填满整个数组，于是要检查一个**假想元素**的初始化是否合法：
 
-- ¶9.1 花括号列表：假想元素从**空初始化列表复制初始化**（`T x = {};`）；
-- ¶9.2 括号列表：假想元素**值初始化**。
+- ¶9.1 花括号列表：假想元素从空初始化列表复制初始化（`T x = {};`）；
+- ¶9.2 括号列表：假想元素值初始化。
 
-注 5：数组可能比初始化器多出若干元素，它们需要按此方式初始化。这条规则保证"剩余元素"的初始化在编译期就通过语义检查。
+注 5：数组的元素可能比初始化器多，多出的元素需要按这种方式初始化。这条规则保证剩余元素的初始化在编译期就通过了语义检查。
 
 ```cpp title="hypothetical-element.cpp" error
 struct E { explicit E(); E(int); };
@@ -211,8 +211,8 @@ void f(int n) {
 
 ¶11 结果是 prvalue：
 
-- 被分配类型是"N 个 `T` 的数组"（使用了 *noptr-new-declarator*，或 typedef 名指代数组类型）时，结果类型是 `T*`，指向**首元素**（若有）；
-- 否则结果类型是"指向被分配类型的指针"，指向所创建的对象。
+- 被分配类型是“N 个 `T` 的数组”（使用了 *noptr-new-declarator*，或 typedef 名指代数组类型）时，结果类型是 `T*`，指向首元素（如果有）；
+- 否则结果类型是“指向被分配类型的指针”，指向所创建的对象。
 
 注 7：`new int` 和 `new int[10]` 的类型都是 `int*`；`new int[i][10]` 的类型是 `int (*)[10]`。
 
@@ -222,35 +222,35 @@ void f(int n) {
     char* p = new Buf;    // 实际上是数组 new！
     delete p;             // UB：必须用 delete[]
     ```
-    ¶11 明确说"或 *new-type-id* 指代数组类型"时也算数组。被分配类型是数组，就调用 `operator new[]`，就必须配 `delete[]`——与写法无关（[[expr.delete#2]] 注 1）。
+    ¶11 明确说，*new-type-id* 指代数组类型时也算数组。只要被分配类型是数组，就调用 `operator new[]`，也就必须配 `delete[]`，与写法无关（[[expr.delete#2]] 注 1）。
 
 ## 分配函数（¶12–¶23）
 
 ### 名字与查找（¶12–¶13）
 
-¶12 *new-expression* **可能**通过调用分配函数获得存储（"可能"是因为 ¶14 允许省略）。若初始化抛异常，它可能调用**释放函数**归还存储。名字取决于被分配类型：
+¶12 *new-expression* 可能通过调用分配函数获得存储（说可能，是因为 ¶14 允许省略）。如果初始化抛出异常，它可能调用**释放函数**归还存储。函数名取决于被分配类型：
 
 | 被分配类型 | 分配函数 | 释放函数 |
 |---|---|---|
 | 非数组 | `operator new` | `operator delete` |
 | 数组 | `operator new[]` | `operator delete[]` |
 
-注 8：实现提供全局默认版本；程序可以**替换**它们（[[replacement.functions]]），也可以提供**类专属**版本（[[class.free]]）。分配函数集合里也包括**不分配**的函数，如 placement 形式 `operator new(size_t, void*)`（[[new.delete.placement]]）。
+注 8：实现提供全局的默认版本；程序可以替换它们（[[replacement.functions]]），也可以提供类专属版本（[[class.free]]）。分配函数集合里也包括不分配存储的函数，如 placement 形式 `operator new(size_t, void*)`（[[new.delete.placement]]）。
 
-¶13 查找规则：
+¶13 查找规则如下：
 
-- 没有以 `::` 开头，且被分配类型是类类型 `T`（或其数组）：先在 **`T` 的作用域**中查找（[[class.member.lookup]]，包括基类）；
-- 否则，或者类作用域中没找到：在**全局作用域**查找。
+- 没有以 `::` 开头，且被分配类型是类类型 `T`（或其数组）时，先在 `T` 的作用域中查找（[[class.member.lookup]]，包括基类）；
+- 否则，或者类作用域中没有找到，就在全局作用域查找。
 
-注意这是"**查找**"，不是"重载决议后失败再回退"：一旦类作用域里找到任何 `operator new`，全局版本就**被隐藏**了。类只声明了 placement 版本 `operator new(size_t, Arena&)` 时，`new T` 就会因为找不到 `operator new(size_t)` 而非良构——这是 [[class.free]] 中"要么全写，要么用 `using ::operator new;` 引入"的原因。
+注意这里说的是名字查找，而不是重载决议失败后再回退：**一旦在类作用域里找到任何 `operator new`，全局版本就被隐藏了**。如果类只声明了 placement 版本 `operator new(size_t, Arena&)`，`new T` 就会因为找不到 `operator new(size_t)` 而非良构。这就是 [[class.free]] 中要求要么全部写出、要么用 `using ::operator new;` 引入的原因。
 
 ### 分配省略（¶14–¶15）{{c++14}}
 
-¶14 实现**可以省略**对**可替换的全局分配函数**的调用。省略时，存储由实现提供，或通过**扩展另一个 *new-expression* 的分配**提供。
+¶14 实现可以省略对可替换的全局分配函数的调用。省略时，存储由实现提供，或者通过扩展另一个 *new-expression* 的分配来提供。
 
-¶15 在**常量表达式的求值中**，对可替换分配函数的调用**总是被省略**（[[expr.const.core]]）——这是 `constexpr` 中能用 `new` 的基础。
+¶15 在常量表达式的求值中，对可替换分配函数的调用**总是被省略**（[[expr.const.core]]），这是在 `constexpr` 中能使用 `new` 的基础。
 
-为什么需要 ¶14？在 C++14 之前，`new`/`delete` 调用的是可被用户替换的函数，而替换函数可能有可观察的副作用（打印日志、计数），所以编译器在 as-if 规则下**不能**删除一对多余的 `new`/`delete`。[[N3664]] 明确放宽：对**可替换全局**分配函数的调用本身不再被视为必须保留的行为，即使用户替换了它，也可能根本不被调用。这样下面的函数可以优化成 `return 42;`：
+为什么需要 ¶14？在 C++14 之前，`new`/`delete` 调用的是可由用户替换的函数，而替换函数可能有可观察的副作用（打印日志、计数），所以编译器在 as-if 规则下不能删除一对多余的 `new`/`delete`。[[N3664]] 明确放宽了这一点：对可替换全局分配函数的调用本身不再被视为必须保留的行为，即使用户替换了它，它也可能根本不被调用。这样，下面的函数就可以优化成 `return 42;`：
 
 ```cpp title="elision.cpp" ok
 int f() {
@@ -261,48 +261,48 @@ int f() {
 }
 ```
 
-注意范围：只适用于 *new-expression* 调用的**可替换全局**分配函数。**类专属**的 `operator new`、**直接调用** `::operator new(n)` 的函数调用表达式、placement 形式都不在其列。
+注意适用范围：只适用于 *new-expression* 调用的可替换全局分配函数。类专属的 `operator new`、直接调用 `::operator new(n)` 的函数调用表达式、placement 形式都不在此列。
 
 ### 分配合并（¶16）
 
-¶16 实现可以把 *new-expression* `e1` 的分配**扩展**，同时为 `e2` 提供存储（即把两次分配合并为一次），条件是（假设不扩展时）以下全部成立：
+¶16 实现可以扩展 *new-expression* `e1` 的分配，同时为 `e2` 提供存储，即把两次分配合并为一次。条件是，假设不做扩展时，以下各项全部成立：
 
-- ¶16.1 `e1` 的求值**先序于** `e2`；
+- ¶16.1 `e1` 的求值先序于 `e2`；
 - ¶16.2 只要 `e1` 取得了存储，`e2` 就一定会被求值；
-- ¶16.3 两者调用**同一个**可替换全局分配函数；
-- ¶16.4 若该分配函数会抛出，则 `e1`、`e2` 中抛出的异常都会首先被**同一个 handler** 捕获；
-- ¶16.5 两者产生的指针值都是**被求值的 *delete-expression*** 的操作数；
+- ¶16.3 两者调用同一个可替换全局分配函数；
+- ¶16.4 如果该分配函数会抛出异常，`e1`、`e2` 中抛出的异常都会首先被同一个 handler 捕获；
+- ¶16.5 两者产生的指针值都是被求值的 *delete-expression* 的操作数；
 - ¶16.6 `e2` 的求值先序于以 `e1` 结果为操作数的 *delete-expression*。
 
-直觉：`e2` 的存储被"嵌套"在 `e1` 的生命期之内，异常行为也不受影响，合并就不可观察。标准例 5 中 `can_merge` 的三次 `nothrow` 分配可以合并（`nothrow` 版本不抛出，¶16.4 自然满足）；`cannot_merge` 中第二次分配在 `try` 块里，合并会改变"分配失败由哪个 handler 捕获"，所以不行。
+直观地说，`e2` 的存储嵌套在 `e1` 的生命期之内，异常行为也不受影响，合并就不可观察。标准例 5 中，`can_merge` 的三次 `nothrow` 分配可以合并（`nothrow` 版本不抛出，¶16.4 自然满足）；`cannot_merge` 中第二次分配位于 `try` 块里，合并会改变分配失败时由哪个 handler 捕获，所以不能合并。
 
-¶18 合并后的分配大小**不得超过**：各被省略调用的大小之和 + 扩展调用本身的大小 + 必要的对齐填充。
+¶18 合并后的分配大小不得超过以下各项之和：各被省略调用的大小、扩展调用本身的大小，以及必要的对齐填充。
 
 ### 第一个实参：请求的大小（¶17）
 
-¶17 未扩展的分配，第一个实参（`std::size_t`）是请求的字节数：
+¶17 对于未扩展的分配，第一个实参（`std::size_t`）是请求的字节数：
 
-- **不得小于**所创建对象的大小；
-- **只有**当对象是数组且分配函数不是 placement 的不分配形式时，才**可以大于**——多出的部分就是**数组分配开销**（array allocation overhead），见 ¶21 中的 *x*。
+- 不得小于所创建对象的大小；
+- 只有当对象是数组、且分配函数不是 placement 的不分配形式时，才可以大于对象的大小。多出的部分就是**数组分配开销**（array allocation overhead），即 ¶21 中的 *x*。
 
-对 `char`、`unsigned char`、`std::byte` 数组还有一条：*new-expression* 的结果与分配函数返回地址之差，必须是"大小不超过该数组的任何对象类型的最严格基础对齐"的整数倍。注 9 解释：这保证了"`new char[sizeof(T)]` 然后在里面放 `T`"这个惯用法的对齐正确性——即使实现在字符数组前面放了开销，也不会破坏对齐。
+对 `char`、`unsigned char`、`std::byte` 数组还有一条要求：*new-expression* 的结果与分配函数返回地址之差，必须是大小不超过该数组的任何对象类型的最严格基础对齐的整数倍。注 9 解释说，这保证了先 `new char[sizeof(T)]`、再在里面放置 `T` 这一惯用法的对齐正确性：即使实现在字符数组前面放了开销，也不会破坏对齐。
 
 ### 实参列表的组装与重载决议（¶19–¶21）
 
-¶19 带 *new-placement* 的 *new-expression* 叫做 **placement new-expression**（[[g:placement-new-expression]]）。注意：标准中"placement"指的是**额外实参**的语法，并不特指 `new (ptr) T`。`new (std::nothrow) T` 也是 placement new。
+¶19 带 *new-placement* 的 *new-expression* 称为 **placement new-expression**（[[g:placement-new-expression]]）。注意，标准中的 placement 指的是提供额外实参的语法，并不特指 `new (ptr) T`。`new (std::nothrow) T` 也是 placement new。
 
 ¶20 对一个组装出来的函数调用做重载决议：
 
-1. 第一个实参：请求的大小，`std::size_t`；
-2. 若对象类型有 **new-extended 对齐**（[[basic.align]]，超过 `__STDCPP_DEFAULT_NEW_ALIGNMENT__`），下一个实参是对齐值，类型 `std::align_val_t`；
-3. 若有 *new-placement*，其中的表达式依次作为后续实参。
+1. 第一个实参是请求的大小，类型为 `std::size_t`；
+2. 如果对象类型具有 new-extended 对齐（[[basic.align]]，即超过 `__STDCPP_DEFAULT_NEW_ALIGNMENT__`），下一个实参是对齐值，类型为 `std::align_val_t`；
+3. 如果有 *new-placement*，其中的表达式依次作为后续实参。
 
-若**没有找到匹配的函数**，再试一次：
+如果没有找到匹配的函数，再试一次：
 
-- ¶20.1 对齐是 new-extended 的：**去掉**对齐实参再试；
-- ¶20.2 否则：在第一个实参后**加上**对齐实参再试。
+- ¶20.1 对齐是 new-extended 的：去掉对齐实参再试；
+- ¶20.2 否则：在第一个实参后加上对齐实参再试。
 
-这个"两次尝试"让旧代码和新代码互相兼容：只提供了 `operator new(size_t)` 的类，仍然能 `new` 一个过对齐类型（只是对齐不再被保证）；只提供对齐版本的类，也能 `new` 普通类型。
+这样尝试两次，让旧代码和新代码可以互相兼容：只提供了 `operator new(size_t)` 的类，仍然能 `new` 一个过对齐类型（只是对齐不再有保证）；只提供对齐版本的类，也能 `new` 普通类型。
 
 ¶21（例 6）把四种情形写成了调用形式：
 
@@ -313,9 +313,9 @@ int f() {
 | `new T[5]` | `operator new[](sizeof(T) * 5 + x)` | `operator new[](sizeof(T) * 5 + x, std::align_val_t(alignof(T)))` |
 | `new(2,f) T[5]` | `operator new[](sizeof(T) * 5 + x, 2, f)` | `operator new[](sizeof(T) * 5 + x, std::align_val_t(alignof(T)), 2, f)` |
 
-（对 new-extended 对齐的 `T`，"先尝试"与"再尝试"两列互换。）
+（对具有 new-extended 对齐的 `T`，先尝试与再尝试两列互换。）
 
-*x* 是一个**非负的未指明值**，表示数组分配开销；*new-expression* 的结果相对于 `operator new[]` 的返回值偏移这么多。这个开销可以出现在**所有**数组 *new-expression* 中，包括调用用户 placement 分配函数的——**唯一例外**是标准库的 `operator new[](std::size_t, void*)`。开销的大小可以每次不同。
+*x* 是一个非负的未指明值，表示数组分配开销；*new-expression* 的结果相对于 `operator new[]` 的返回值偏移这么多。这个开销可以出现在所有数组 *new-expression* 中，包括调用用户 placement 分配函数的情形，**唯一的例外**是标准库的 `operator new[](std::size_t, void*)`。开销的大小每次可以不同。
 
 ```cpp title="aligned-new.cpp" run ok
 #include <cstdio>
@@ -338,23 +338,23 @@ int main() {
 }
 ```
 
-在 macOS arm64 上输出 `default new alignment = 16` 和 `operator new(64, align_val_t{64})`。
+在 macOS arm64 上，程序输出 `default new alignment = 16` 和 `operator new(64, align_val_t{64})`。
 
 !!! history "对齐 new 之前"
-    C++17 之前（[[P0035R4]] 之前），`new` 完全不考虑 `alignas`：`new Line` 只调用 `operator new(64)`，返回的存储只保证基础对齐（通常 16 字节），过对齐类型的 `new` 实际上是 UB 的温床（SIMD 类型崩溃是常见症状）。C++17 加入了 `std::align_val_t` 重载、¶20 的规则和 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 宏。
+    在 C++17 之前（[[P0035R4]] 之前），`new` 完全不考虑 `alignas`：`new Line` 只调用 `operator new(64)`，返回的存储只保证基础对齐（通常为 16 字节），对过对齐类型使用 `new` 很容易导致 UB（SIMD 类型崩溃是常见症状）。C++17 加入了 `std::align_val_t` 重载、¶20 的规则和 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 宏。
 
 ### 数组 cookie：实现视角
 
 !!! impl "Itanium ABI 与 ARM 的数组 cookie"
-    "数组分配开销" *x* 在实践中几乎只用于一件事：**cookie**——在数组前面记录元素个数，让 `delete[] p` 知道要析构多少个元素。
+    数组分配开销 *x* 在实践中几乎只有一个用途，就是 **cookie**：在数组前面记录元素个数，让 `delete[] p` 知道要析构多少个元素。
 
-    - **Itanium C++ ABI**（x86-64 Linux/macOS、AArch64 Linux）：只有当元素类型有**非平凡析构函数**，或者对应的普通 `operator delete[]` 带有 `size_t` 形参（需要知道大小）时，才加 cookie。cookie 大小为 `max(sizeof(size_t), alignof(T))`，元素个数存放在**紧挨数组首元素之前**的 `size_t` 中。对 `struct NT { int x; ~NT(); }`，`new NT[5]` 在 x86-64 上请求 `5 * 4 + 8 = 28` 字节，在返回地址处写入 5，结果指针偏移 8 字节。
-    - **ARM C++ ABI**（32 位 ARM；以及 Apple arm64）：cookie 固定为两个 `size_t`，依次存放**元素大小**和**元素个数**。本地 macOS arm64 验证：`new NonTrivial[5]`（`sizeof == 4`）请求 36 字节，cookie 为 16 字节，内容是 `4, 5`。
-    - **平凡析构**的元素类型通常**没有** cookie：`new int[4]` 请求恰好 16 字节，结果指针等于分配函数的返回值。
-    - **MSVC**：同样是为有非平凡析构函数的元素类型在数组前存放元素个数（布局细节未公开文档化）。
-    - 标准库的 `operator new[](size_t, void*)` 被 ¶21 明确排除，**不会**加 cookie。但**用户定义的** placement `operator new[]` 可以有 cookie——这就是 `new (buf) T[n]` 在用户版本下可能越界写 `buf` 的原因。
+    - Itanium C++ ABI（x86-64 Linux/macOS、AArch64 Linux）：只有当元素类型有非平凡析构函数，或者对应的普通 `operator delete[]` 带有 `size_t` 形参（需要知道大小）时，才加 cookie。cookie 的大小为 `max(sizeof(size_t), alignof(T))`，元素个数存放在紧挨数组首元素之前的 `size_t` 中。对于 `struct NT { int x; ~NT(); }`，`new NT[5]` 在 x86-64 上请求 `5 * 4 + 8 = 28` 字节，在返回地址处写入 5，结果指针偏移 8 字节。
+    - ARM C++ ABI（32 位 ARM，以及 Apple arm64）：cookie 固定为两个 `size_t`，依次存放元素大小和元素个数。在本地 macOS arm64 上验证：`new NonTrivial[5]`（`sizeof == 4`）请求 36 字节，cookie 为 16 字节，内容是 `4, 5`。
+    - 元素类型析构平凡时通常没有 cookie：`new int[4]` 恰好请求 16 字节，结果指针等于分配函数的返回值。
+    - MSVC：同样为有非平凡析构函数的元素类型在数组前存放元素个数（布局细节没有公开的文档）。
+    - 标准库的 `operator new[](size_t, void*)` 被 ¶21 明确排除，不会加 cookie。但用户定义的 placement `operator new[]` 可以有 cookie，所以在用户版本下，`new (buf) T[n]` 可能越界写入 `buf`。
 
-    `delete[]` 和 `new[]` 必须配对的根本原因就在这里：`delete` 不会去读 cookie，传给 `operator delete` 的指针会比真正的分配地址偏 8 或 16 字节；反之 `delete[]` 一个非数组 `new` 的对象会去读一个不存在的 cookie。
+    `delete[]` 和 `new[]` 必须配对，根本原因就在这里：`delete` 不会去读 cookie，传给 `operator delete` 的指针会比真正的分配地址偏移 8 或 16 字节；反过来，对非数组 `new` 得到的对象使用 `delete[]`，会去读一个不存在的 cookie。
 
 ```cpp title="array-cookie.cpp" run impl
 #include <cstdio>
@@ -385,20 +385,20 @@ int main() {
 }
 ```
 
-在 x86-64 Linux 上的预期输出是 `operator new[](16)`、`offset = 0`、`operator new[](28)`、`offset = 8`、`operator delete[](p, 28)`；在 macOS arm64 上第二次分配是 36 字节、偏移 16。注意第一个 `delete[] a` 调用了**不带大小**的版本（平凡析构的数组，[[expr.delete#9]] ¶9.6 未指明），第二个调用了带大小的版本（¶9.5 要求）。
+在 x86-64 Linux 上的预期输出是 `operator new[](16)`、`offset = 0`、`operator new[](28)`、`offset = 8`、`operator delete[](p, 28)`；在 macOS arm64 上，第二次分配是 36 字节，偏移 16。注意第一个 `delete[] a` 调用的是不带大小的版本（平凡析构的数组，[[expr.delete#9]] ¶9.6 未指明），第二个调用的是带大小的版本（¶9.5 的要求）。
 
 ### 失败的约定（¶22–¶23）
 
-¶22 注 10：除非分配函数有**不抛出**的异常规约，它通过抛出 `std::bad_alloc` 表示失败，成功时返回非空指针；`noexcept` 的分配函数用**返回空指针**表示失败。
+¶22 注 10：除非分配函数具有不抛出的异常规约，它通过抛出 `std::bad_alloc` 表示失败，成功时返回非空指针；`noexcept` 的分配函数则用返回空指针表示失败。
 
-规范部分：
+规范性的规定如下：
 
-- 若分配函数是**不分配形式**（[[new.delete.placement]]，即 `operator new(size_t, void*)`）而返回空——也就是说你写了 `new (nullptr) T`——**行为未定义**；
-- 否则若分配函数返回空：**不做初始化**，**不调用**释放函数，*new-expression* 的值为**空**。
+- 如果分配函数是不分配形式（[[new.delete.placement]]，即 `operator new(size_t, void*)`），却返回了空指针，也就是写了 `new (nullptr) T`，**行为未定义**；
+- 否则，如果分配函数返回空指针，就不做初始化，也不调用释放函数，*new-expression* 的值为空指针。
 
-这就是 `new (std::nothrow) T(args)` 失败时 `T` 的构造函数根本不会被调用的依据。
+`new (std::nothrow) T(args)` 失败时 `T` 的构造函数根本不会被调用，依据就在这里。
 
-¶23 注 11：返回非空时，必须指向已预留空间的存储块，并假定**适当对齐**且大小足够。数组时对象地址不一定等于块地址（因为 cookie）。
+¶23 注 11：返回非空指针时，它必须指向已预留空间的存储块，并假定该存储适当对齐、大小足够。对数组而言，对象地址不一定等于块地址（因为有 cookie）。
 
 ```cpp title="placement-null.cpp" ub
 #include <new>
@@ -410,7 +410,7 @@ int main() {
 ```
 
 !!! history "placement new 对空指针的检查"
-    `operator new(size_t, void*)` 是 `noexcept` 的。若只有 ¶22 的一般规则，*new-expression* 就必须先检查返回值是否为空，再决定是否初始化，这让每次 `new (p) T` 都多出一次无用的空检查。后来一项核心语言 issue 的修订把"不分配形式返回空"单独定为 UB，编译器便可以省掉这个检查。
+    `operator new(size_t, void*)` 是 `noexcept` 的。如果只有 ¶22 的一般规则，*new-expression* 就必须先检查返回值是否为空，再决定是否初始化，这让每次 `new (p) T` 都多出一次无用的空检查。后来一项核心语言 issue 的修订把不分配形式返回空指针单独定为 UB，编译器便可以省掉这个检查。
 
 ## 初始化（¶24–¶26）
 
@@ -418,8 +418,8 @@ int main() {
 
 ¶24 *new-expression* 创建的类型为 `T` 的对象按如下方式初始化：
 
-- ¶24.1 省略 *new-initializer*：**默认初始化**（[[dcl.init]]）。注 12：若不进行任何初始化，对象具有**不确定值**；
-- ¶24.2 否则：按 [[dcl.init]] 中**直接初始化**的规则解释 *new-initializer*。
+- ¶24.1 省略 *new-initializer* 时，进行**默认初始化**（[[dcl.init]]）。注 12：如果不进行任何初始化，对象具有不确定值；
+- ¶24.2 否则，按 [[dcl.init]] 中直接初始化的规则解释 *new-initializer*。
 
 这条规则产生了 C++ 中最常见的一个微妙差别：
 
@@ -443,24 +443,24 @@ int main() {
 }
 ```
 
-!!! note "动态存储期没有“错误值”"
-    C++26 把**自动**存储期变量的未初始化读取从 UB 改为错误行为（erroneous behavior，[[basic.indet]]），但 `new int` 这类**动态**存储期对象的默认初始化仍然得到**不确定值**，读取它仍然是 UB。
+!!! note "动态存储期没有错误值"
+    C++26 把读取未初始化的自动存储期变量从 UB 改为错误行为（erroneous behavior，[[basic.indet]]），但 `new int` 这类动态存储期对象经默认初始化后仍然具有不确定值，读取它仍然是 UB。
 
 ### 求值顺序（¶25）{{c++17}}
 
-¶25 两条先序关系：
+¶25 规定了两条先序关系：
 
-- **分配函数的调用**先序于 *new-initializer* 中表达式的求值；
-- **对象的初始化**先序于 *new-expression* 的值计算。
+- 分配函数的调用先序于 *new-initializer* 中表达式的求值；
+- 对象的初始化先序于 *new-expression* 的值计算。
 
-第一条是 C++17 加入的（[[P0145R3]]）。在此之前，`new T(f())` 中先调用 `f()` 还是先分配是**未指明**的。这个旧规则曾造成一个经典的泄漏场景：
+第一条是 C++17 加入的（[[P0145R3]]）。在此之前，`new T(f())` 中是先调用 `f()` 还是先分配是未指明的。这条旧规则曾造成一个经典的泄漏场景：
 
 ```cpp
 g(std::shared_ptr<A>(new A), h());   // C++14：可能 new A → h() → shared_ptr 构造
                                      // 若 h() 抛异常，A 泄漏
 ```
 
-C++17 的函数实参求值顺序规则（每个实参的求值整体上不交错，[[expr.call]]）解决了这个问题；¶25 则进一步确定了 *new-expression* 内部的顺序。注意它也意味着：即使初始化器的求值抛异常，分配也**已经发生了**——此时由 ¶27 负责释放。
+C++17 的函数实参求值顺序规则（各个实参的求值作为整体互不交错，[[expr.call]]）解决了这个问题；¶25 则进一步确定了 *new-expression* 内部的顺序。注意它也意味着，即使初始化器的求值抛出异常，分配也已经发生了，这时由 ¶27 负责释放。
 
 ```cpp title="new-order.cpp" run ok
 #include <cstdio>
@@ -481,7 +481,7 @@ int main() {
 
 ### 析构函数被潜在调用（¶26）
 
-¶26 若 *new-expression* 创建**类类型对象的数组**，析构函数被**潜在调用**（potentially invoked，[[class.dtor]]）。原因：若第 k 个元素的构造抛异常，前 k−1 个已构造的元素必须按逆序析构。所以即使你从不 `delete[]`，`new T[n]` 也要求 `T` 的析构函数**可访问且未删除**。
+¶26 如果 *new-expression* 创建的是类类型对象的数组，析构函数就被**潜在调用**（potentially invoked，[[class.dtor]]）。原因是，如果第 k 个元素的构造抛出异常，已构造好的前 k−1 个元素必须按逆序析构。所以即使从不 `delete[]`，`new T[n]` 也要求 `T` 的析构函数可访问且未被删除。
 
 ```cpp title="array-dtor-required.cpp" error
 struct P { private: ~P() = default; public: P() = default; };
@@ -493,34 +493,34 @@ P* b = new P[2];   // error: 数组 new 潜在调用析构函数，而它是私�
 
 ### 何时释放（¶27）
 
-¶27 若初始化的**任何部分**（脚注 54：包括求值 *new-initializer*、调用构造函数）**以异常终止**，且能找到一个**合适的释放函数**，就调用它释放正在构造对象所在的内存，然后异常在 *new-expression* 的上下文中继续传播。若找不到**无歧义的匹配**释放函数，传播异常**不会**释放内存。注 13：对于不真正分配内存的分配函数（如 `new (buf) T`），这是合适的；否则很可能导致内存泄漏。
+¶27 如果初始化的任何部分（脚注 54：包括求值 *new-initializer*、调用构造函数）以异常终止，并且能找到一个合适的释放函数，就调用它释放正在构造的对象所在的内存，然后异常在 *new-expression* 的上下文中继续传播。如果找不到无歧义的匹配释放函数，异常照样传播，但**内存不会被释放**。注 13：对于不真正分配内存的分配函数（如 `new (buf) T`），这样做是合适的；否则很可能导致内存泄漏。
 
 ### 释放函数的查找（¶28–¶29）
 
-¶28 与 ¶13 对称：类类型（或其数组）且未以 `::` 开头时，先在类作用域查找释放函数名，找不到再去全局。
+¶28 与 ¶13 对称：对类类型（或其数组），如果没有以 `::` 开头，先在类作用域查找释放函数名，找不到再到全局作用域查找。
 
 ¶29 匹配规则：
 
-- **非 placement** 分配函数：使用普通的释放函数查找规则（与 [[expr.delete]] 相同）。
-- **placement** 分配函数：按 ¶30 选择。
+- 对非 placement 分配函数，使用普通的释放函数查找规则（与 [[expr.delete]] 相同）。
+- 对 placement 分配函数，按 ¶30 选择。
 
-无论哪种，匹配的释放函数（如果有）必须**未被删除**并且在 *new-expression* 处**可访问**。
+无论哪种情况，匹配的释放函数（如果有）都必须未被删除，并且在 *new-expression* 处可访问。
 
 ### placement 的匹配释放函数（¶30–¶31）
 
-¶30 对 placement 分配函数，匹配的释放函数这样选：
+¶30 对于 placement 分配函数，匹配的释放函数按以下步骤选择：
 
-- ¶30.1 候选中的函数**模板**替换为用模板实参推导得到的特化；
-- ¶30.2 删去形参类型列表与分配函数**不完全相同**的候选（忽略各自的第一个形参：`size_t` vs `void*`）；
+- ¶30.1 候选中的函数模板替换为经模板实参推导得到的特化；
+- ¶30.2 删去形参类型列表与分配函数不完全相同的候选（忽略各自的第一个形参，即 `size_t` 与 `void*`）；
 - ¶30.3 删去约束不满足的候选；
-- ¶30.4 若恰好剩一个，选中它；
+- ¶30.4 如果恰好剩下一个，就选中它；
 - ¶30.5 否则不选任何释放函数。
 
 如果选中的是一个**普通释放函数**（usual deallocation function，[[basic.stc.dynamic.deallocation]]），程序**非良构**。
 
-¶30 中处理模板和约束的细节（¶30.1、¶30.3 以及例 8–10）是 C++23 之后的新措辞，此前的标准对模板形式的 placement delete 如何匹配语焉不详。注 14：比分配函数**多一个**尾随形参的释放函数**永远不会**匹配，即使它有默认实参。
+¶30 中处理模板和约束的细节（¶30.1、¶30.3 以及例 8–10）是 C++23 之后的新措辞，此前的标准对模板形式的 placement delete 如何匹配语焉不详。注 14：比分配函数多一个尾随形参的释放函数永远不会匹配，即使那个形参有默认实参。
 
-为什么"选中普通释放函数"要定为非良构？看例 7：
+为什么选中普通释放函数要定为非良构？看例 7：
 
 ```cpp title="placement-usual-mismatch.cpp" error
 #include <cstddef>
@@ -531,9 +531,9 @@ struct S {
 S* p = new (0) S;   // error: 普通释放函数"匹配"了 placement 分配函数
 ```
 
-按 ¶30.2，`operator delete(void*, size_t)` 去掉第一个形参后是 `(size_t)`，与 `operator new(size_t, size_t)` 去掉第一个形参后的 `(size_t)` 相同，因此"匹配"。但它是一个**普通** sized delete，其第二个形参的含义是"对象的大小"，而 placement new 传给它的却是 placement 实参 `0`——含义完全不同。与其悄悄传错实参，不如直接报错。
+按 ¶30.2，`operator delete(void*, size_t)` 去掉第一个形参后是 `(size_t)`，与 `operator new(size_t, size_t)` 去掉第一个形参后的 `(size_t)` 相同，因此形式上匹配。但它是一个普通的 sized delete，第二个形参的含义是对象的大小，而 placement new 传给它的却是 placement 实参 `0`，含义完全不同。与其悄悄传错实参，不如直接报错。
 
-例 8–10 展示模板与约束：
+例 8–10 展示了模板与约束的处理：
 
 ```cpp title="placement-delete-template.cpp" ok
 #include <cstddef>
@@ -548,11 +548,11 @@ A al;
 T* p = new (al) T;   // OK：使用 #1，构造抛异常时使用 #2
 ```
 
-例 9 中有两个都能匹配的候选（一个模板、一个非模板），¶30.4 不满足，于是**不选任何释放函数**——程序仍然良构，只是构造抛异常时不会释放。例 10 用 `requires (I > 0)` 排除掉模板，剩下的非模板就被选中。
+例 9 中有两个都能匹配的候选（一个模板、一个非模板），不满足 ¶30.4，于是不选任何释放函数。程序仍然良构，只是构造抛出异常时不会释放内存。例 10 用 `requires (I > 0)` 排除了模板，剩下的非模板就被选中。
 
 ### 传给释放函数的实参（¶32）
 
-¶32 释放函数的第一个实参是分配函数返回的值（`void*`）。若调用的是 placement 释放函数，传给它**与 placement 分配函数相同的额外实参**——即 *new-placement* 中的那些。若实现被允许为某个实参引入临时量或复制，是否在两次调用中使用同一个对象是**未指明**的。
+¶32 释放函数的第一个实参是分配函数返回的值（`void*`）。如果调用的是 placement 释放函数，还要传入与 placement 分配函数相同的额外实参，即 *new-placement* 中的那些实参。如果允许实现为某个实参引入临时量或复制，那么两次调用是否使用同一个对象是未指明的。
 
 ### 综合例子
 
@@ -601,8 +601,8 @@ int main() {
 
 结合 ¶15 与 [[expr.const.core]]：C++20 起（[[P0784R7]]），常量求值中可以使用 *new-expression*，条件是：
 
-- 调用的是**可替换的全局**分配函数（由于 ¶15，调用总被省略，存储由编译器提供）；
-- 分配必须在**同一次**常量求值中被 `delete` 释放——这种分配称为**暂时分配**（transient allocation）。分配不能"泄漏"到常量表达式的结果中（不能用 `constexpr` 指针变量保存它）。
+- 调用的是可替换的全局分配函数（由于 ¶15，这个调用总被省略，存储由编译器提供）；
+- 分配必须在同一次常量求值中由 `delete` 释放，这种分配称为**暂时分配**（transient allocation）。分配不能逃逸到常量表达式的结果中（不能用 `constexpr` 指针变量保存它）。
 
 ```cpp title="constexpr-new.cpp" ok
 constexpr int sum(int n) {
@@ -621,7 +621,7 @@ constexpr int* leak() { return new int(1); }
 constexpr int* q = leak();   // error: 分配逃逸出常量求值
 ```
 
-C++26 起（[[P2747R2]]）**placement new** 也可以在常量求值中使用（`operator new(size_t, void*)` 成为 `constexpr`），条件是指针指向合适类型的对象（详见 [[expr.const.core]]）。这让 `std::construct_at` 不再需要编译器"开后门"。{{c++26}}
+C++26 起（[[P2747R2]]），placement new 也可以在常量求值中使用（`operator new(size_t, void*)` 成为 `constexpr`），条件是指针指向合适类型的对象（详见 [[expr.const.core]]）。这样，`std::construct_at` 就不再需要编译器开特例了。{{c++26}}
 
 ```cpp title="constexpr-placement-new.cpp" ok
 #include <memory>
@@ -640,7 +640,7 @@ static_assert(g() == 7);
 
 ## placement new 与 const 对象
 
-*new-expression* 本身不禁止在 `const` 对象的存储上创建对象（被分配类型可以是任何完整对象类型），但 [[basic.life#12]] 规定：在**静态、线程或自动存储期的 const 完整对象**所占（或曾经占用）的存储上创建新对象是 **UB**。原因是编译器可以假设这些对象的值永不改变（甚至把它们放进只读段）。动态存储期的 `const` 对象不受此限制，但替换后需要 `std::launder` 才能通过旧指针访问新对象（旧对象是 `const` 完整对象，不能透明替换，[[basic.life#9]]）。
+*new-expression* 本身并不禁止在 `const` 对象的存储上创建对象（被分配类型可以是任何完整对象类型），但 [[basic.life#12]] 规定，在**静态、线程或自动存储期的 const 完整对象**所占用（或曾经占用）的存储上创建新对象是 UB。原因是编译器可以假设这些对象的值永不改变，甚至把它们放进只读段。动态存储期的 `const` 对象不受此限制，但替换之后，需要用 `std::launder` 才能通过旧指针访问新对象，因为旧对象是 `const` 完整对象，不能被透明替换（[[basic.life#9]]）。
 
 ```cpp title="const-placement.cpp" ub
 #include <new>
@@ -667,30 +667,30 @@ int main() {
 ## 历史与演进
 
 !!! history "C++98 → 当前草案"
-    - **C++98**：`new` 的基本形式、placement 语法、`std::nothrow`、数组开销 *x* 已经存在；负的数组边界是 UB。
+    - **C++98**：`new` 的基本形式、placement 语法、`std::nothrow`、数组开销 *x* 都已存在；负的数组边界是 UB。
     - **C++11**：花括号 *new-initializer*；`new auto(x)`；负数或溢出的数组大小改为抛出 `std::bad_array_new_length`（新增该异常类）。
-    - **C++14**：[[N3664]] 允许省略/合并可替换全局分配函数的调用（¶14、¶16、¶18）；sized deallocation（N3778）影响 ¶29 选中的释放函数。
-    - **C++17**：[[P0035R4]] 对齐 new（¶20、`std::align_val_t`）；[[P0145R3]] 规定分配先序于初始化器求值（¶25）；CTAD 也可用于 `new A{1, 2}`。
-    - **C++20**：[[P0784R7]] constexpr new（¶15）；[[P1009R2]] 未知边界数组的 new（¶7）；括号聚合初始化让 `new int[](1, 2)` 成立。
-    - **C++26**：[[P2747R2]] constexpr placement new {{c++26}}。
-    - **当前草案**：括号类型使用 *nofun-type-id*；placement 释放函数匹配对模板与约束的精确处理（¶30）。
+    - **C++14**：[[N3664]] 允许省略或合并对可替换全局分配函数的调用（¶14、¶16、¶18）；sized deallocation（N3778）影响 ¶29 选中的释放函数。
+    - **C++17**：[[P0035R4]] 引入对齐 new（¶20、`std::align_val_t`）；[[P0145R3]] 规定分配先序于初始化器的求值（¶25）；CTAD 也可用于 `new A{1, 2}`。
+    - **C++20**：[[P0784R7]] 引入 constexpr new（¶15）；[[P1009R2]] 允许未知边界数组的 new（¶7）；括号聚合初始化使 `new int[](1, 2)` 成立。
+    - **C++26**：[[P2747R2]] 引入 constexpr placement new {{c++26}}。
+    - **当前草案**：括号形式的类型改用 *nofun-type-id*；placement 释放函数的匹配对模板与约束有了精确处理（¶30）。
 
 ## 陷阱
 
 !!! pitfall "`new T[n]` 与 `delete` 不配对"
-    数组 new 必须配 `delete[]`，单对象 new 必须配 `delete`，哪怕元素类型是 `int`。判断标准是**被分配类型**，不是语法（`using Buf = char[64]; new Buf` 也是数组 new）。
+    数组 new 必须配 `delete[]`，单对象 new 必须配 `delete`，即使元素类型是 `int` 也一样。判断标准是被分配类型，而不是语法（`using Buf = char[64]; new Buf` 也是数组 new）。
 
 !!! pitfall "以为 `new T` 会清零"
-    `new int`、`new Pt`（聚合）、`new int[n]` 都只做默认初始化，值不确定。需要零时写 `new T()`、`new T{}` 或 `new int[n]()`。
+    `new int`、`new Pt`（聚合）、`new int[n]` 都只做默认初始化，值不确定。需要零值时，写 `new T()`、`new T{}` 或 `new int[n]()`。
 
 !!! pitfall "只声明了 placement operator new 的类"
-    类作用域中**任何**名为 `operator new` 的声明都会隐藏全局版本（¶13）。只写了 `operator new(size_t, Arena&)` 的类，`new T` 会编译失败。
+    类作用域中任何名为 `operator new` 的声明都会隐藏全局版本（¶13）。只写了 `operator new(size_t, Arena&)` 的类，`new T` 会编译失败。
 
-!!! pitfall "依赖替换的 operator new 一定被调用"
-    ¶14 允许省略对可替换全局分配函数的调用。用替换 `operator new` 来"统计 new 次数"的测试，在优化后可能得到更少的计数。
+!!! pitfall "以为替换的 operator new 一定会被调用"
+    ¶14 允许省略对可替换全局分配函数的调用。靠替换 `operator new` 来统计 new 次数的测试，开启优化后可能得到更少的计数。
 
 !!! pitfall "以为 `new (buf) T[n]` 正好用 `n * sizeof(T)` 字节"
-    标准库的 `operator new[](size_t, void*)` 不加开销（¶21），但**用户定义**的 placement `operator new[]` 可能被加上 cookie。不要假设数组 placement new 的结果等于 `buf`。
+    标准库的 `operator new[](size_t, void*)` 不加开销（¶21），但用户定义的 placement `operator new[]` 可能被加上 cookie。不要假设数组 placement new 的结果等于 `buf`。
 
 ## 思考题
 
@@ -700,7 +700,7 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-`new A`：¶13 在 `A` 的作用域找到了 `operator new`，全局版本被隐藏；对实参列表 `(sizeof(A))` 做重载决议，唯一的候选需要两个实参，失败；¶20.2 加上对齐实参再试，仍然失败——**非良构**。`new (1) A`：匹配 `operator new(size_t, int)`，良构（它没有匹配的 placement delete，所以构造抛异常时内存泄漏，但这不影响良构性）。`::new A`：只查找全局，找到 `::operator new(size_t)`，良构。
+`new A`：按 ¶13，在 `A` 的作用域找到了 `operator new`，全局版本被隐藏；对实参列表 `(sizeof(A))` 做重载决议，唯一的候选需要两个实参，决议失败；按 ¶20.2 加上对齐实参再试，仍然失败，所以**非良构**。`new (1) A`：匹配 `operator new(size_t, int)`，良构（它没有匹配的 placement delete，所以构造抛出异常时内存会泄漏，但这不影响良构性）。`::new A`：只在全局查找，找到 `::operator new(size_t)`，良构。
 </details>
 
 !!! question "思考题 2"
@@ -709,7 +709,7 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-¶8 末尾：值为 0 时仍然调用分配函数，分配一个**零元素数组**。[[basic.stc.dynamic.allocation]] 要求即使请求大小为 0，成功的分配也返回一个**非空**且与其他存活分配不同的指针。结果指针不指向任何对象（零元素数组没有首元素，[[expr.delete]] 脚注 56），解引用是 UB；但它确实占有一次分配，必须 `delete[]`，否则泄漏。
+见 ¶8 末尾：值为 0 时仍然调用分配函数，分配一个零元素数组。[[basic.stc.dynamic.allocation]] 要求，即使请求大小为 0，成功的分配也要返回一个非空、且与其他存活分配都不同的指针。结果指针不指向任何对象（零元素数组没有首元素，[[expr.delete]] 脚注 56），解引用是 UB；但它确实占有一次分配，必须 `delete[]`，否则会泄漏。
 </details>
 
 !!! question "思考题 3"
@@ -718,7 +718,7 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-¶25：分配先序于初始化器的求值。分配失败返回空时，¶22 规定"不做初始化"，所以 `f()` **不会**被调用（它是初始化的一部分）。若分配成功而 `f()` 抛异常，这属于 ¶27 所说的"初始化的任何部分以异常终止"：`std::nothrow` 版本是 placement 分配函数，按 ¶30 查找匹配的 `operator delete(void*, const std::nothrow_t&)`（标准库提供），用它释放内存，然后异常继续传播。
+按 ¶25，分配先序于初始化器的求值。分配失败返回空指针时，¶22 规定不做初始化，所以 `f()` 不会被调用（它是初始化的一部分）。如果分配成功而 `f()` 抛出异常，这就属于 ¶27 所说的初始化的某一部分以异常终止：`std::nothrow` 版本是 placement 分配函数，于是按 ¶30 查找匹配的 `operator delete(void*, const std::nothrow_t&)`（由标准库提供），用它释放内存，然后异常继续传播。
 </details>
 
 ## 小结
