@@ -12,17 +12,17 @@ updated: 2026-10-17
 auto [x, y] = point;
 ```
 
-这一行看起来像"声明两个变量 `x` 和 `y`，分别用 `point.x`、`point.y` 初始化"。标准说的完全不是这样：它**只声明了一个变量**——一个没有名字的变量 *e*，用 `point` 初始化；`x` 和 `y` 则是[[g:structured-binding|结构化绑定]]（structured binding），它们是"指向 *e* 的某个部分"的**名字**，本身既不是变量，也不是引用。
+这一行看起来像是声明了两个变量 `x` 和 `y`，分别用 `point.x`、`point.y` 初始化。标准的规定完全不是这样：它**只声明了一个变量**，即一个没有名字的变量 *e*，用 `point` 初始化；`x` 和 `y` 则是[[g:structured-binding|结构化绑定]]（structured binding），它们是指向 *e* 的某个部分的名字，本身既不是变量，也不是引用。
 
-理解这个"一个隐藏变量 + 若干别名"的模型，几乎所有关于结构化绑定的"怪现象"都能直接推出来：
+理解了一个隐藏变量加若干别名的模型，结构化绑定几乎所有看似奇怪的行为都能直接推出来：
 
-- `auto [x, y] = p;` 修改 `x` 不影响 `p`——因为改的是 *e* 的副本；
-- `decltype(x)` 给出的类型和你想象的不一样——因为它报告的是"被引用类型"（referenced type），而不是某个变量的声明类型；
-- `return x;` 不会隐式移动——因为 `x` 不是变量（[[expr.prim.id.unqual#15]]）；
-- `auto& [a, b] = f();` 不能绑定纯右值——因为 *e* 是 `auto&` 引用，而左值引用不能绑定纯右值；
-- 一个 `static` 结构化绑定声明只产生**一个**静态对象。
+- `auto [x, y] = p;` 之后修改 `x` 不影响 `p`，因为改的是副本 *e*；
+- `decltype(x)` 给出的类型和你想象的不一样，因为它报告的是被引用类型（referenced type），而不是某个变量的声明类型；
+- `return x;` 不会隐式移动，因为 `x` 不是变量（[[expr.prim.id.unqual#15]]）；
+- `auto& [a, b] = f();` 不能绑定纯右值，因为 *e* 是 `auto&` 引用，而左值引用不能绑定纯右值；
+- 一个 `static` 结构化绑定声明只产生一个静态对象。
 
-本节（[dcl.struct.bind]）规定 *e* 怎么声明、三种"拆解协议"如何选择、每个名字到底指什么。语法与说明符限制在 [[dcl.pre#7]]，`decltype` 的特殊规则在 [[dcl.type.decltype#1]]，绑定包展开在 [[temp.variadic]]。
+本节（[dcl.struct.bind]）规定 *e* 怎么声明、三种拆解协议如何选择、每个名字到底指什么。语法与说明符限制在 [[dcl.pre#7]]，`decltype` 的特殊规则在 [[dcl.type.decltype#1]]，绑定包展开在 [[temp.variadic]]。
 
 ## 语法与允许的说明符（[[dcl.pre#7]]）
 
@@ -38,9 +38,9 @@ sb-identifier:
 | 约束 | 内容 |
 |---|---|
 | 说明符 | 只能是 `constexpr`、`constinit`、`static`、`thread_local`、`auto`、cv 限定符 |
-| 类型 | 必须是**不受约束的** `auto`：`C auto [x, y] = ...` 非良构，`decltype(auto)` 也不行 |
-| 包 | 至多一个 *sb-identifier* 带 `...`，而且有包时该声明必须声明一个**模板化实体**（templated entity） |
-| 初始化器 | `= expr`、`{ expr }`、`( expr )` 三选一，都只能有**一个**表达式 |
+| 类型 | 必须是不受约束的 `auto`：`C auto [x, y] = ...` 非良构，`decltype(auto)` 也不行 |
+| 包 | 至多一个 *sb-identifier* 带 `...`，而且有包时该声明必须声明一个模板化实体（templated entity） |
+| 初始化器 | `= expr`、`{ expr }`、`( expr )` 三选一，都只能有一个表达式 |
 | 初始化表达式类型 | 数组或非联合类类型；出现在 condition 中时只能是非联合类类型 |
 
 ```cpp title="sb-specifiers.cpp" error
@@ -58,22 +58,22 @@ void f() {
 }
 ```
 
-注意 `auto [k, l] = {1, 2};`：等号右边必须是 *assignment-expression*，花括号列表不是表达式。而 `auto [k, l]{p};` 是允许的——花括号里只有**一个**表达式，等价于直接初始化。（Clang 23 对 `= {1, 2}` 的处理是先把 *e* 推导成 `std::initializer_list<int>`，再报告无法绑定其私有成员——结论相同，但诊断的理由与标准不同。）
+注意 `auto [k, l] = {1, 2};`：等号右边必须是 *assignment-expression*，而花括号列表不是表达式。`auto [k, l]{p};` 则是允许的，花括号里只有一个表达式，等价于直接初始化。（Clang 23 对 `= {1, 2}` 的处理是先把 *e* 推导成 `std::initializer_list<int>`，再报告无法绑定其私有成员。结论相同，但诊断的理由与标准不同。）
 
 ## 隐藏变量 *e*（¶1）
 
-¶1 是整节的骨架。先给出几个记号：
+¶1 是整节的骨架。它先给出几个记号：
 
 - *cv*：*decl-specifier-seq* 中的 cv 限定符；
 - *S*：*decl-specifier-seq* 中的 `constexpr`、`constinit` 和存储类说明符（`static`、`thread_local`）；
 - `volatile` 出现在 *cv* 中已弃用（[[depr.volatile.type]]）{{deprecated}}。
 
-然后：**先引入一个名字唯一的变量 *e***。它的声明分两种情况：
+然后**引入一个名字唯一的变量 *e***。它的声明分两种情况：
 
-1. 初始化表达式是**数组类型** `cv1 A`、且没有 *ref-qualifier*（即按值拆数组）：*e* 被定义为 `attribute-specifier-seq S cv A e;`，然后**逐元素**复制初始化或直接初始化（取决于初始化器的形式）。这是为了绕开"数组不能整体复制"的限制——`auto` 推导会把数组退化成指针，所以必须特殊处理。
-2. 其他情况：*e* "如同"由 `attribute-specifier-seq decl-specifier-seq ref-qualifier e initializer;` 定义，即把方括号部分换成 *e*，其余照抄。这个声明**永远不会被解释成函数声明**（避免 `auto [a, b](x);` 被读成什么奇怪东西）。
+1. 初始化表达式是数组类型 `cv1 A`、且没有 *ref-qualifier*（即按值拆数组）：*e* 定义为 `attribute-specifier-seq S cv A e;`，然后逐元素复制初始化或直接初始化（取决于初始化器的形式）。数组不能整体复制，`auto` 推导又会把数组退化成指针，所以这里必须特殊处理。
+2. 其他情况：*e* 如同由 `attribute-specifier-seq decl-specifier-seq ref-qualifier e initializer;` 定义，即把方括号部分换成 *e*，其余照抄。这个声明永远不会解释成函数声明（以免 `auto [a, b](x);` 被读成别的东西）。
 
-*id-expression* `e` 的类型记作 **E**。注 1 指出 E 永远不是引用类型——因为 id-expression 的类型会去掉引用（[[expr.prop]]）。所以 `auto& [a, b] = p;` 中 *e* 是 `P&`，但 E 是 `P`。
+*id-expression* `e` 的类型记作 E。注 1 指出，E 永远不是引用类型，因为 id-expression 的类型会去掉引用（[[expr.prop]]）。所以 `auto& [a, b] = p;` 中 *e* 是 `P&`，但 E 是 `P`。
 
 ```cpp run title="hidden-e.cpp" ok
 #include <cassert>
@@ -98,7 +98,7 @@ int main() {
 }
 ```
 
-结构化绑定声明里的 `auto`、`const`、`&` 修饰的是 ***e***，**不是**各个名字。这是最常见的误解来源：
+**结构化绑定声明里的 `auto`、`const`、`&` 修饰的是 *e*，不是各个名字。**这是最常见的误解来源：
 
 ```cpp title="const-applies-to-e.cpp" ok
 #include <type_traits>
@@ -115,7 +115,7 @@ void f(int& i) {
 int main() { int i = 0; f(i); }
 ```
 
-`const auto [r, v]` 并没有让 `r` 变成 const——`r` 指的是 *e*.r，一个 `int&` 成员，而"const 对象的引用成员"仍然可以通过它修改被引用者。
+`const auto [r, v]` 并没有让 `r` 变成 const。`r` 指的是 *e*.r，一个 `int&` 成员，而通过 const 对象的引用成员仍然可以修改被引用者。
 
 ### 生命周期延长与 *ref-qualifier*
 
@@ -138,8 +138,8 @@ void f() {
 
 ¶2 定义 E 的[[g:structured-binding-size|结构化绑定大小]]（structured binding size）：E 需要引入的绑定个数，由后面三种协议分别给出（数组元素数 / `tuple_size` / 数据成员数）。
 
-- 没有绑定包时，方括号里的名字个数必须**恰好等于**结构化绑定大小；
-- 有绑定包时，非包名字的个数**不能超过**它，剩下的全部归入包（可能为零个）。
+- 没有绑定包时，方括号里的名字个数必须恰好等于结构化绑定大小；
+- 有绑定包时，非包名字的个数不能超过它，剩下的全部归入包（可能为零个）。
 
 ¶3 引入记号 SB*ᵢ*：展开绑定包之后的第 *i* 个结构化绑定。标准例 1 展示了包可以出现在任意位置：
 
@@ -186,7 +186,7 @@ int main() {
 }
 ```
 
-[[dcl.pre#7]] 要求含绑定包的声明**必须声明模板化实体**——也就是说它只能出现在模板（或泛型 lambda 等模板化上下文）中。原因是包展开的整个机制建立在"实例化时才确定元素数"之上：在非模板代码中引入一个包，意味着编译器要在非模板代码里处理包展开，这对实现是很大的负担。提案在演进中因此收窄了范围。
+[[dcl.pre#7]] 要求含绑定包的声明必须声明模板化实体，也就是说它只能出现在模板（或泛型 lambda 等模板化上下文）中。原因是包展开的整个机制建立在实例化时才确定元素个数的前提上：在非模板代码中引入一个包，意味着编译器要在非模板代码里处理包展开，这对实现是很大的负担。提案在演进中因此收窄了范围。
 
 ```cpp title="sb-pack-nontemplate.cpp" error
 struct P { int x, y; };
@@ -195,11 +195,11 @@ void f() {
 }
 ```
 
-Clang 23 对此报告"pack declaration outside of template"。
+Clang 23 对此报告 "pack declaration outside of template"。
 
 ## 结构化绑定作为条件（¶4）{{c++26}}
 
-¶4：结构化绑定声明出现在 *condition* 中时，条件的**判定变量**（decision variable，[[stmt.pre]]）是 *e*。换句话说，`if (auto [a, b] = expr)` 判断的是 *e* 被上下文转换为 `bool` 的结果，而**不是**某个绑定的值。
+¶4 规定，结构化绑定声明出现在 *condition* 中时，条件的判定变量（decision variable，[[stmt.pre]]）是 *e*。换句话说，`if (auto [a, b] = expr)` 判断的是 *e* 上下文转换为 `bool` 的结果，而不是某个绑定的值。
 
 ```cpp run title="sb-condition.cpp" ok
 #include <cstddef>
@@ -228,13 +228,13 @@ int main() {
 // 输出：operator bool / get<0> / get<1> / v=42 ok=1
 ```
 
-输出顺序不是巧合：¶7 末尾规定，*e* 的初始化**以及**把 *e* 作为判定变量做的转换，都**按顺序先于**任何 *rᵢ* 的初始化。这样设计的动机是：像 `std::from_chars` 结果、`expected` 之类的类型，往往只有"成功"时才能安全地取出各个分量；先判断再拆解，`get` 就不会在失败状态下被调用。
+输出顺序不是巧合：¶7 末尾规定，*e* 的初始化以及把 *e* 作为判定变量做的转换，都按顺序先于任何 *rᵢ* 的初始化。这样设计是因为 `std::from_chars` 的结果、`expected` 之类的类型，往往只有成功时才能安全地取出各个分量；先判断再拆解，就不会在失败状态下调用 `get`。
 
-[[dcl.pre#7]] 规定条件中的初始化表达式只能是**非联合类类型**——数组不能被上下文转换为 `bool`，放进条件没有意义。
+[[dcl.pre#7]] 规定条件中的初始化表达式只能是非联合类类型。数组不能上下文转换为 `bool`，放进条件没有意义。
 
 ## 初始化器不能引用自己引入的名字（¶5）
 
-¶5：如果初始化器引用了本声明引入的名字，程序非良构。
+¶5 规定，如果初始化器引用了本声明引入的名字，程序非良构。
 
 ```cpp title="sb-self-ref.cpp" error
 struct P { int x, y; };
@@ -243,11 +243,11 @@ void f() {
 }
 ```
 
-为什么不按普通变量的规则（[[basic.scope.pdecl]]：变量的声明点在其声明符之后，`int x = x;` 是良构的，只是读了未初始化的值）？因为结构化绑定的名字指向 *e* 的部分，而 *e* 正是在初始化器求值之后才存在的——在初始化器中引用它没有任何可能的合理语义，于是直接禁止。
+为什么不按普通变量的规则处理？按 [[basic.scope.pdecl]]，变量的声明点在其声明符之后，`int x = x;` 是良构的，只是读了未初始化的值。结构化绑定则不同，它的名字指向 *e* 的部分，而 *e* 正是在初始化器求值之后才存在的。在初始化器中引用它不可能有合理的语义，于是标准直接禁止。
 
 ## 协议一：数组（¶6）
 
-¶6：E 不能是**未知边界数组**；E 是其他数组类型（元素类型 T）时，结构化绑定大小就是元素个数，每个 SB*ᵢ* 是一个**左值**的名字，指向数组的第 *i* 个元素，类型是 T；[[g:referenced-type|被引用类型]]（referenced type）也是 T。注 3：T 的顶层 cv 限定就是 *cv*。
+¶6 规定，E 不能是未知边界数组。E 是其他数组类型（元素类型 T）时，结构化绑定大小就是元素个数，每个 SB*ᵢ* 是一个左值的名字，指向数组的第 *i* 个元素，类型是 T；[[g:referenced-type|被引用类型]]也是 T。注 3 指出，T 的顶层 cv 限定就是 *cv*。
 
 ```cpp title="sb-array.cpp" ok
 #include <cstddef>
@@ -282,22 +282,22 @@ void f() {
 
 ## 协议二：tuple-like（¶7）
 
-只要 E 不是数组，而 `std::tuple_size<E>` 是一个**完整的类类型并且有名为 `value` 的成员**，就走 tuple-like 协议。这是用户自定义类型接入结构化绑定的唯一途径（对于想隐藏数据成员、或者想暴露"计算出来的"分量的类型）。
+只要 E 不是数组，而 `std::tuple_size<E>` 是一个**完整的类类型并且有名为 `value` 的成员**，就走 tuple-like 协议。对于想隐藏数据成员、或者想暴露计算出来的分量的用户自定义类型，这是接入结构化绑定的唯一途径。
 
 ### 大小
 
 `std::tuple_size<E>::value` 必须是良构的整型常量表达式，值非负；它就是结构化绑定大小。
 
-注意判断条件的精确措辞："完整类类型 **且有成员 `value`**"。只声明了 `tuple_size<E>` 主模板（未定义）或特化里没有 `value`，都**不会**进入 tuple-like 协议，而是落到 ¶8 的数据成员协议。这让"一个类恰好特化了个空的 `tuple_size`"不至于破坏它的结构化绑定。
+注意判断条件的精确措辞：完整类类型，并且有成员 `value`。只声明了 `tuple_size<E>` 主模板（未定义），或者特化里没有 `value`，都不会进入 tuple-like 协议，而是落到 ¶8 的数据成员协议。这样，一个类即使恰好特化了一个空的 `tuple_size`，它的结构化绑定也不会被破坏。
 
-### `get` 的查找：成员优先，但只认"首个模板形参是常量形参"的成员模板
+### `get` 的查找：成员优先，但只认首个模板形参是常量形参的成员模板
 
 令 *i* 为 `std::size_t` 类型的索引纯右值。
 
-- 在 E 的作用域中**搜索**名字 `get`（[[class.member.lookup]]），如果找到**至少一个**"首个模板形参是常量模板形参（非类型模板形参）的函数模板"，初始化器就是 `e.get<i>()`；
-- 否则，初始化器是 `get<i>(e)`，其中 `get` **只**通过 ADL 查找（[[basic.lookup.argdep]]）。注 4 强调：**不做普通的无限定查找**。
+- 在 E 的作用域中搜索名字 `get`（[[class.member.lookup]]），如果找到至少一个首个模板形参是常量模板形参（非类型模板形参）的函数模板，初始化器就是 `e.get<i>()`；
+- 否则，初始化器是 `get<i>(e)`，其中 `get` 只通过 ADL 查找（[[basic.lookup.argdep]]）。注 4 强调，这里**不做普通的无限定查找**。
 
-无论哪种，`get<i>` 都被当作 *template-id* 解析（所以不必担心 `<` 被当成小于号）。
+无论哪种情况，`get<i>` 都按 *template-id* 解析（所以不必担心 `<` 被当成小于号）。
 
 ```cpp run title="sb-tuple-like.cpp" ok
 #include <cstddef>
@@ -326,16 +326,16 @@ int main() {
 }
 ```
 
-这条"成员优先、但要求首个模板形参是常量"的规则是 C++20 时修订的（[[P0961R1]]）。C++17 的原始规则是"只要在类中找到**任何**名为 `get` 的成员，就用成员形式"。这导致一个现实问题：许多类本来就有一个与 tuple 无关的成员 `get`（智能指针的 `get()`、某些 `std::shared_ptr` 包装器……），它们一旦想支持结构化绑定，就会被这个无关的 `get` 劫持，而 `e.get<0>()` 编译失败。现在的规则只认"看起来像 tuple 的 `get<I>`"的成员模板。
+成员优先、但要求首个模板形参是常量形参，这条规则是 C++20 修订的（[[P0961R1]]）。C++17 的原始规则是，只要在类中找到任何名为 `get` 的成员，就用成员形式。这导致一个现实问题：许多类本来就有一个与 tuple 无关的成员 `get`（智能指针的 `get()`、某些 `std::shared_ptr` 包装器等），这些类一旦想支持结构化绑定，就会被这个无关的 `get` 劫持，`e.get<0>()` 编译失败。现在的规则只认形如 tuple 的 `get<I>` 的成员模板。
 
 !!! lawyer "`template<class T> T get()` 的成员也不算"
-    `std::variant` 风格的 `get<T>()`（首个模板形参是类型形参）不满足条件，所以不会阻止 ADL。但只要类里**有一个**满足条件的成员模板 `get`，就会用成员形式——哪怕那个模板对当前的 *i* 根本无法调用，也不会退回 ADL。查找结果是"全有或全无"。
+    `std::variant` 风格的 `get<T>()`（首个模板形参是类型形参）不满足条件，所以不会阻止 ADL。但只要类里有一个满足条件的成员模板 `get`，就会用成员形式，哪怕那个模板对当前的 *i* 根本无法调用，也不会退回 ADL。查找结果是全有或全无的。
 
 ### *e* 的值类别与 *rᵢ*
 
-- 如果 *e* 实体的类型是**左值引用**，表达式 *e* 是**左值**；否则是 **xvalue**。
+- 如果 *e* 实体的类型是左值引用，表达式 *e* 是左值；否则是 xvalue。
 
-所以 `auto [a, b] = t;`（*e* 是对象）会以 xvalue 调用 `get`——这让 `get(T&&)` 重载可以把成员**移走**；而 `auto& [a, b] = t;` 以左值调用 `get`。
+所以 `auto [a, b] = t;`（*e* 是对象）会以 xvalue 调用 `get`，`get(T&&)` 重载因此可以把成员移走；而 `auto& [a, b] = t;` 以左值调用 `get`。
 
 然后，令 T*ᵢ* = `std::tuple_element<i, E>::type`，U*ᵢ* 按初始化器 `get<i>(...)` 的值类别决定：
 
@@ -345,12 +345,12 @@ int main() {
 | 左值 | T*ᵢ*& |
 | xvalue | T*ᵢ*&& |
 
-引入一组名字唯一的**变量** `S Uᵢ rᵢ = initializer;`。每个 SB*ᵢ* 是一个**左值**的名字，类型是 T*ᵢ*，指向绑定到 *rᵢ* 的对象；被引用类型是 T*ᵢ*。
+然后引入一组名字唯一的变量 `S Uᵢ rᵢ = initializer;`。每个 SB*ᵢ* 是一个左值的名字，类型是 T*ᵢ*，指向绑定到 *rᵢ* 的对象；被引用类型是 T*ᵢ*。
 
-关键点：
+这里有几个关键点：
 
 1. 在 tuple-like 协议下，标准**确实创建了变量** *rᵢ*（通常是引用）。数组和数据成员协议下则没有额外变量，名字直接指向 *e* 的子对象。
-2. 当 `get` 返回纯右值时，*rᵢ* 是 T*ᵢ* 类型的对象，从 `get` 的结果初始化——这时 SB*ᵢ* 指的是一个**独立的对象**而不是 *e* 的一部分。
+2. 当 `get` 返回纯右值时，*rᵢ* 是 T*ᵢ* 类型的对象，从 `get` 的结果初始化。这时 SB*ᵢ* 指的是一个独立的对象，而不是 *e* 的一部分。
 3. *S*（`static`、`thread_local`、`constexpr`、`constinit`）同样施加于每个 *rᵢ*。
 4. 求值顺序：*e* 的初始化先于所有 *rᵢ*；*rᵢ* 按下标从小到大依次初始化。
 
@@ -372,18 +372,18 @@ int main() {
 
 ### `decltype` 的特殊规则
 
-[[dcl.type.decltype#1]] 第 1.1 项：`decltype(x)`（x 是**不带括号**的、命名结构化绑定的 id-expression）给出的是**被引用类型**。所以上面 `decltype(s)` 是 `std::string` 而不是 `std::string&&`（*r₁* 的类型），尽管底层确实是一个右值引用变量。加括号 `decltype((s))` 则按普通左值规则得到 `std::string&`。
+按 [[dcl.type.decltype#1]] 第 1.1 项，若 x 是不带括号的、命名结构化绑定的 id-expression，`decltype(x)` 给出的是被引用类型。所以上面 `decltype(s)` 是 `std::string` 而不是 `std::string&&`（*r₁* 的类型），尽管底层确实是一个右值引用变量。加括号 `decltype((s))` 则按普通左值规则得到 `std::string&`。
 
 ## 协议三：数据成员（¶8）
 
-既不是数组，也没有可用的 `tuple_size`，就走数据成员协议。条件：
+既不是数组，也没有可用的 `tuple_size`，就走数据成员协议。它的条件如下：
 
-1. E 的**所有**非静态数据成员都必须是 E 的**直接成员**，或者都是 E 的**同一个**基类的直接成员；
-2. 每个成员在结构化绑定所在的上下文中以 `e.name` 命名时都是良构的——也就是说要**可访问**（C++20 起；C++17 要求全部 public）；
-3. E 不能有**匿名联合**成员；
+1. E 的所有非静态数据成员都必须是 E 的直接成员，或者都是 E 的同一个基类的直接成员；
+2. 每个成员在结构化绑定所在的上下文中以 `e.name` 命名时都是良构的，也就是说要可访问（C++20 起；C++17 要求全部 public）；
+3. E 不能有匿名联合成员；
 4. 结构化绑定大小 = 非静态数据成员的个数。
 
-按声明顺序把成员记为 m₀, m₁, …，每个 SB*ᵢ* 是一个**左值**的名字，指向 *e* 的成员 m*ᵢ*，类型是 `e.mᵢ` 的类型（[[expr.ref]]，所以会合并 *e* 的 cv 与成员的 `mutable`）。被引用类型：若 m*ᵢ* 声明为引用类型，就是该声明类型；否则是 `e.mᵢ` 的类型。若成员是位域，这个左值也是**位域**。
+按声明顺序把成员记为 m₀, m₁, …，每个 SB*ᵢ* 是一个左值的名字，指向 *e* 的成员 m*ᵢ*，类型是 `e.mᵢ` 的类型（[[expr.ref]]，所以会合并 *e* 的 cv 与成员的 `mutable`）。若 m*ᵢ* 声明为引用类型，被引用类型就是该声明类型；否则是 `e.mᵢ` 的类型。若成员是位域，这个左值也是位域。
 
 ```cpp title="sb-members.cpp" ok
 #include <type_traits>
@@ -400,7 +400,7 @@ void g() {
 int main() {}
 ```
 
-各条约束的边界：
+下面的例子展示各条约束的边界：
 
 ```cpp title="sb-members-errors.cpp" error
 struct B { int a; };
@@ -423,19 +423,19 @@ void friend_ok() {
 }
 ```
 
-为什么要求"同一个类"？因为"按声明顺序编号"只有在所有成员都在同一个类中声明时才有明确含义；跨越基类和派生类时，"第 0 个成员是谁"要依赖某种布局约定，标准不愿意规定。
+为什么要求同一个类？因为只有所有成员都在同一个类中声明时，按声明顺序编号才有明确含义。跨越基类和派生类时，第 0 个成员是谁要依赖某种布局约定，而标准不愿意规定这种约定。
 
 !!! note "位域与引用"
-    绑定到位域成员的名字本身就是位域左值，所以 `&x` 非良构，`int& r = x;` 也非良构；但读写 `x` 完全正常。这是"结构化绑定不是引用"的又一个直接后果——如果标准把它定义成 `auto& x = e.x1;`，位域根本无法被绑定。
+    绑定到位域成员的名字本身就是位域左值，所以 `&x` 非良构，`int& r = x;` 也非良构；但读写 `x` 完全正常。这也是结构化绑定不是引用的直接后果：如果标准把它定义成 `auto& x = e.x1;`，位域根本无法绑定。
 
 ## 结构化绑定不是变量
 
-[[basic.pre#8]] 把结构化绑定列为一种**独立的实体**，与变量并列。这在很多地方产生可观察的差异：
+[[basic.pre#8]] 把结构化绑定列为一种独立的实体，与变量并列。这在很多地方产生可观察的差异：
 
 | 情形 | 普通变量 | 结构化绑定 |
 |---|---|---|
 | `decltype(x)` | 声明类型 | 被引用类型（[[dcl.type.decltype#1]]） |
-| `return x;` 隐式移动 | 是（自动存储期的非 volatile 对象） | **否**：不是"变量"，不满足 [[expr.prim.id.unqual#15]] |
+| `return x;` 隐式移动 | 是（自动存储期的非 volatile 对象） | 否：不是变量，不满足 [[expr.prim.id.unqual#15]] |
 | `extern` 声明 | 可以 | 不可以（说明符只能是上表那几个） |
 | lambda 捕获 | 可以 | C++20 起可以（[[P1091R3]]、[[P1381R1]]） |
 | 取地址 | 可以 | 可以，除非绑定到位域 |
@@ -459,7 +459,7 @@ std::unique_ptr<int> g() {
 
 ### lambda 捕获
 
-C++17 中，结构化绑定**不能被 lambda 捕获**——标准只允许捕获变量。C++20 允许捕获；[[expr.prim.lambda.capture]] 对位域另有一条限制："位域或匿名联合的成员不得按引用捕获"。
+C++17 中，lambda 不能捕获结构化绑定，因为标准只允许捕获变量。C++20 允许捕获；[[expr.prim.lambda.capture]] 对位域另有一条限制：位域或匿名联合的成员不得按引用捕获。
 
 ```cpp title="sb-capture.cpp" error
 struct S { int bf : 3; int v; };
@@ -473,13 +473,13 @@ int main() {
 ```
 
 !!! impl "Clang 的一个偏差"
-    上例中 Clang 23 对 `[&bf]` 的诊断是"non-const reference cannot bind to bit-field"。但如果把结构化绑定声明为 `const auto [bf, v]`，Clang 23 会**接受** `[&bf]`——标准的规则不区分 const，按引用捕获位域一律非良构。
+    上例中 Clang 23 对 `[&bf]` 的诊断是 "non-const reference cannot bind to bit-field"。但如果把结构化绑定声明为 `const auto [bf, v]`，Clang 23 会接受 `[&bf]`。标准的规则不区分 const，按引用捕获位域一律非良构。
 
 ## 说明符：`static`、`thread_local`、`constexpr`、`constinit`、属性
 
 ### `static` / `thread_local`（C++20）
 
-*S* 中的存储类说明符施加于 *e*（以及 tuple 协议下的各 *rᵢ*）。由于只有 *e* 是对象，一个 `static auto [a, b] = ...;` 只会创建一个静态对象，初始化一次。
+*S* 中的存储类说明符施加于 *e*（以及 tuple 协议下的各 *rᵢ*）。由于只有 *e* 是对象，`static auto [a, b] = ...;` 只会创建一个静态对象，并且只初始化一次。
 
 ```cpp run title="sb-static.cpp" ok
 #include <cstdio>
@@ -528,11 +528,11 @@ int main() {}
 在 C++26 之前，唯一的选择是先 `constexpr auto t = ...;` 再逐个取。
 
 !!! impl "块作用域 + tuple 协议"
-    在块作用域中写 `constexpr auto [p, q] = std::pair{1, 2};`，tuple 协议会引入 `constexpr int&& r0 = get<0>(xvalue e);` 这样的**引用**，指向一个自动存储期对象。C++26 同一提案修改了常量表达式中引用/指针的规则：自动对象若对当前程序点是**可被 constexpr 引用**的（[[expr.const.init#2]]，大意是位于同一次函数调用中），就可以作为常量表达式结果所引用的对象。因此按当前草案这是良构的。截至写作时，Clang 23 拒绝它（诊断"address of non-static constexpr variable may differ on each invocation"，并建议加 `static`）；把声明改成 `static constexpr` 可以通过。数组和数据成员协议不引入引用，Clang 接受。
+    在块作用域中写 `constexpr auto [p, q] = std::pair{1, 2};`，tuple 协议会引入 `constexpr int&& r0 = get<0>(xvalue e);` 这样的引用，指向一个自动存储期对象。C++26 的同一提案修改了常量表达式中引用/指针的规则：如果自动对象对当前程序点是可被 constexpr 引用的（[[expr.const.init#2]]，大意是位于同一次函数调用中），它就可以作为常量表达式结果所引用的对象。因此按当前草案这是良构的。截至写作时，Clang 23 拒绝它（诊断 "address of non-static constexpr variable may differ on each invocation"，并建议加 `static`）；把声明改成 `static constexpr` 可以通过。数组和数据成员协议不引入引用，Clang 接受。
 
 ### 属性 {{c++26}}
 
-¶1：每个 *sb-identifier* 后可以跟 *attribute-specifier-seq*，它**属于对应的结构化绑定**（[[P0609R3]]）。最典型的用途是对单个名字标 `[[maybe_unused]]`：
+按 ¶1，每个 *sb-identifier* 后可以跟 *attribute-specifier-seq*，它属于对应的结构化绑定（[[P0609R3]]）。最典型的用途是对单个名字标 `[[maybe_unused]]`：
 
 ```cpp title="sb-attr.cpp" ok
 #include <map>
@@ -548,28 +548,28 @@ int count_values(const std::map<std::string, int>& m) {
 int main() {}
 ```
 
-在此之前只能把 `[[maybe_unused]]` 加在整个声明上（[[dcl.attr.unused#2]] 允许它用于结构化绑定声明），压制全部警告。[[dcl.attr.unused#4]] 还建议：未标记的结构化绑定声明，只有当**所有**绑定都未使用时才应警告。
+在此之前只能把 `[[maybe_unused]]` 加在整个声明上（[[dcl.attr.unused#2]] 允许它用于结构化绑定声明），压制全部警告。[[dcl.attr.unused#4]] 还建议，对未标记的结构化绑定声明，只有所有绑定都未使用时才应警告。
 
 C++26 还引入了占位符名 `_`（名字无关声明，[[basic.scope.scope]]），在结构化绑定中可以重复使用：`auto [_, value, _] = triple;`。
 
 ## 与其他特性的配合
 
-- **范围 `for`**：`for (auto& [k, v] : map)`——*for-range-declaration* 可以是结构化绑定声明，每次迭代用 `*__begin` 初始化一个新的 *e*（[[stmt.ranged]]）。
+- **范围 `for`**：在 `for (auto& [k, v] : map)` 中，*for-range-declaration* 是结构化绑定声明，每次迭代用 `*__begin` 初始化一个新的 *e*（[[stmt.ranged]]）。
 - **展开语句** {{c++26}}：`template for (auto x : tup)` 中解构式展开用的是结构化绑定大小及同样的协议（[[stmt.expand]]）。
 - **标准库的 tuple-like 类型**：`std::pair`、`std::tuple`、`std::array`、`std::subrange`、`std::complex`（C++26）都提供了 `tuple_size` / `tuple_element` / `get`。
 
 ## 实现视角
 
 !!! impl "*e* 在目标代码中"
-    - *e* 是一个真实的对象（或引用）。在 Itanium C++ ABI 中，命名空间作用域的结构化绑定声明的 *e* 需要一个链接名；GCC 和 Clang 用 `_ZDC` 开头的"分解声明"（decomposition declaration）修饰名为其编码，例如 `auto [a, b] = ...;` 在全局作用域会产生形如 `_ZDC1a1bE` 的符号。函数内的 `static` 结构化绑定也有链接名（Clang 生成 `_ZZ1fvEDC1c1dE` 这样的局部静态名），若需要动态初始化还会配一个守卫变量。
-    - 对数据成员协议，绑定名在编译器内部是"指向 *e* 成员的表达式"的别名，不分配任何额外存储；调试器中通常能看到 *e*（以合成名字显示）和各个绑定。
+    - *e* 是一个真实的对象（或引用）。在 Itanium C++ ABI 中，命名空间作用域的结构化绑定声明的 *e* 需要一个链接名；GCC 和 Clang 用 `_ZDC` 开头的分解声明（decomposition declaration）修饰名为其编码，例如 `auto [a, b] = ...;` 在全局作用域会产生形如 `_ZDC1a1bE` 的符号。函数内的 `static` 结构化绑定也有链接名（Clang 生成 `_ZZ1fvEDC1c1dE` 这样的局部静态名），若需要动态初始化还会配一个守卫变量。
+    - 对数据成员协议，绑定名在编译器内部是指向 *e* 成员的表达式的别名，不分配任何额外存储；调试器中通常能看到 *e*（以合成名字显示）和各个绑定。
     - 对 tuple 协议，*rᵢ* 是真实的引用变量；优化后通常与直接调用 `get` 没有区别。
 
 ## 历史与演进
 
 !!! history "C++17 → C++26"
-    - **C++17**：引入结构化绑定（[[P0217R3]]；提案阶段曾称为"decomposition declaration"，ABI 的 `DC` 修饰名即源于此）。限制：说明符只有 `auto` 和 cv、引用；数据成员必须全部 public；不能 `static`/`thread_local`/`constexpr`；不能被 lambda 捕获；任何名为 `get` 的成员都会触发成员形式。
-    - **C++20**：放宽 `get` 成员查找规则（[[P0961R1]]）；数据成员只需在上下文中**可访问**（[[P0969R0]]）；允许 `static`、`thread_local` 和 lambda 捕获（[[P1091R3]]、[[P1381R1]]）。
+    - **C++17**：引入结构化绑定（[[P0217R3]]；提案阶段曾称为 decomposition declaration，ABI 的 `DC` 修饰名即源于此）。当时的限制有：说明符只有 `auto` 和 cv、引用；数据成员必须全部 public；不能 `static`/`thread_local`/`constexpr`；不能被 lambda 捕获；任何名为 `get` 的成员都会触发成员形式。
+    - **C++20**：放宽 `get` 成员查找规则（[[P0961R1]]）；数据成员只需在上下文中可访问（[[P0969R0]]）；允许 `static`、`thread_local` 和 lambda 捕获（[[P1091R3]]、[[P1381R1]]）。
     - **C++26**：结构化绑定可以带属性（[[P0609R3]]）；可以作为 `if`/`while`/`switch` 的条件（[[P0963R3]]）；引入结构化绑定包（[[P1061R10]]）；允许 `constexpr`（[[P2686R5]]）；占位符 `_` 可以在同一声明中重复出现。
     - 特性测试宏 `__cpp_structured_bindings`：Clang 23 在 `-std=c++2c` 下报告 `202411L`。
 
@@ -579,10 +579,10 @@ C++26 还引入了占位符名 `_`（名字无关声明，[[basic.scope.scope]]�
     cv 和引用修饰的是 *e*。引用成员（数据成员协议）或 `tuple_element` 本身是引用类型（如 `std::tuple<int&>`）时，绑定仍然可以写穿到外部对象。
 
 !!! pitfall "按值拆 tuple 时 get 收到的是 xvalue"
-    `auto [s] = std::tuple<std::string>{...};` 中 *e* 是对象，以 xvalue 调用 `get`，得到 `std::string&&`，*r₀* 是右值引用——但它引用的是 *e* 内部的字符串，并没有发生移动。只有当你自己的 `get(T&&)` 返回**纯右值**（即在 `get` 中移动构造一个新对象）时，才会真正移走分量。
+    `auto [s] = std::tuple<std::string>{...};` 中 *e* 是对象，以 xvalue 调用 `get`，得到 `std::string&&`，*r₀* 是右值引用。但它引用的是 *e* 内部的字符串，并没有发生移动。只有当你自己的 `get(T&&)` 返回纯右值（即在 `get` 中移动构造一个新对象）时，才会真正移走分量。
 
 !!! pitfall "结构化绑定不能直接 `return` 移动"
-    见上面的 `unique_ptr` 例子：要么 `return std::move(p);`，要么改用普通变量。
+    见上面的 `unique_ptr` 例子：要么写 `return std::move(p);`，要么改用普通变量。
 
 !!! pitfall "`auto [a, b] = {1, 2};` 不是 initializer_list 的拆解"
     初始化器不允许是花括号列表；`auto [a, b]{x}` 中花括号里只能有一个表达式。
@@ -616,7 +616,7 @@ C++26 还引入了占位符名 `_`（名字无关声明，[[basic.scope.scope]]�
 <details markdown="1">
 <summary>答案</summary>
 
-C++17：在 `Handle` 中找到名为 `get` 的成员，于是使用 `e.get<i>()`；但成员 `get` 不是模板，`e.get<0>()` 非良构。C++20 起（¶7）：成员查找必须找到"首个模板形参是常量模板形参的函数模板"才用成员形式；`int* get() const` 不是模板，于是退回 `get<i>(e)` + ADL，找到自由函数模板，良构。
+C++17：在 `Handle` 中找到名为 `get` 的成员，于是使用 `e.get<i>()`；但成员 `get` 不是模板，`e.get<0>()` 非良构。C++20 起（¶7），成员查找必须找到首个模板形参是常量模板形参的函数模板才用成员形式；`int* get() const` 不是模板，于是退回 `get<i>(e)` 加 ADL，找到自由函数模板，良构。
 </details>
 
 !!! question "思考题 3"
@@ -625,15 +625,15 @@ C++17：在 `Handle` 中找到名为 `get` 的成员，于是使用 `e.get<i>()`
 <details markdown="1">
 <summary>答案</summary>
 
-`auto& [x] = s;`：*e* 是 `auto&` 推导出的 `const S&`，`x` 是 `e.a`，类型 `const int`，所以 `x = 2` 非良构。`auto [y] = s;`：*e* 是 `S` 的**非 const 副本**（`auto` 推导丢弃顶层 const），`y` 的类型是 `int`，`y = 2` 良构，修改的是副本。
+`auto& [x] = s;`：*e* 是 `auto&` 推导出的 `const S&`，`x` 是 `e.a`，类型 `const int`，所以 `x = 2` 非良构。`auto [y] = s;`：*e* 是 `S` 的非 const 副本（`auto` 推导丢弃顶层 const），`y` 的类型是 `int`，`y = 2` 良构，修改的是副本。
 </details>
 
 ## 小结
 
 !!! summary "要点"
     - 只有一个真实变量 *e*；cv、`&`/`&&`、`static`、`constexpr` 等全部作用于 *e*（tuple 协议下也作用于各 *rᵢ*）。
-    - 三种协议按顺序尝试：**数组** → **tuple-like**（`tuple_size<E>` 完整且有 `value`）→ **数据成员**（全部在同一个类、可访问、无匿名联合）。
-    - tuple-like 协议中 `get` 先找"首个模板形参为常量形参"的成员模板，否则 **仅 ADL**；*e* 为非引用时以 xvalue 调用。
+    - 三种协议按顺序尝试：数组 → tuple-like（`tuple_size<E>` 完整且有 `value`）→ 数据成员（全部在同一个类、可访问、无匿名联合）。
+    - tuple-like 协议中 `get` 先找首个模板形参为常量形参的成员模板，否则仅用 ADL；*e* 为非引用时以 xvalue 调用。
     - 绑定名是左值；`decltype` 给出被引用类型；不是变量，所以不隐式移动。
     - C++26：属性、条件、绑定包（只能在模板化实体中）、`constexpr`/`constinit`。
 
