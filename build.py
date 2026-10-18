@@ -311,7 +311,11 @@ def xref_html(target, text, ctx, page_key):
         title = f'{entry["num"]} {entry["title"]}' + (f" · {zh}" if zh else "")
     if sid in ctx.std_pages:
         p = ctx.std_pages[sid]
-        href = "{ROOT}" + p["url"] + (f"#p{para}" if para and para.isdigit() else (f"#{para}" if para else ""))
+        if para and re.match(r"^\d+(\.\d+)*$", para):
+            frag = "#p" + para.split(".")[0]
+        else:
+            frag = f"#{para}" if para else ""
+        href = "{ROOT}" + p["url"] + frag
         tip = title + (" — " + p.get("summary", "") if p.get("summary") else "")
         return f'<a class="xref std local" href="{href}" data-tip="{html.escape(tip)}">{html.escape(label)}</a>'
     if sid in ctx.covered:

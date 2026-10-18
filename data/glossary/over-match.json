@@ -1,0 +1,23 @@
+[
+  {"id": "overload-resolution", "en": "overload resolution", "zh": "重载决议", "def": "根据使用点上实参的类型，从重载集中选出被调用的函数声明并判定调用是否合法的过程。分三步：构造候选函数、筛选可行函数、选出唯一的最佳可行函数（[[over.match]]）。", "ref": "over.pre#2"},
+  {"id": "candidate-function", "en": "candidate function", "zh": "候选函数", "def": "在某个调用语境中参与重载决议的函数集合的成员；由名字查找、模板实参推导以及各语境的特定规则（[[over.match.funcs]]）构造。", "ref": "over.match.general#1"},
+  {"id": "viable-function", "en": "viable function", "zh": "可行函数", "def": "形参个数与实参相符（考虑省略号与默认实参）、关联约束得到满足、且每个实参都存在到对应形参的隐式转换序列的候选函数。", "ref": "over.match.viable#1"},
+  {"id": "best-viable-function", "en": "best viable function", "zh": "最佳可行函数", "def": "比所有其他可行函数都更好的那个可行函数：所有实参的 ICS 都不差，且某个实参更好或某条决胜规则成立（[[over.match.best]]）。不存在或不唯一时调用非良构。", "ref": "over.match.best.general#2"},
+  {"id": "usable-candidate", "en": "usable candidate", "zh": "可用候选", "def": "重载决议成功，且选中的是内建运算符候选，或未被删除且在该语境中可访问的函数。用于判定预置比较运算符是否被定义为删除（[[class.compare.default]]）。", "ref": "over.match.general#4"},
+  {"id": "implicit-object-parameter", "en": "implicit object parameter", "zh": "隐式对象形参", "def": "为参与重载决议而视为隐式对象成员函数（及有隐含对象实参时的静态成员函数）所具有的额外第一形参，类型为 `cv X&` 或 `cv X&&`；不能对它应用用户定义转换。", "ref": "over.match.funcs.general#2"},
+  {"id": "implied-object-argument", "en": "implied object argument", "zh": "隐含对象实参", "def": "重载决议的实参列表中代表被操作对象的第一个实参，如 `a.f(x)` 中的 `a`、类内非限定调用中的 `(*this)`，对上候选的隐式（或显式）对象形参。", "ref": "over.match.funcs.general#3"},
+  {"id": "permissible-type", "en": "permissible type", "zh": "容许类型", "def": "在以转换函数初始化对象或引用的各语境中，一个转换函数的返回类型必须属于的类型集合；非 explicit 与 explicit 转换函数各有一组。", "ref": "over.match.funcs.general#7"},
+  {"id": "surrogate-call-function", "en": "surrogate call function", "zh": "代理调用函数", "def": "对类对象使用函数调用语法时，为每个转换到函数指针/函数引用的非 explicit 转换函数虚构的候选 `R call-function(F, P1, …, Pn)`；对象实参需经用户定义转换匹配其第一形参。", "ref": "over.call.object#2"},
+  {"id": "rewritten-candidate", "en": "rewritten candidate", "zh": "改写候选", "def": "C++20 起运算符表达式的第四类候选：关系运算符可由 `operator<=>` 改写，`!=` 可由 `operator==` 改写，`==` 与 `<=>` 还有参数反转的合成候选。平局时劣于非改写候选。", "ref": "over.match.oper#3"},
+  {"id": "rewrite-target", "en": "rewrite target", "zh": "改写目标", "def": "可以被用作 `!=` 改写或参数反转的 `operator==`；若在相应作用域中能搜索到与之对应的 `operator!=`，它就不是改写目标（C++23 的 P2468）。", "ref": "over.match.oper#4"},
+  {"id": "built-in-candidate", "en": "built-in candidate", "zh": "内建候选", "def": "运算符重载决议中代表内建运算符的假想函数（[[over.built]]），使用户定义转换后的内建运算可以与用户定义运算符在同一张表上比较。", "ref": "over.match.oper#3"},
+  {"id": "deduction-guides-of-class-template", "en": "guides (of a class template)", "zh": "（类模板的）指引", "def": "类模板实参推导时构造的一组函数（模板）：每个构造函数一个、拷贝推导候选、用户推导指引、聚合推导候选等；在它们上做一次重载决议，胜者的返回类型即推导结果。", "ref": "over.match.class.deduct#1"},
+  {"id": "copy-deduction-candidate", "en": "copy deduction candidate", "zh": "拷贝推导候选", "def": "由假想构造函数 `C(C)` 生成的指引，保证用 `C<X>` 对象初始化时推导出 `C<X>` 而非 `C<C<X>>`；平局时优于其他非推导指引的候选。", "ref": "over.match.class.deduct#1.3"},
+  {"id": "aggregate-deduction-candidate", "en": "aggregate deduction candidate", "zh": "聚合推导候选", "def": "C++20 起，对没有推导指引的聚合类模板，根据初始化器各元素所对应的聚合元素类型生成的指引，使聚合也能使用 CTAD。", "ref": "over.match.class.deduct#1"},
+  {"id": "implicit-conversion-sequence", "en": "implicit conversion sequence", "zh": "隐式转换序列", "def": "把实参转换到对应形参类型所需的转换序列，是对\"用实参拷贝初始化形参\"的建模，只关心类型、cv 限定与值类别。分标准、用户定义、省略号三种形式。", "ref": "over.best.ics.general#1"},
+  {"id": "user-defined-conversion-sequence", "en": "user-defined conversion sequence", "zh": "用户定义转换序列", "def": "初始标准转换序列 + 一次用户定义转换（构造函数或转换函数）+ 第二标准转换序列。只有使用同一个转换函数/构造函数的两个这种序列才可比较。", "ref": "over.ics.user#1"},
+  {"id": "ellipsis-conversion-sequence", "en": "ellipsis conversion sequence", "zh": "省略号转换序列", "def": "实参与省略号形参匹配时形成的转换序列，是三种形式中最差的。", "ref": "over.ics.ellipsis#1"},
+  {"id": "ambiguous-conversion-sequence", "en": "ambiguous conversion sequence", "zh": "歧义转换序列", "def": "实参到形参存在多个良构隐式转换序列时所指定的唯一序列；排序时视为与任何用户定义转换序列不分优劣，若所在函数被选中则调用非良构。", "ref": "over.best.ics.general#12"},
+  {"id": "conversion-rank", "en": "rank (of a conversion)", "zh": "（转换的）等级", "def": "标准转换的三个等级：Exact Match、Promotion、Conversion。标准转换序列的等级取其中各转换及引用绑定里最差的一个。", "ref": "over.ics.scs#3"},
+  {"id": "indistinguishable-conversion-sequences", "en": "indistinguishable conversion sequences", "zh": "不可区分的转换序列", "def": "两个隐式转换序列互不比对方更好时称为不可区分；[[over.ics.rank]] 定义的只是偏序，大量序列对都不可区分。", "ref": "over.ics.rank#1"}
+]
