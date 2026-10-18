@@ -1,0 +1,44 @@
+[
+ {
+  "id": "base-characteristic",
+  "en": "base characteristic",
+  "zh": "基特征",
+  "def": "一元/二元类型特征公开且无歧义地（直接或间接）派生自的那个 `integral_constant` 特化；trait 的 `value`、`type`、`value_type` 均来自它，但 trait 本身是另一个类型。",
+  "ref": "meta.rqmts#1"
+ },
+ {
+  "id": "cpp17-unary-type-trait",
+  "en": "Cpp17UnaryTypeTrait",
+  "zh": "一元类型特征要求",
+  "def": "描述单个类型性质的类模板应满足的要求：取一个类型实参（可附加辅助实参），可默认构造、可复制构造，并派生自其基特征且不隐藏基特征的成员名。",
+  "ref": "meta.rqmts#1"
+ },
+ {
+  "id": "cpp17-binary-type-trait",
+  "en": "Cpp17BinaryTypeTrait",
+  "zh": "二元类型特征要求",
+  "def": "描述两个类型之间关系的类模板应满足的要求：取两个类型实参（可附加辅助实参），其余与一元类型特征相同。",
+  "ref": "meta.rqmts#2"
+ },
+ {
+  "id": "cpp17-transformation-trait",
+  "en": "Cpp17TransformationTrait",
+  "zh": "变换特征要求",
+  "def": "修改类型某一性质的类模板应满足的要求：取一个类型实参（可附加辅助实参），并声明公开的嵌套类型 `type` 作为修改后类型的同义词。",
+  "ref": "meta.rqmts#3"
+ },
+ {
+  "id": "enumerable-type",
+  "en": "enumerable type",
+  "zh": "可枚举类型",
+  "def": "从程序点 P 可枚举的类型：在 P 处完整的类类型，或定义从 P 可达且 P 不在其枚举说明符内部的枚举类型。`members_of`、`enumerators_of` 要求实参可枚举。",
+  "ref": "meta.reflection.queries#30"
+ },
+ {
+  "id": "access-context",
+  "en": "access context",
+  "zh": "访问语境",
+  "def": "`std::meta::access_context` 的值：由一个作用域（命名空间、类或函数，或空反射）与一个指定类组成，决定反射成员查询按哪个位置的访问权限进行；由 `current()`、`unprivileged()`、`unchecked()` 与 `via()` 构造。",
+  "ref": "meta.reflection.access.context#1"
+ }
+]
