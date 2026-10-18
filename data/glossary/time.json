@@ -1,0 +1,72 @@
+[
+ {
+  "id": "clock-epoch",
+  "en": "epoch (of a clock)",
+  "zh": "纪元（时钟的起点）",
+  "def": "时钟的 time_point 所度量的原点：time_point 只存一个 duration，含义是“距纪元多远”。system_clock 的纪元是 1970-01-01 00:00:00 UTC；steady_clock、file_clock 的纪元未指明。两个时钟纪元不同，所以它们的 time_point 不能直接比较或相减。",
+  "ref": "time.clock.req#1"
+ },
+ {
+  "id": "cpp17clock",
+  "en": "Cpp17Clock requirements",
+  "zh": "Cpp17Clock 要求",
+  "def": "一个“时钟”类型必须提供的东西：rep、period、duration、time_point 四个类型成员，可用于常量表达式的 bool 常量 is_steady，以及返回当前 time_point 的静态函数 now()。is_clock 特征至少检查这些名字是否存在。",
+  "ref": "time.clock.req#1"
+ },
+ {
+  "id": "trivial-clock",
+  "en": "Cpp17TrivialClock requirements",
+  "zh": "Cpp17TrivialClock 要求",
+  "def": "在 Cpp17Clock 之上再要求：rep、duration、time_point 可比较、可交换、满足数值类型要求（因而操作不抛异常），now() 不抛异常，且 time_point::clock 递归地满足本要求。标准线程库的超时函数所用的时钟都是这种时钟。",
+  "ref": "time.clock.req#4"
+ },
+ {
+  "id": "tick-period",
+  "en": "tick period",
+  "zh": "计次周期",
+  "def": "duration 中相邻两个“计数单位”之间的时间长度，以秒为单位、用编译期有理数 ratio 表示。duration<long long, milli> 的计次周期是 1/1000 秒；count() 返回的是计次数而不是秒数。",
+  "ref": "time.duration.general#1"
+ },
+ {
+  "id": "unix-time",
+  "en": "Unix time",
+  "zh": "Unix 时间",
+  "def": "从 1970-01-01 00:00:00 UTC 起算、不计闰秒的时间度量：每天恰好 86400 秒。sys_time 按标准规定就是 Unix 时间，因此 sys_days 与公历日期之间可以用纯算术换算。",
+  "ref": "time.clock.system.overview#1"
+ },
+ {
+  "id": "leap-second",
+  "en": "leap second",
+  "zh": "闰秒",
+  "def": "为使 UTC 与地球自转对齐而插入（或删除）的一秒。sys_time 不计闰秒，utc_time 计入闰秒；两者之差就是 1970 年以来插入的闰秒总数。闰秒表随时区数据库提供（tzdb::leap_seconds）。",
+  "ref": "time.zone.leap.overview#1"
+ },
+ {
+  "id": "field-based-time-point",
+  "en": "field-based time point",
+  "zh": "基于字段的时间点",
+  "def": "用年、月、日等独立字段存储的时间点，如 year_month_day。它便于按年、按月做算术和取字段，但不便按天加减；与之相对，sys_days 是“序列式”时间点（一个整数天数），按天算术很快。两者可以互相转换。",
+  "ref": "time.cal.ym.overview#1"
+ },
+ {
+  "id": "local-time",
+  "en": "local time (local_time)",
+  "zh": "本地时间",
+  "def": "以伪时钟 local_t 为参数的 time_point 族 local_time<Duration>：表示“某个尚未指定的时区里的钟面时间”。它有完整的 time_point 算术，但没有 now()，也不能与 sys_time 混用；要换算成 UTC 必须经过某个 time_zone。",
+  "ref": "time.clock.local#1"
+ },
+ {
+  "id": "formatting-locale",
+  "en": "formatting locale",
+  "zh": "格式化 locale",
+  "def": "chrono 格式化实际使用的 locale：格式说明里没有 L 选项时一律用 \"C\" locale；有 L 时用传给格式化函数的 locale，没有传则用全局 locale。",
+  "ref": "time.format#2"
+ },
+ {
+  "id": "remote-time-zone-database",
+  "en": "remote time zone database",
+  "zh": "远程时区数据库",
+  "def": "程序运行期间实现可能获得的、更新后的时区数据库。它不会自动影响程序：只有调用 reload_tzdb() 时才被推到 tzdb_list 的最前面，remote_version() 可查询其版本。",
+  "ref": "time.zone.db.remote#1"
+ }
+]
