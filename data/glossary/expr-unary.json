@@ -1,0 +1,11 @@
+[
+  {"id": "indirection", "en": "indirection", "zh": "间接", "def": "一元 `*` 运算：操作数为指向对象或函数类型 `T` 的指针 prvalue，结果是指代所指对象或函数的 `T` 类型左值；指针不指向对象或函数时为 UB（`typeid` 的情形除外）。", "ref": "expr.unary.op#1"},
+  {"id": "suspension-context", "en": "suspension context", "zh": "挂起语境", "def": "函数中允许出现 `co_await` 的语境：函数体或 lambda 体内的潜在求值位置，且不在 handler、默认实参、静态/线程局部变量的初始化器或契约谓词中。见 [[expr.await]]。", "ref": "expr.await#2"},
+  {"id": "suspend-point", "en": "suspend point", "zh": "挂起点", "def": "协程在 `co_await` 中挂起后、控制返回其调用者或恢复者之前的那一点；控制返回时不退出任何作用域。", "ref": "expr.await#5"},
+  {"id": "allocated-type", "en": "allocated type", "zh": "被分配类型", "def": "*new-expression* 试图创建的对象的类型；须为完整对象类型且不是抽象类（或其数组）。它决定调用 `operator new` 还是 `operator new[]`，与写法无关。", "ref": "expr.new#1"},
+  {"id": "placement-new-expression", "en": "placement new-expression", "zh": "placement new 表达式", "def": "带 *new-placement*（括号中的额外实参）的 *new-expression*，额外实参传给分配函数，如 `new (buf) T`、`new (std::nothrow) T`。", "ref": "expr.new#19"},
+  {"id": "single-object-delete-expression", "en": "single-object delete expression", "zh": "单对象 delete 表达式", "def": "形如 `delete p` 的 *delete-expression*；操作数须为空指针、非数组 `new` 的结果或其基类子对象指针，否则 UB。", "ref": "expr.delete#1"},
+  {"id": "array-delete-expression", "en": "array delete expression", "zh": "数组 delete 表达式", "def": "形如 `delete[] p` 的 *delete-expression*；操作数须为空指针或数组 `new`（非不分配形式）的结果，且动态类型与静态类型相似，否则 UB。", "ref": "expr.delete#1"},
+  {"id": "deleted-object", "en": "deleted object", "zh": "被删除对象", "def": "*delete-expression* 销毁的对象：单对象 delete 中，若操作数所指对象的静态类型有虚析构函数则为其最派生对象，否则为该对象本身；数组 delete 中为数组对象。其地址与大小传给释放函数。", "ref": "expr.delete#10"},
+  {"id": "reflection-operator", "en": "reflection operator", "zh": "反射运算符", "def": "C++26 的一元 `^^` 运算符，结果是 `std::meta::info` 类型的 prvalue，代表其操作数所指的命名空间、类型、模板、变量、函数等构造。", "ref": "expr.reflect#1"}
+]
