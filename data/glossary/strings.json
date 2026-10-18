@@ -1,0 +1,6 @@
+[
+ {"id": "char-like-type", "en": "char-like type", "zh": "类字符类型", "def": "非数组、平凡可复制、标准布局且可平凡默认构造的类型；其对象称为 char-like object 或“字符”，是 `basic_string`/`basic_string_view` 的元素类型。比核心语言的“字符类型”宽，可以是用户定义的结构体。", "ref": "strings.general#1"},
+ {"id": "character-traits", "en": "character traits", "zh": "字符 traits", "def": "为某个字符类型提供 `eq`/`lt`/`compare`/`length`/`find`/`copy`/`move`/`assign` 以及 `int_type`/`eof()` 等成员的类，作为 `basic_string`、`basic_string_view` 与 iostream 的 `traits` 模板实参；其 `char_type` 必须与字符类型相同，要求表中的表达式不得抛出异常。", "ref": "char.traits.require#1"},
+ {"id": "null-terminator", "en": "null terminator", "zh": "空终止符", "def": "`basic_string` 中 `data() + size()` 所指、值为 `charT()` 的对象；它在任何时候都存在，使 `c_str()` 为常数时间。把它修改为 `charT()` 以外的值是未定义行为。`basic_string_view` 没有这一保证。", "ref": "basic.string.general#3"},
+ {"id": "short-string-optimization", "en": "short string optimization (SSO)", "zh": "短字符串优化", "def": "把较短的字符序列直接存放在 `basic_string` 对象内部而不做堆分配的实现技术。标准未要求但允许它，这也是 `basic_string` 的移动赋值与 `swap` 可能使迭代器失效的原因；libc++ 中 `std::string` 为 24 字节、对象内可存 22 个 `char`。", "ref": "string.require#4"}
+]
