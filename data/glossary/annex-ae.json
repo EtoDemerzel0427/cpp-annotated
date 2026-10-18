@@ -1,0 +1,30 @@
+[
+ {
+  "id": "uax31",
+  "en": "UAX #31 (Unicode Standard Annex #31)",
+  "zh": "Unicode 标准附录 31",
+  "def": "Unicode 关于标识符与语法字符的附录，给出默认标识符语法 `<Start> <Continue>*` 及 R1–R8 等可选的符合性要求。C++ 符合其中的 R1（默认标识符，带数学记号 profile 并额外允许 `_` 开头）和 R4（以 NFC 判定等价）。见 [[uaxid]]。",
+  "ref": "uaxid.general#1"
+ },
+ {
+  "id": "xid-start",
+  "en": "XID_Start / XID_Continue",
+  "zh": "XID 起始 / 后续属性",
+  "def": "Unicode 字符属性：XID_Start 大致是字母类字符，XID_Continue 在其上加入数字、组合标记、连接标点等；前缀 X 表示该集合在 NFKC 规范化下封闭。C++ 标识符的首字符取 XID_Start（加 `_` 和数学起始字符），后续字符取 XID_Continue。",
+  "ref": "lex.name"
+ },
+ {
+  "id": "nfc",
+  "en": "Normalization Form C (NFC)",
+  "zh": "规范组合形式",
+  "def": "Unicode 规范化形式之一：先做规范分解，再规范组合，使 `e` + U+0301 与预组合的 `é`（U+00E9）得到同一码位序列。C++ 要求标识符本身就是 NFC，否则非良构；不使用兼容等价（NFKC），所以 `ﬁ` 与 `fi` 是不同的标识符。",
+  "ref": "lex.name#1"
+ },
+ {
+  "id": "most-vexing-parse",
+  "en": "most vexing parse",
+  "zh": "最令人烦恼的解析",
+  "def": "非正式术语：形如 `S w(int());` 或 `T t(U(x));` 的代码按\"能当声明就当声明\"的消歧规则被解析为函数声明，而不是对象定义。见 [[dcl.ambig.res]]、[[stmt.ambig]]。",
+  "ref": "dcl.ambig.res#1"
+ }
+]
