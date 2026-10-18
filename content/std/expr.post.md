@@ -53,7 +53,7 @@ postfix-expression:
 
 ### 下标表达式与求值顺序（¶1）
 
-¶1 定义**下标表达式**（subscript expression）：后缀表达式后跟方括号，括号里是**可能为空的、逗号分隔的** *initializer-clause* 列表，它们是下标运算符的实参。注意这里已经是 C++23 的写法——方括号里可以有零个、一个或多个实参（多个实参只对重载的 `operator[]` 有意义）。
+¶1 定义**[[g:subscript-expression|下标表达式]]**（subscript expression）：后缀表达式后跟方括号，括号里是**可能为空的、逗号分隔的** *initializer-clause* 列表，它们是下标运算符的实参。注意这里已经是 C++23 的写法——方括号里可以有零个、一个或多个实参（多个实参只对重载的 `operator[]` 有意义）。
 
 然后是求值顺序：
 

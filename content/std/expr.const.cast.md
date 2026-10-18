@@ -9,7 +9,7 @@ updated: 2026-10-17
 
 `const_cast` 是职责最单一的具名转换：**只改 cv 限定（`const`、`volatile`），别的一概不改**。它能去掉 `const`，也能加上 `const`；能作用于多级指针的任意层；但不能改变类型本身（`int*` 不能变 `long*`），也不能用于函数指针和成员函数指针。
 
-本节同时承担另一个职责：定义**"去掉常量性"**（casts away constness）这个术语（¶6–¶7）。`static_cast`、`reinterpret_cast`、`dynamic_cast` 都"不能去掉常量性"，它们的这条限制正是引用这里的定义。
+本节同时承担另一个职责：定义**[[g:casts-away-constness|"去掉常量性"]]**（casts away constness）这个术语（¶6–¶7）。`static_cast`、`reinterpret_cast`、`dynamic_cast` 都"不能去掉常量性"，它们的这条限制正是引用这里的定义。
 
 最重要的一点：`const_cast` 本身**永远不是 UB**；UB 来自之后**通过结果修改一个 const 对象**（[[dcl.type.cv]]）。
 
@@ -63,20 +63,27 @@ void t(int** pp, const int* const* cpcp, int* ip, volatile int* vp) {
 结果指代与（可能经转换的）操作数**相同的对象**。标准例 1：
 
 ```cpp run title="const-cast-ref.cpp" ok
-typedef int* A[3];                  // 3 个 int* 的数组
-typedef const int* const CA[3];     // 3 个 const int* const 的数组
-
 int main() {
-    auto&& r2 = const_cast<A&&>(CA{});   // OK：¶4.3，数组 prvalue 被实质化
     const int ci = 1;
     const int& cr = ci;
     int& r = const_cast<int&>(cr);       // OK：¶4.1（转换本身合法；写入 r 才是 UB）
     struct S { int v; };
     S&& s = const_cast<S&&>(S{1});       // OK：¶4.3，类 prvalue 被实质化
-    (void)r2; (void)r;
+    (void)r;
     return s.v == 1 ? 0 : 1;
 }
 ```
+
+数组 prvalue 的情形是标准例 1：
+
+```cpp title="const-cast-array.cpp"
+typedef int* A[3];                  // 3 个 int* 的数组
+typedef const int* const CA[3];     // 3 个 const int* const 的数组
+
+auto&& r2 = const_cast<A&&>(CA{});  // OK（按标准）：¶4.3，数组 prvalue 被实质化
+```
+
+本机 Clang 拒绝这一行（"const_cast from rvalue to reference type 'A &&'"），即尚未实现 ¶4.3 中数组 prvalue 的情形；按标准它是良构的。
 
 为什么 ¶4.3 只允许类和数组 prvalue？因为标量 prvalue 根本没有 cv（[[expr.prop]]：非类非数组的 prvalue 的 cv 会被丢弃），`const_cast<int&&>(5)` 没有要去掉的东西，标准也就不为它开实质化的口子——它是非良构的。
 

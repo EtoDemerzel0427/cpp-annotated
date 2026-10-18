@@ -1,0 +1,8 @@
+[
+  {"id": "subscript-expression", "en": "subscript expression", "zh": "下标表达式", "def": "后缀表达式后跟方括号，括号内是可能为空、逗号分隔的实参列表（C++23 起可有多个）。内置版本 `E1[E2]` 按定义等于 `*((E1)+(E2))`，方括号前的表达式先序于方括号内的实参。", "ref": "expr.sub#1"},
+  {"id": "virtual-function-call", "en": "virtual function call", "zh": "虚函数调用", "def": "选中的函数是虚函数、且类成员访问中的名字不是限定名时，调用对象表达式动态类型中该函数的最终覆盖者；这样的调用称为虚函数调用。", "ref": "expr.call#2"},
+  {"id": "call-compatible", "en": "call-compatible", "zh": "调用兼容", "def": "函数类型 `Tcall` 与 `Tfunc` 相同，或\"指向 `Tfunc` 的指针\"能经函数指针转换（去掉 `noexcept`）变为\"指向 `Tcall` 的指针\"。经不调用兼容的函数类型调用函数是 UB。", "ref": "expr.call#6"},
+  {"id": "default-argument-promotions", "en": "default argument promotions", "zh": "默认实参提升", "def": "传给 `...` 的实参中，可整型提升的整型/枚举做整型提升、`float` 提升为 `double`；所以 `va_arg` 必须使用提升后的类型。", "ref": "expr.call#13"},
+  {"id": "object-expression", "en": "object expression", "zh": "对象表达式", "def": "类成员访问 `E1.E2` 中的 `E1`（`E1->E2` 化归为 `(*(E1)).E2` 后的 `*(E1)`）。它总会被求值，即使 `E2` 是静态成员。", "ref": "expr.ref#4"},
+  {"id": "casts-away-constness", "en": "casts away constness", "zh": "去掉常量性", "def": "把目标类型各层的 cv 套到源类型的限定分解上，若所得类型不能由源类型经限定转换得到，则该转换去掉常量性；如 `const int*` → `int*`，以及 `int**` → `const int**`。只有 `const_cast` 与 C 风格转换能做到。", "ref": "expr.const.cast#6"}
+]

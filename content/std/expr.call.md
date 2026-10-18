@@ -46,7 +46,7 @@ int main() {
 
 ## 静态绑定与虚调用（¶2）
 
-¶2：若选中的函数**不是虚函数**，或者类成员访问中的 *id-expression* 是**限定名**（`p->Base::f()`），就调用该函数本身。否则调用对象表达式**动态类型**中该函数的**最终覆盖者**（final overrider，[[class.virtual]]）——这称为**虚函数调用**（virtual function call）。
+¶2：若选中的函数**不是虚函数**，或者类成员访问中的 *id-expression* 是**限定名**（`p->Base::f()`），就调用该函数本身。否则调用对象表达式**动态类型**中该函数的**最终覆盖者**（final overrider，[[class.virtual]]）——这称为**[[g:virtual-function-call|虚函数调用]]**（virtual function call）。
 
 注 2 补充：动态类型由对象表达式**当前值**所指对象决定；对正在构造或析构的对象，虚调用的行为由 [[class.cdtor]] 规定（分派到当前构造/析构的类）。
 
@@ -135,7 +135,7 @@ void t(Y& y) {
 
 ## 经不兼容的函数类型调用：UB（¶6）
 
-¶6 先定义一个术语：函数类型 `Tcall` 与 `Tfunc` **调用兼容**（call-compatible），若二者相同，或者"指向 `Tfunc` 的指针"能经**函数指针转换**（[[conv.fctptr]]，即去掉 `noexcept`）转换为"指向 `Tcall` 的指针"。
+¶6 先定义一个术语：函数类型 `Tcall` 与 `Tfunc` **[[g:call-compatible|调用兼容]]**（call-compatible），若二者相同，或者"指向 `Tfunc` 的指针"能经**函数指针转换**（[[conv.fctptr]]，即去掉 `noexcept`）转换为"指向 `Tcall` 的指针"。
 
 !!! std
     Calling a function through an expression whose function type is not call-compatible with the type of the called function's definition results in undefined behavior.
@@ -335,7 +335,7 @@ int main() {
 2. `std::nullptr_t` 类型的实参转换为 `void*`；
 3. 转换后若不是算术、枚举、指针、成员指针或类类型，**非良构**；
 4. 传递**潜在求值**的、**有作用域枚举**类型的实参，或具有资格的非平凡复制/移动构造函数或非平凡析构函数的**类类型**实参，是**有条件支持**的（conditionally-supported），语义由实现定义；
-5. **默认实参提升**（default argument promotions）：可整型提升的整型/枚举做整型提升（[[conv.prom]]），`float` 提升为 `double`（[[conv.fpprom]]）。
+5. **[[g:default-argument-promotions|默认实参提升]]**（default argument promotions）：可整型提升的整型/枚举做整型提升（[[conv.prom]]），`float` 提升为 `double`（[[conv.fpprom]]）。
 
 ```cpp run title="varargs.cpp" ok
 #include <cstdarg>

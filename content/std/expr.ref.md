@@ -56,7 +56,7 @@ int main() {
 
 ## 对象表达式与伪析构（¶4）
 
-¶4：把 `E1.E2` 中的 `E1` 称为**对象表达式**（object expression）。若对象表达式是**标量类型**，`E2` 必须指名**同一类型**（忽略 cv）的**伪析构函数**（[[expr.prim.id.dtor]]），而 `E1.E2` 是"返回 `void` 的无参函数"类型的 prvalue——它只能用于一次"名义上的"函数调用。这就是 `p->~T()` 在 `T = int` 时仍然合法的原因（调用的效果见 [[expr.call#4]]：销毁该标量对象）。
+¶4：把 `E1.E2` 中的 `E1` 称为**[[g:object-expression|对象表达式]]**（object expression）。若对象表达式是**标量类型**，`E2` 必须指名**同一类型**（忽略 cv）的**伪析构函数**（[[expr.prim.id.dtor]]），而 `E1.E2` 是"返回 `void` 的无参函数"类型的 prvalue——它只能用于一次"名义上的"函数调用。这就是 `p->~T()` 在 `T = int` 时仍然合法的原因（调用的效果见 [[expr.call#4]]：销毁该标量对象）。
 
 ```cpp run title="pseudo-dtor-access.cpp" ok
 #include <new>
