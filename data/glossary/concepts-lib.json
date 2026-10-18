@@ -1,0 +1,17 @@
+[
+  {"id": "models-concept", "en": "model (a concept)", "zh": "建模（概念）", "def": "一组模板实参建模某个库概念，当且仅当它满足该概念（约束表达式为真）并且符合该概念规格中给出的全部语义要求。满足但不建模、而程序的有效性或含义依赖于此时，程序 IFNDR。", "ref": "res.on.requirements#1"},
+  {"id": "equality-preserving", "en": "equality-preserving", "zh": "保持相等性", "def": "给定相等的输入（操作数），表达式产生相等的输出（结果及被修改的操作数）；还要求稳定：对同一批输入对象两次求值，若中间没有显式修改，输出相等。库 requires 表达式中的表达式默认都要求保持相等性。", "ref": "concepts.equality#1"},
+  {"id": "expression-domain", "en": "domain (of an expression)", "zh": "（表达式的）定义域", "def": "表达式被要求良定义的输入值集合。概念所要求的操作不必是全函数，例如 NaN 不在 double 的 < 的定义域内，这不影响 double 建模 totally_ordered。", "ref": "concepts.equality#2"},
+  {"id": "implicit-expression-variation", "en": "implicit expression variations", "zh": "隐式表达式变体", "def": "库 requires 表达式中对某 const 左值操作数不做修改的表达式，隐含要求把该操作数换成非 const 左值或（可能为 const 的）右值后的变体也有效且满足相同语义；实现在多大程度上检查这些变体的语法是未指明的。", "ref": "concepts.equality#6"},
+  {"id": "common-reference-type", "en": "common reference type", "zh": "公共引用类型", "def": "若 common_reference_t<T, U> 良构且为 C，并且 T、U 到 C 的 convertible_to 都被建模，则 C 是 T 与 U 的公共引用类型；为代理迭代器统一处理\"引用\"与\"值\"而设计。", "ref": "concept.commonref#1"},
+  {"id": "common-type", "en": "common type", "zh": "公共类型", "def": "若 T 与 U 都能显式转换到某第三个类型 C，则 C 是它们的公共类型；不一定唯一。common_with 用 common_type_t 选定它并附加公共引用的相容性要求。", "ref": "concept.common#1"},
+  {"id": "exchanges-values", "en": "exchanges the values", "zh": "交换值", "def": "一个操作交换 t1 与 u1 表示的值，指它不修改记录原值的旁证对象 t2、u2，且结果使 t1 等于 u2、u1 等于 t2（类型不同时在公共引用类型中比较）；自交换必须保持值不变。", "ref": "concept.swappable#1"},
+  {"id": "customization-point-object", "en": "customization point object", "zh": "定制点对象", "def": "具有字面量类类型的函数对象（如 ranges::swap），与程序定义的类型交互并对这种交互施加语义要求；其类型须建模 semiregular、是结构化且可平凡复制的类型，所有实例相等。", "ref": "customization.point.object#1"},
+  {"id": "boolean-testable", "en": "boolean-testable", "zh": "可布尔测试", "def": "说明专用概念：类型可转换为 bool，且 !e 的结果也可转换为 bool；语义上还要求 ! 真的是取反，并且 ADL 等查找不会找到劫持 && 与 || 的\"取消资格的声明\"，使逻辑运算决议到内建运算符。", "ref": "concept.booleantestable#1"},
+  {"id": "strict-weak-ordering", "en": "strict weak ordering", "zh": "严格弱序", "def": "反自反（!comp(x, x)）且 comp 与 equiv(a, b) = !comp(a, b) && !comp(b, a) 都传递的关系；equiv 因此是等价关系，comp 在等价类之间诱导出严格全序。sort 等算法的比较器须满足它。", "ref": "concept.strictweakorder#2"},
+  {"id": "error-category", "en": "error category", "zh": "错误类别", "def": "派生自 std::error_category 的单例对象，标识一类错误码的来源与编码：按地址判定相等，提供 name()、message() 以及把错误码映射到错误状况的 default_error_condition、equivalent。", "ref": "syserr.errcat.overview#1"},
+  {"id": "error-code", "en": "error code", "zh": "错误码（error_code）", "def": "由整数值与错误类别指针组成的值类型，保存某次操作实际得到的、平台相关的精确错误；值 0 表示无错误。与 error_code 比较是精确的，与 error_condition 比较则经由类别的 equivalent 语义判断。", "ref": "syserr.errcode.overview#1"},
+  {"id": "error-condition", "en": "error condition", "zh": "错误状况（error_condition）", "def": "由整数值与错误类别组成的可移植抽象，表示调用者关心的\"哪一种错误\"（如 errc::timed_out），用于与 error_code 做语义比较；默认类别为 generic_category()。", "ref": "syserr.errcondition.overview#1"},
+  {"id": "invocation-sequence", "en": "invocation sequence", "zh": "调用序列", "def": "当前线程中当前求值 x0 的调用序列是求值序列 (x0, …, xn)，其中每个 xi 都位于函数调用 x(i+1) 之内；栈踪迹是它的近似表示。", "ref": "stacktrace.general#2"},
+  {"id": "stacktrace-entry", "en": "stacktrace entry", "zh": "栈踪迹条目", "def": "栈踪迹中代表一个求值的元素，由 std::stacktrace_entry 表示：可为空的轻量句柄，可查询描述、源文件与行号，无信息时返回空串或 0。", "ref": "stacktrace.general#3"}
+]
