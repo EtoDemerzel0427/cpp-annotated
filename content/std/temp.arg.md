@@ -1,58 +1,28 @@
 ---
 title: 模板实参
-summary: 模板实参与模板形参如何匹配：类型/表达式歧义一律取类型；访问检查发生在实参书写处；常量模板实参的虚构 constexpr 声明模型、类类型实参的模板形参对象、指针/引用不得指向临时对象与字符串字面量；模板模板实参按"至少一样特殊"匹配（P0522）。
+summary: 模板实参怎样与模板形参匹配：类型和表达式有歧义时取类型，常量实参必须能初始化一个 static constexpr 变量且不能指向字符串字面量或临时对象，模板模板实参只要能接受形参允许的一切用法就匹配。
 status: done
 covers: temp.arg.general, temp.arg.type, temp.arg.nontype, temp.arg.template
-papers: N4268, P0522R0, P1907R1, P2841
+papers: N4268, P0522R0, P0732R2, P1907R1, P2841
 related: temp.param, temp.names, temp.type, expr.const.const, temp.func.order, temp.constr.order, class.access
 tags: 模板, 模板实参, 常量模板实参, 模板模板实参, P0522
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-[[temp.param]] 规定模板有哪些形参，本节规定实参：每种形参能接受什么样的实参，实参又如何转换成形参的值。本节由四个子节组成：
+!!! tldr
+    - 模板实参既能读成类型又能读成表达式时，一律读成类型：`f<int()>()` 中的 `int()` 是函数类型。
+    - 常量模板实参 `E` 必须能写成 `static constexpr T x = E;`，因此它是常量表达式，指针和引用只能指向静态存储期的对象，而且不允许窄化。
+    - 指针或引用实参不能指向字符串字面量、临时对象、`typeid` 的结果或 `__func__`。要用字符串作模板实参，形参得是类类型，比如自己写的 `fixed_string`。
+    - 模板实参中的名字在书写处做访问检查；模板对实参类型的私有成员没有特殊访问权。
+    - 模板模板实参只要能接受形参允许的一切用法就匹配，所以 C++17 起 `std::vector` 可以传给 `template<class> class`。
 
-| 子节 | 内容 |
-|---|---|
-| [temp.arg.general] | 通用规则：形式匹配、名字形式实参的解释、类型/表达式歧义、访问检查、空 `<>`、默认实参的实例化 |
-| [temp.arg.type] | 类型模板实参：必须是 *type-id* |
-| [temp.arg.nontype] | 常量模板实参：值如何确定；类类型实参与模板形参对象；指针和引用的限制 |
-| [temp.arg.template] | 模板模板实参：兼容性，以及"至少一样特殊"的匹配规则 |
+[[temp.param]] 规定模板能声明哪些形参。这一页讲另一半：使用模板时，每个**模板实参**（template argument）怎样与形参对应，又怎样变成形参的值。标准把它分成通用规则 [temp.arg.general] 和三种实参各自的规则：类型、常量、模板。
 
-## 通用规则（[temp.arg.general]）
+## 实参的种类要与形参对上 [temp.arg.general]
 
-### 类型与形式必须匹配（¶1–¶2）
+¶1 每个模板实参的种类和类型都要与对应的形参一致：类型形参接受类型，常量形参接受值，模板模板形参接受模板。形参包对应零个或多个实参。
 
-¶1 *template-id* 中每个 *template-argument* 的类型和形式必须与模板为对应形参声明的类型和形式相匹配：类型形参对应类型，常量形参对应值，模板模板形参对应模板。形参包对应零个或多个实参。
-
-¶2 定义了 ***template-head* 的模板实参列表**：第 n 个实参就是第 n 个形参本身；若第 n 个形参是包 `Ts`，则第 n 个实参是包展开 `Ts...`。这是一个技术性定义，用来描述主模板自身的 *template-id*，比如判断部分特化是否与主模板相同（[[temp.spec.partial]]：部分特化的实参列表不能与主模板的这个列表一模一样）。
-
-### 名字形式的实参如何解释（¶3）{{c++26}}
-
-¶3 若 *template-argument* `A` 符合 *template-argument-name* 的形式（一个可能带限定的标识符），就把它当作名字，查找其中的标识符：
-
-- ¶3.1 若找到**注入类名**（[[temp.local]]），那么 `A` 对应类型模板模板形参时表示对应的类模板，否则表示一个类型名。
-- ¶3.2 否则，若找到模板，`A` 表示该模板。
-- ¶3.3 否则，若找到类型别名或类型，`A` 表示其底层类型，按 *type-id* 解释。
-- ¶3.4 否则，`A` 按表达式解释。
-
-¶3.1 是一条老规则的新表述：在类模板内部，注入类名 `A` 既可以当类型 `A<T>` 用，也可以当模板 `A` 用，取决于它对应什么样的形参。
-
-```cpp run title="injected.cpp" ok
-template<template<class> class TT> struct W {};
-template<class T> struct V {};
-
-template<class T>
-struct A {
-    W<A> w;           // A 对应类型模板模板形参 ⇒ 表示类模板 A
-    V<A> v;           // A 对应类型形参 ⇒ 表示类型 A<T>
-};
-A<int> a;
-int main() {}
-```
-
-### 类型优先（¶4）
-
-¶4 在 *template-argument* 中，*type-id* 与表达式之间的歧义**一律解析为 *type-id***，不管对应形参是什么形式。[[stmt.ambig]]/[[dcl.ambig.res]] 的原则是能当声明就当声明，这条规则是它在模板实参中的对应物。
+### 有歧义时取类型（¶4）
 
 ```cpp run title="type-wins.cpp" ok
 #include <cstdio>
@@ -60,15 +30,69 @@ template<class T> void f() { std::puts("type"); }
 template<int I>   void f() { std::puts("value"); }
 
 int main() {
-    f<int()>();       // int() 是 type-id（返回 int 的函数类型）：调用第一个 f
+    f<int()>();   // int() 是"返回 int 的函数"类型：调用第一个 f
 }
 ```
 
-所谓不管对应形参是什么，是说即使只有 `template<int I> void f()`，`f<int()>()` 也会把 `int()` 当作类型，然后因为不匹配而失败，而不会退一步把 `int()` 解释为值初始化表达式 `0`。脚注 102 说明默认模板实参没有这个歧义，因为默认实参的形式由形参决定。
+¶4 模板实参在语法上既能读成 *type-id* 又能读成表达式时，一律读成 *type-id*，不管对应的形参是什么。这和语句中"能当声明就当声明"的原则一致（[[stmt.ambig]]、[[dcl.ambig.res]]）。
 
-### 访问检查发生在实参书写处（¶5）
+即使只有 `template<int I> void f()` 一个模板，`f<int()>()` 也把 `int()` 当作类型，然后因为不匹配而失败，不会退回去把它读成值为 0 的表达式。按脚注 102，默认模板实参没有这种歧义，因为它的形式由形参决定。
 
-¶5 注 1：模板实参中使用的名字在其出现的地方接受访问控制。模板形参不是类成员，所以在模板内部使用模板形参时不进行访问检查。
+### 名字形式的实参（¶3）{{c++26}}
+
+¶3 实参是一个可能带限定的名字时，先查找这个名字，再按查找结果决定它的含义：
+
+- ¶3.1 找到注入类名（类模板内部用来指称自身的名字，[[temp.local]]）时，如果对应的是类型模板模板形参，它表示类模板本身，否则表示当前的类型；
+- ¶3.2 找到模板时，表示该模板；
+- ¶3.3 找到类型或类型别名时，表示那个类型；
+- ¶3.4 否则当作表达式。
+
+¶3.1 的效果是，在类模板内部，`A` 既可以当类型 `A<T>` 用，也可以当模板 `A` 用：
+
+```cpp run title="injected.cpp" ok
+template<template<class> class TT> struct W {};
+template<class T> struct V {};
+
+template<class T>
+struct A {
+    W<A> w;   // 对应模板模板形参：A 是类模板
+    V<A> v;   // 对应类型形参：A 是类型 A<T>
+};
+A<int> a;
+int main() {}
+```
+
+### 空的 `<>` 不能省（¶6）
+
+¶6 所有形参都有默认实参，或者只有一个形参包时，实参列表可以为空，但 `<>` 必须写出来：
+
+```cpp title="empty-angle.cpp" error
+template<class T = char> class String;
+String<>* p;     // OK：String<char>
+String* q;       // error
+
+template<class... Elements> class Tuple;
+Tuple<>* t;      // OK：Elements 为空
+Tuple* u;        // error
+```
+
+C++17 起 `String s("x");` 可以省略 `<>`，那是类模板实参推导（[[over.match.class.deduct]]），`String` 在那里是一个待推导的占位符。`String*` 所在的位置不能用占位符。
+
+### 重载集中的函数模板（¶9）
+
+¶9 template-id 中的名字找到一个重载集时，非模板函数和形参与实参对不上的函数模板都被忽略。注 2：一个都对不上时，程序非良构。
+
+```cpp run title="overload-set.cpp" ok
+void f(int);
+template<int N> int f() { return N; }
+template<class T> int f() { return sizeof(T); }
+
+int a = f<1>();        // 只剩 template<int N>
+int b = f<double>();   // 只剩 template<class T>
+int main() {}
+```
+
+### 访问检查在实参书写处进行（¶5）
 
 ```cpp title="access-arg.cpp" error
 template<class T> class X {
@@ -76,87 +100,35 @@ template<class T> class X {
 };
 
 class Y {
-    struct S {};
-    X<S> x;       // OK: 在 Y 内部，S 可访问
-                  //     X<Y::S> 有一个 Y::S 类型的静态成员——OK，即使 Y::S 是 private
+    struct S {};   // private
+    X<S> x;        // OK：在 Y 内部，S 可以访问
 };
 
-X<Y::S> y;        // error: S 不可访问
+X<Y::S> y;         // error: S 是 Y 的私有成员
 ```
 
-私有类型可以通过模板泄露出去，标准依据就在这里：`X<S>` 在 `Y` 内部合法地写出后，模板内部对 `T` 的一切使用都不再检查访问。
+¶5 注 1：模板实参中的名字，在它出现的地方接受访问控制。模板形参不是类成员，所以模板内部使用 `T` 时不再做访问检查。`X<S>` 在 `Y` 内部合法写出之后，`X` 里对 `Y::S` 的一切使用都不受影响。私有类型能通过模板流出类外，依据就在这里。
 
-¶5 后半句说，模板实参是类类型或类模板时，模板定义对模板实参的成员**没有特殊访问权**：
+¶5 的后半句说，实参是类类型或类模板时，模板定义对实参的成员没有特殊访问权：
 
 ```cpp title="no-special-access.cpp" error
 template<template<class TT> class T> class A {
-    typename T<int>::S s;       // 访问 B<int>::S
+    typename T<int>::S s;      // 要访问 B<int>::S
 };
 
 template<class U> class B {
-    struct S {};                // private
+    struct S {};               // private
 };
 
-A<B> b;                         // error: A 无权访问 B<int>::S
+A<B> b;                        // error: A 无权访问 B<int>::S
 ```
 
-!!! lawyer "显式实例化的访问豁免"
-    与 ¶5 相对，[[temp.explicit]] 规定显式实例化中的名字不受通常的访问检查。通过显式实例化合法访问私有成员的著名技巧就来源于此：把 `&Class::private_member` 作为常量模板实参写在显式实例化里。
+!!! lawyer "显式实例化不做访问检查"
+    与 ¶5 相反，[[temp.explicit]] 规定显式实例化中的名字不受通常的访问检查。把 `&Class::private_member` 作为常量模板实参写进显式实例化，就能合法地拿到私有成员的指针，这个常见技巧依据的正是这一条。
 
-### 空 `<>` 不可省略（¶6）
+## 类型模板实参 [temp.arg.type]
 
-¶6 使用形参包或默认模板实参时，实参列表可以为空，但空的 `<>` 必须写出：
-
-```cpp title="empty-angle.cpp" error
-template<class T = char> class String;
-String<>* p;          // OK: String<char>
-String* q;            // error（在此语境中）: 不能省略 <>
-
-template<class... Elements> class Tuple;
-Tuple<>* t;           // OK: Elements 为空
-Tuple* u;             // error
-```
-
-C++17 起，`String s("x");` 这种带初始化器的声明可以省略 `<>`。那是类模板实参推导（CTAD，[[over.match.class.deduct]]），`String` 在那里用作推导类类型的占位符；而 `String*` 所在的语境不能使用占位符。
-
-### 显式析构函数调用（¶7）
-
-¶7 对类模板特化类型对象的显式析构函数调用可以显式写出模板实参：
-
-```cpp run title="dtor-call.cpp" ok
-template<class T> struct A { ~A() {} };
-void f(A<int>* p, A<int>* q) {
-    p->A<int>::~A();          // OK
-    q->A<int>::~A<int>();     // OK
-}
-int main() {}
-```
-
-### 实例化中的错误；重载集；默认实参的实例化（¶8–¶11）
-
-¶8 如果使用某个模板实参导致模板特化的实例化中出现非良构的构造，程序非良构。（这是关于硬错误的一般规定；函数模板推导期间的替换失败由 [[temp.deduct]] 另行处理。）
-
-¶9 如果查找 *template-id* 中的名字找到一个重载集，那么重载集中的非模板函数，以及模板形参与实参不匹配的函数模板，都不予考虑。注 2：若没有任何函数模板的形参匹配，程序非良构。
-
-```cpp run title="overload-set.cpp" ok
-void f(int);
-template<int N> int f() { return N; }
-template<class T> int f() { return sizeof(T); }
-
-int a = f<1>();        // 非模板 f(int) 被忽略；template<class T> 不匹配 1，被忽略
-int b = f<double>();   // template<int N> 不匹配 double，被忽略
-int main() {}
-```
-
-¶10 当 *simple-template-id* 不指称函数时，默认模板实参在需要其值时隐式实例化：`S<bool>*` 中 `S<bool, int>` 的 `int` 被实例化以形成类型。
-
-¶11 后跟省略号的 *template-argument* 是包展开（[[temp.variadic]]）。
-
-## 类型模板实参（[temp.arg.type]）
-
-¶1 类型模板形参的实参必须是 *type-id*。
-
-¶2 的例子与注说明：局部类型、无名类型、无链接的类型都可以作模板实参；模板类型实参可以是不完整类型。
+¶1 类型形参的实参必须是一个类型（*type-id*）。¶2 的例子和注说明，局部类型、没有名字的类型、不完整类型都可以：
 
 ```cpp run title="type-args.cpp" ok
 template<class T> class X {};
@@ -168,205 +140,208 @@ void g() {
     enum { e1 };
     typedef struct {} B;
     B b;
-    X<A>  x1;          // OK: 局部类型
-    X<A*> x2;          // OK
-    X<B>  x3;          // OK: 无名类型（有 typedef 名）
-    f(e1);             // OK: 无名枚举类型
-    f(unnamed_obj);    // OK: 无名类类型
-    f(b);              // OK
+    X<A>  x1;          // 局部类型
+    X<A*> x2;
+    X<B>  x3;          // 没有名字的类（有 typedef 名）
+    f(e1);             // 没有名字的枚举
+    f(unnamed_obj);    // 没有名字的类
+    f(b);
     (void)x1; (void)x2; (void)x3;
 }
 
 struct Incomplete;
-X<Incomplete>* p;      // OK: 不完整类型可以作模板实参
+X<Incomplete>* p;      // 不完整类型
 int main() { g(); }
 ```
 
-C++03 中局部类型和无名类型不能作模板实参，理由是它们没有链接，特化无法跨 TU 命名。C++11 取消了这一限制，这对 lambda 必不可少：每个 lambda 的闭包类型都是无名的局部类型，若不能作模板实参，`std::sort(v.begin(), v.end(), [](int a, int b){...})` 根本无法工作。
+C++03 不允许局部类型和无名类型作模板实参，理由是它们没有链接，特化无法在别的翻译单元中被指称。C++11 取消了这个限制。这对 lambda 是必需的：每个 lambda 的闭包类型都是无名的局部类型，不能作模板实参的话，`std::sort(v.begin(), v.end(), [](int a, int b) { ... })` 就无法编译。
 
-## 常量模板实参（[temp.arg.nontype]）
+## 常量模板实参 [temp.arg.nontype]
 
-本子节旧称 "Template non-type arguments"，{{c++26}} 草案随术语变更改为 "Constant template arguments"。现行表述很统一：**所有规则都归结为能否用实参初始化一个 static constexpr 变量**。
+### 能初始化一个 static constexpr 变量（¶1）
 
-### 虚构声明模型（¶1）
-
-¶1 形参的声明类型为 `T`，实参为 `E`，则虚构的声明
+¶1 设常量形参的类型为 `T`，实参为 `E`。虚构一个声明
 
 ```cpp
 T x = E ;
 ```
 
-必须满足定义一个具有静态存储期的 constexpr 变量时的语义约束（[[dcl.constexpr]]）。若 `T` 含有占位符类型（`auto`）或推导类类型的占位符，形参的类型就从这个声明推导；推导出的类型若不允许作常量模板形参（[[temp.param#11]]），程序非良构。
+它必须满足定义一个静态存储期的 constexpr 变量时的全部要求（[[dcl.constexpr]]）。`T` 含有 `auto` 这样的占位符时，形参的类型就从这个声明推导；推导出的类型不能作常量形参类型（[[temp.param#11]]）时，程序非良构。
 
-这个模型可以解释很多规则：
+很多规则都由这个模型直接得出：
 
-- 实参必须是常量表达式，因为 constexpr 变量的初始化器必须是常量表达式；
-- 引用和指针必须指向具有静态存储期的对象或函数，因为 constexpr 变量不能保存局部变量的地址；
-- `auto` 形参的类型推导与 `auto x = E;` 相同：`B<'a'>` 推导为 `char`，`B<void(0)>` 推导为 `void`，后者不允许。
+- 实参必须是常量表达式；
+- 指针和引用只能指向具有静态存储期的对象或函数，局部变量的地址不行；
+- `auto` 形参按 `auto x = E;` 推导：`B<'a'>` 中是 `char`，`B<void(0)>` 中是 `void`，后者不允许。
 
 ```cpp title="invented-decl.cpp" error
 template<int& r> class A {};
 extern int x;
-A<x> a;                       // OK: static constexpr int& v = x; 合法
+A<x> a;                       // OK
 
 void f(int p) {
-    constexpr int& r = p;     // OK（C++26 草案）：p 从此处是 constexpr-referenceable 的
-    A<r> a2;                  // error: static constexpr int& 不能被初始化为引用 p
+    constexpr int& r = p;     // 按当前草案 OK，见下文
+    A<r> a2;                  // error: 静态的 constexpr 引用不能引用 p
 }
 
 template<auto n> struct B {};
-B<5>       b1;                // OK: int
-B<'a'>     b2;                // OK: char
-B<2.5>     b3;                // OK: double（C++20）
-B<void(0)> b4;                // error: 推导出 void，不允许
+B<5>       b1;                // int
+B<'a'>     b2;                // char
+B<2.5>     b3;                // double（C++20 起）
+B<void(0)> b4;                // error: 推导出 void
 ```
 
-（标准例 1 把 `constexpr int& r = p;` 注为 OK，因为 {{c++26}} 当前草案引入了 constexpr-referenceable 的概念（[[expr.const.defns#2]]），在同一函数内，constexpr 变量可以引用自动存储期对象。但 `A<r>` 仍然非法，因为虚构的是静态存储期的 constexpr 变量，从那里不能引用 `p`。截至写作时，Clang 23 尚未实现这一放宽，对 `constexpr int& r = p;` 本身也报错。）
+标准的例 1 把 `constexpr int& r = p;` 标为 OK。C++26 草案放宽了规则，在同一个函数内部，constexpr 引用可以引用自动变量（[[expr.const]]）。但 `A<r>` 仍然非法，因为虚构的是一个静态存储期的变量，它不能引用 `p`。截至写作时，本机 Clang 23 还没有实现这项放宽，`constexpr int& r = p;` 本身也报错。
 
-### 非类类型：转换常量表达式（¶2）
+### 非类类型：不允许窄化（¶2）
 
-¶2 设形参 `P` 的（可能推导出的）类型为 `T`，实参为 `A`。若 `T` 不是类类型，且 `A` 不是 *braced-init-list*，则 `A` 必须是类型 `T` 的**转换常量表达式**（converted constant expression，[[expr.const.const]]），`P` 的值就是转换后的 `A`。
-
-转换常量表达式只允许有限的几种隐式转换，并且禁止窄化：
+¶2 形参不是类类型、实参也不是花括号列表时，实参必须是形参类型的**转换常量表达式**（converted constant expression，[[expr.const.const]]）：只允许少数几种隐式转换，而且不允许窄化。形参的值就是转换后的实参。
 
 ```cpp title="converted.cpp" error
 template<char c> struct X {};
 template<unsigned u> struct U {};
 
 X<'a'> x1;        // OK
-X<65>  x2;        // OK: 65 能被 char 精确表示
-X<300> x3;        // error: 窄化（300 超出 char 的范围）
-U<-1>  u1;        // error: 窄化（-1 不能表示为 unsigned）
+X<65>  x2;        // OK：65 能用 char 表示
+X<300> x3;        // error: 窄化
+U<-1>  u1;        // error: 窄化
 U<1.0> u2;        // error: 浮点到整数的转换不允许
 ```
 
-为什么禁止窄化？因为常量模板实参决定类型的身份。如果 `X<300>` 悄悄转换成 `X<44>`，`X<300>` 和 `X<44>` 就成了同一个类型，这几乎肯定不是程序员想要的。
+常量实参决定类型的身份。如果 `X<300>` 悄悄变成 `X<44>`，两者就成了同一个类型，这几乎不会是程序员的本意。
 
-### 类类型与 braced-init-list：候选初始化器（¶3–¶5）
-
-¶3 否则（`T` 是类类型，或 `A` 是 *braced-init-list*），引入一个临时变量
-
-```cpp
-constexpr T v = A;
-```
-
-它和模板形参对象初始化完毕后，它的生命周期立即结束。每个这样的变量的 *id-expression* `v` 称为**候选初始化器**（candidate initializer）。
-
-¶4 若 `T` 是类类型，则存在一个模板形参对象（[[temp.param#13]]），其构造结果与 `v` 模板实参等价，`P` 表示这个模板形参对象。`P` 从某个未指明的、与 `v` 模板实参等价的候选初始化器复制初始化。如果对任何一个候选初始化器有以下情况之一：
-
-- ¶4.1 初始化非良构，或
-- ¶4.2 虚构的 *init-declarator* 的完整表达式不是常量表达式，或
-- ¶4.3 初始化导致 `P` 与 `v` 不模板实参等价，
-
-则程序非良构。
-
-¶5 否则（非类类型，`A` 是 *braced-init-list*），`P` 的值就是 `v` 的值，所以 `C<{42}>` 对 `template<int i>` 是合法的。
-
-为什么要这么绕？因为类类型的模板形参对象在全程序中是唯一的（每个值一个），而不同 TU 可能用不同的实参表达式写出同一个值。标准需要保证，无论从哪个实参表达式复制出模板形参对象，结果都一样。¶4.3 提供的就是这个保证：如果复制构造函数会改变值，使副本与原值不等价，就无法确定那个唯一的对象，程序非良构。
-
-```cpp title="candidate-init.cpp" error
-template<auto> struct B {};
-
-struct J1 {
-    J1* self = this;                       // 指向自身
-};
-B<J1{}> j1;    // error: 模板形参对象的初始化不是常量表达式
-               //        （self 指向临时对象 v，见 ¶6）
-
-struct J2 {
-    J2* self = this;
-    constexpr J2() {}
-    constexpr J2(const J2&) {}             // 复制时 self 指向新对象
-};
-B<J2{}> j2;    // error: 模板形参对象与引入的临时变量 v 不模板实参等价（¶4.3）
-```
-
-!!! impl "编译器现状"
-    Clang 23 拒绝上面两个例子，但给出的理由都是指向临时对象的指针不允许作为模板实参（即 ¶6 的检查），而不是 ¶4.3 所说的不模板实参等价。结论相同。
-
-### 指针和引用的限制（¶6）
-
-¶6 对于引用或指针类型的常量模板形参，以及类类型常量模板形参（或其子对象）中引用或指针类型的非静态数据成员，其值不能引用或指向：
-
-- ¶6.1 临时对象（[[class.temporary]]）；
-- ¶6.2 字符串字面量对象（[[lex.string]]）；
-- ¶6.3 `typeid` 表达式的结果（[[expr.typeid]]）；
-- ¶6.4 预定义的 `__func__` 变量（[[dcl.fct.def.general]]）；
-- ¶6.5 以上任何对象的子对象。
-
-这些对象的共同点是**身份不稳定**。同一个字符串字面量在不同 TU 中可能是不同对象，在同一 TU 中是否合并也是未指明的；`typeid(int)` 的结果对象在不同 TU/共享库中可能不同，`__func__` 是每个函数的局部静态数组。如果允许它们作为模板实参，`X<"abc">` 在两个 TU 中可能是两个不同的类型，ODR 也就无从谈起。
-
-这个清单之外的东西都允许，包括（C++20 起）子对象的地址和尾后指针：
-
-```cpp run title="subobject-ptr.cpp" ok
-int arr[3];
-struct S { int m; } s;
-
-template<int* p> struct P {};
-P<&arr[1]> pa;      // OK（C++20 起）: 数组元素的地址
-P<&s.m>    pm;      // OK（C++20 起）: 成员子对象的地址
-P<&arr[3]> pe;      // OK: 尾后指针也是合法的常量表达式值
-P<nullptr> pn;      // OK
-int main() {}
-```
-
-C++17 及之前，指针实参必须指向完整对象（不能是子对象），也不能是尾后指针。C++20 的 [[P1907R1]] 移除了这些限制。
-
-### 标准例子（¶7–¶8）
-
-¶8 的例子展示了允许的转换：数组到指针、限定转换、函数重载决议：
+¶8 的例子列出了允许的几种转换：数组到指针、加 const、从重载集中选出函数。
 
 ```cpp run title="arg-conversions.cpp" ok
 template<const int* pci> struct X {};
 int ai[10];
-X<ai> xi;                       // 数组到指针 + 限定转换
+X<ai> xi;                  // 数组到指针，再加 const
 
 struct Y {};
 template<const Y& b> struct Z {};
 Y y;
-Z<y> z;                         // 无转换，但注意多了 const
+Z<y> z;                    // 没有转换，引用多了 const
 
 template<int (&pa)[5]> struct W {};
 int b[5];
-W<b> w;                         // 无转换
+W<b> w;                    // 没有转换
 
 void f(char);
 void f(int);
 template<void (*pf)(int)> struct A {};
-A<&f> a;                        // 重载决议选中 f(int)
+A<&f> a;                   // 重载决议选中 f(int)
 
 template<int i> struct C {};
-C<{ 42 }> c1;                   // OK: braced-init-list（¶5）
+C<{ 42 }> c1;              // 花括号列表，见 ¶5
 
 void f(char) {}
 void f(int) {}
 int main() {}
 ```
 
-### 字符串字面量（¶9）
+`C<{ 42 }>` 是合法的，本机 Clang 23 会给出一条 `-Wbraced-scalar-init` 警告。
 
-¶9 注 2：*string-literal* 不能作为非类类型常量模板形参的实参：
+### 类类型：复制出唯一的模板形参对象（¶3–¶5）
 
-```cpp title="string-literal-arg.cpp" error
-template<class T, T p> class X {};
+¶3 形参是类类型，或者实参是花括号列表时，标准引入一个临时变量
 
-X<const char*, "Studebaker"> x;     // error: 字符串字面量对象作模板实参
-X<const char*, "Knope" + 1> x2;     // error: 字符串字面量对象的子对象
-
-const char p[] = "Vivisectionist";
-X<const char*, p> y;                // OK: p 是一个有链接的具名数组
-
-struct A {
-    constexpr A(const char*) {}
-};
-X<A, "Pyrophoricity"> z;            // OK: 字符串字面量只是 A 的构造函数实参
+```cpp
+constexpr T v = A;
 ```
 
-最后一行是 C++20 中用字符串作模板实参的标准做法：形参是类类型，字符串字面量只用来初始化模板形参对象，而模板形参对象保存的是字符的值（拷贝），不是指向字面量的指针。
+它在初始化完成后立即结束生命周期。这样的 `v` 叫做**候选初始化器**（candidate initializer）。
+
+¶5 对非类类型（实参是花括号列表的情况），形参的值就是 `v` 的值，所以 `template<int i>` 可以接受 `C<{42}>`。
+
+¶4 对类类型，形参指称一个模板形参对象（[[temp.param#13]]），它是从某个与 `v` 等价的候选初始化器复制初始化来的。下面任一情况发生，程序就非良构：
+
+- ¶4.1 这次初始化本身非良构；
+- ¶4.2 初始化不是常量表达式；
+- ¶4.3 复制得到的对象与 `v` 不是模板实参等价的（[[temp.type]]）。
+
+为什么这么绕？同一个值在整个程序里只有一个模板形参对象，但不同的翻译单元可以用不同的实参表达式写出这个值。标准要保证不管从哪个表达式复制，得到的对象都一样。如果复制构造函数改变了值，就无法确定那个唯一的对象，¶4.3 因此判它非良构。
+
+```cpp title="candidate-init.cpp" error
+template<auto> struct B {};
+
+struct J1 {
+    J1* self = this;     // 指向自身
+};
+B<J1{}> j1;    // error: 初始化不是常量表达式（¶4.2）
+
+struct J2 {
+    J2* self = this;
+    constexpr J2() {}
+    constexpr J2(const J2&) {}   // 复制后 self 指向新对象
+};
+B<J2{}> j2;    // error: 副本与 v 不等价（¶4.3）
+```
+
+本机 Clang 23 拒绝这两行，但给出的理由都是 "pointer to temporary object is not allowed in a template argument"，即下一节 ¶6 的检查。结论相同。
+
+### 指针和引用不能指向什么（¶6）
+
+¶6 引用或指针类型的常量实参，以及类类型实参中引用或指针类型的成员，都不能引用或指向：
+
+- ¶6.1 临时对象（[[class.temporary]]）；
+- ¶6.2 字符串字面量对象（[[lex.string]]）；
+- ¶6.3 `typeid` 表达式的结果（[[expr.typeid]]）；
+- ¶6.4 预定义变量 `__func__`（[[dcl.fct.def.general]]）；
+- ¶6.5 以上对象的子对象。
+
+这些对象的共同点是身份不稳定。两个相同的字符串字面量是不是同一个对象，标准不作规定，不同翻译单元里通常是不同的对象。`typeid(int)` 的结果在不同的共享库里可能是不同的对象；每个函数有自己的 `__func__`。如果允许它们作模板实参，`X<"abc">` 在两个翻译单元里可能是两个不同的类型。
+
+清单之外的都可以，包括 C++20 起的子对象地址和尾后指针：
+
+```cpp run title="subobject-ptr.cpp" ok
+int arr[3];
+struct S { int m; } s;
+
+template<int* p> struct P {};
+P<&arr[1]> pa;      // 数组元素的地址（C++20 起）
+P<&s.m>    pm;      // 成员的地址（C++20 起）
+P<&arr[3]> pe;      // 尾后指针
+P<nullptr> pn;
+int main() {}
+```
+
+C++17 及以前，指针实参必须指向完整对象，也不能是尾后指针。C++20 的 [[P1907R1]] 去掉了这些限制。
+
+### 字符串作模板实参（¶9）
+
+<div class="compare" markdown="1">
+
+```cpp error
+template<const char* p>
+struct X {};
+
+X<"Studebaker"> x;  // error
+X<"Knope" + 1> x2;  // error: 子对象
+
+const char p[] = "Vivisectionist";
+X<p> y;             // OK：具名数组
+```
+
+```cpp ok
+struct A {
+  constexpr A(const char*) {}
+};
+template<A a> struct Y {};
+
+// 字面量只是构造函数的实参
+Y<"Pyrophoricity"> z;
+```
+
+</div>
+
+¶9 注 2：字符串字面量不能作非类类型常量形参的实参，因为它的值会指向字符串字面量对象（¶6.2）。左边的 `p` 是一个用字面量初始化的具名数组，它本身不是字符串字面量对象，所以可以。
+
+右边是 C++20 起用字符串作模板实参的方法：形参是类类型，字面量只用来初始化模板形参对象。下面的 `fixed_string` 把字符复制进自己的数组，模板形参对象保存的是字符的值，而不是指向字面量的指针：
 
 ```cpp run title="fixed-string.cpp" ok
 #include <cstddef>
 #include <cstdio>
+#include <type_traits>
 
 template<std::size_t N>
 struct fixed_string {
@@ -376,63 +351,58 @@ struct fixed_string {
     }
 };
 
-template<fixed_string S>          // 推导类类型的占位符（[temp.param]/11.3）
+template<fixed_string S>   // 推导类类型的占位符（[temp.param]/11.3）
 struct Named {
     static void print() { std::puts(S.data); }
 };
 
-int main() {
-    Named<"hello">::print();      // OK: S 是 fixed_string<6>，值为 "hello\0"
-    static_assert(!__is_same(Named<"a">, Named<"b">));
-    static_assert(__is_same(Named<"a">, Named<"a">));   // 按值比较
-}
+static_assert(!std::is_same_v<Named<"a">, Named<"b">>);
+static_assert(std::is_same_v<Named<"a">, Named<"a">>);   // 按值比较
+
+int main() { Named<"hello">::print(); }
 ```
 
-`fixed_string` 中不能存 `const char*`，否则又回到了指向字符串字面量的情形（¶6.2）。
+`fixed_string` 里如果存一个 `const char*`，就又回到了指向字符串字面量的情形。
 
-### 临时对象（¶10）
+### 引用不能绑定到临时对象（¶10）
 
-¶10 注 3：形参是引用类型时，临时对象不能作实参：
+¶10 注 3：形参是引用类型时，需要临时对象的实参不能用：
 
 ```cpp title="temporary-arg.cpp" error
 template<const int& CRI> struct B {};
-B<1> b1;                        // error: 需要一个临时对象
+B<1> b1;                  // error: 需要一个临时对象
 int c = 1;
-B<c> b2;                        // OK
+B<c> b2;                  // OK
 
 struct X { int n; };
 struct Y { const int& r; };
 template<Y y> struct C {};
-C<Y{X{1}.n}> c;                 // error: 引用成员绑定到临时对象的子对象
+C<Y{X{1}.n}> c;           // error: 引用成员绑定到临时对象的子对象
 ```
 
-## 模板模板实参（[temp.arg.template]）
+## 模板模板实参 [temp.arg.template]
 
-### 什么能作模板模板实参（¶1）
+### 实参必须是模板的名字（¶1–¶3）
 
-¶1 模板模板形参的实参必须是模板的名字：
+¶1 模板模板形参的实参必须是一个模板的名字。¶3 规定了哪种形参能接受哪种模板，满足这一条的形参和实参叫做**兼容的**（compatible）：
 
-| 形参种类 | 实参必须指称 |
+| 形参 | 实参 |
 |---|---|
-| 类型模板模板形参（*type-tt-parameter*） | 类模板、别名模板，或类型模板模板形参 |
-| 变量模板模板形参 {{c++26}} | 变量模板，或变量模板模板形参 |
-| 概念模板形参 {{c++26}} | 概念，或概念模板形参 |
+| 类型模板模板形参 `template<...> class` | 类模板、别名模板，或另一个类型模板模板形参 |
+| 变量模板模板形参 `template<...> auto` {{c++26}} | 变量模板，或另一个变量模板模板形参 |
+| 概念模板形参 `template<...> concept` {{c++26}} | 概念，或另一个概念模板形参 |
 
-匹配时只考虑主模板；部分特化即使形参列表与模板模板形参相符，也不予考虑。
-
-### 部分特化在使用时才参与（¶2）
-
-¶2 通过模板模板形参实例化特化时，与主模板关联的部分特化会参与选择。若某个部分特化在实例化点不可达，而它若可达本应被选中，则程序 {{ifndr}}。
+匹配时只看主模板，部分特化即使形参列表合适也不考虑。¶2 但是，通过模板模板形参使用特化时，主模板的部分特化照常参与选择：
 
 ```cpp run title="tt-partial.cpp" ok
 #include <type_traits>
-template<class T> class A { public: int x; };          // 主模板
-template<class T> class A<T*> { public: long x; };     // 部分特化
+template<class T> class A { public: int x; };        // 主模板
+template<class T> class A<T*> { public: long x; };   // 部分特化
 
 template<template<class U> class V> class C {
 public:
-    V<int>  y;     // 使用主模板：y.x 是 int
-    V<int*> z;     // 使用部分特化：z.x 是 long
+    V<int>  y;     // 用主模板：y.x 是 int
+    V<int*> z;     // 用部分特化：z.x 是 long
 };
 
 C<A> c;
@@ -441,40 +411,17 @@ static_assert(std::is_same_v<decltype(c.z.x), long>);
 int main() {}
 ```
 
-### 兼容（¶3）
+如果某个部分特化在实例化点不可达，而它可达的话本应被选中，程序非良构，不要求诊断。
 
-¶3 在以下情况下，模板模板形参 `P` 与实参 `A` **兼容**（compatible）：`A` 是类模板或别名模板且 `P` 是类型模板模板形参；`A` 是变量模板且 `P` 是变量模板模板形参；`A` 是概念且 `P` 是概念模板形参。也就是说，两者的种类要对得上。
-
-### 匹配：P 至少和 A 一样特殊（¶4–¶5）
-
-¶4 是本子节的核心。如果 `A` 与 `P` 兼容，并且 **`P` 至少和 `A` 一样特殊**（若 `P` 无约束，则忽略 `A` 的约束），就说模板模板实参 `A` **匹配**模板模板形参 `P`。
-
-直观地说，`P` 描述了模板内部会怎样使用 `A`。`template<template<class> class P>` 承诺模板内部只会写 `P<X>` 这种带一个类型实参的形式。只要 `P` 允许的一切用法 `A` 都能接受，`A` 就是合格的实参。"`P` 至少和 `A` 一样特殊"正是这个意思：`P` 能接受的实参列表，`A` 都能接受。
-
-¶5 给出精确定义：把 `P` 和 `A` 改写成两个函数模板，再用函数模板的偏序规则（[[temp.func.order]]）比较。设虚构类模板 `X`，其 *template-head* 与 `A` 相同（包括默认实参和 *requires-clause*）：
-
-- ¶5.1 两个函数模板分别具有与 `P`、`A` 相同的模板形参和 *requires-clause*；
-- ¶5.2 每个函数模板有唯一一个函数形参，其类型是 `X` 的特化，模板实参对应该函数模板自己的模板形参（形参包对应包展开 `PP...`）。若改写产生了无效类型，则 `P` 不比 `A` 特殊。
-
-例如 `P = template<class> class`，`A = std::vector`（`template<class T, class Alloc = allocator<T>>`）：
-
-```cpp
-template<class T, class Alloc = std::allocator<T>> class X;   // X 的 template-head 取自 A
-
-template<class T>                      void fP(X<T>);           // 对应 P：X<T> 使用 Alloc 的默认实参，有效
-template<class T, class Alloc>         void fA(X<T, Alloc>);    // 对应 A
-```
-
-`fP` 至少和 `fA` 一样特殊（`X<T>` 即 `X<T, allocator<T>>`，可以从 `fP` 的形参推导出 `fA` 的 `T` 和 `Alloc`），所以 `std::vector` 匹配 `template<class> class`。
+### 形参能用的，实参都要能接受（¶4–¶5）
 
 ```cpp run title="p0522.cpp" ok
 #include <vector>
-#include <map>
 
 template<template<class> class C>
 struct Wrap { C<int> c; };
 
-Wrap<std::vector> w;    // OK（C++17 起）: vector 的第二个形参有默认实参
+Wrap<std::vector> w;   // OK（C++17 起）
 
 template<class T> class A {};
 template<class T, class U = T> class B {};
@@ -485,26 +432,41 @@ template<template<class...> class Q> class Y {};
 template<template<int> class R> class Z {};
 
 X<A> xa;   // OK
-X<B> xb;   // OK: B 的 U 有默认实参（C++17 前非良构）
-X<C> xc;   // OK: 包可以接受一个实参
-Y<A> ya;   // OK: 见 ¶4 第二句（P 含包时的逐形参匹配）
+X<B> xb;   // OK：U 有默认实参（C++17 前非良构）
+X<C> xc;   // OK：包可以接受一个实参
+Y<A> ya;   // OK
 Y<B> yb;   // OK
 Y<C> yc;   // OK
-Z<D> zd;   // OK: auto 形参可以接受 int 值（C++17 前非良构）
+Z<D> zd;   // OK：auto 形参可以接受 int 值（C++17 前非良构）
 int main() {}
 ```
 
-¶4 第二句处理 `P` 含形参包的情形：此时若 `A` 的每个模板形参都匹配 `P` 的 *template-head* 中的对应形参，`A` 也匹配 `P`。两个模板形参匹配，是指种类相同、常量形参的类型等价（[[temp.over.link]]）、模板模板形参的各对应形参递归匹配。`P` 中的形参包可以匹配 `A` 中零个或多个类型与形式相同的形参，不论它们是不是包。所以 `Y<A>`、`Y<B>` 合法，尽管 `Y` 内部若写 `Q<int, int, int>`，实例化时仍会出错：
+`template<template<class> class C>` 等于承诺：模板内部只会写 `C<X>` 这种带一个类型实参的形式。`std::vector` 有两个形参，但第二个有默认实参，`std::vector<X>` 完全合法，所以它是合格的实参。
+
+¶4 精确的说法是：实参 `A` 与形参 `P` 兼容，并且 `P` **至少和 `A` 一样特殊**（at least as specialized）时，`A` 匹配 `P`。如果 `P` 没有约束，就忽略 `A` 的约束。
+
+¶5 至少一样特殊的判断方法是把两者改写成函数模板，再套用函数模板的偏序规则（[[temp.func.order]]）。设想一个类模板 `X`，它的模板头和 `A` 完全相同，包括默认实参和约束；再写两个函数模板，模板形参分别取自 `P` 和 `A`，各有一个类型为 `X<...>` 的函数形参。以 `P = template<class> class`、`A = std::vector` 为例：
+
+```cpp
+template<class T, class Alloc = std::allocator<T>> class X;   // 模板头取自 A
+
+template<class T>              void fP(X<T>);          // 对应 P
+template<class T, class Alloc> void fA(X<T, Alloc>);   // 对应 A
+```
+
+`X<T>` 就是 `X<T, std::allocator<T>>`，从 `fP` 的形参可以推导出 `fA` 的 `T` 和 `Alloc`，所以 `fP` 至少和 `fA` 一样特殊，`std::vector` 匹配。改写如果得到无效的类型，`P` 就不比 `A` 特殊。
+
+¶4 的后半部分处理 `P` 含形参包的情形：这时只要 `A` 的每个形参都与 `P` 的对应形参匹配，`A` 也匹配 `P`。两个形参匹配，指种类相同、常量形参的类型等价（[[temp.over.link]]）、模板模板形参的形参递归匹配。`P` 中的形参包可以对应 `A` 中零个或多个种类相同的形参，不管它们是不是包。所以 `Y<A>`、`Y<B>` 合法，尽管在 `Y` 里写 `Q<int, int, int>` 会在实例化时出错：
 
 ```cpp title="pack-tt-use.cpp" error
 template<class T, class U = T> class B {};
 template<template<class...> class Q> struct Y1 { Q<int, int, int> q; };
-Y1<B> y;    // 匹配成功，但实例化 Y1<B> 时 B<int, int, int> 实参过多：error
+Y1<B> y;    // 匹配成功，但实例化时 B<int, int, int> 实参过多：error
 ```
 
 ### 带约束的匹配
 
-¶4 的例 4 展示了约束如何参与匹配。"`P` 至少和 `A` 一样特殊"也涵盖约束：`P` 的约束必须**包含**（subsume，[[temp.constr.order]]）`A` 的约束：
+¶4 例 4 展示了约束怎样参与匹配。`P` 至少和 `A` 一样特殊，意味着 `P` 的约束必须包含（subsume，[[temp.constr.order]]）`A` 的约束：
 
 ```cpp title="tt-constraints.cpp" error
 template<typename T> concept C = requires (T t) { t.f(); };
@@ -516,18 +478,16 @@ template<C> struct X {};
 template<D> struct Y {};
 template<typename T> struct Z {};
 
-S<X> s1;   // OK: X 与 P 的约束等价
-S<Y> s2;   // error: P 不比 Y 特殊——P 只保证 C，Y 还要求 D
-S<Z> s3;   // OK: Z 没有约束，P 至少和它一样特殊
+S<X> s1;   // OK：约束相同
+S<Y> s2;   // error: Y 要求 D，比 P 保证的 C 更严
+S<Z> s3;   // OK：Z 没有约束
 ```
 
-直观地说，`S` 内部会用满足 `C` 的类型实例化 `P<T>`。`Y` 要求 `D`，比 `C` 更严，`S` 就可能把一个只满足 `C` 的类型交给 `Y`，这不安全，因此被拒绝。`Z` 接受任何类型，所以是安全的。
+`S` 内部只保证用满足 `C` 的类型去实例化 `P`。`Y` 要求 `D`，`S` 就可能把一个只满足 `C` 的类型交给它，所以被拒绝。`Z` 接受任何类型，是安全的。
 
-由于"若 `P` 无约束，则忽略 `A` 的约束"，`template<template<class> class P>` 可以接受 `template<std::integral T> class A`。这是为了兼容 C++20 之前的代码：很多已有的模板模板形参没有约束，若一律拒绝受约束的实参，标准库组件一旦加上约束，就会破坏大量用户代码。代价是安全性，在 `P` 中写 `P<double>`，要到实例化时才会因约束不满足而报错。
+`P` 没有约束时忽略 `A` 的约束，所以 `template<template<class> class P>` 可以接受 `template<std::integral T> class A`。这是为了兼容 C++20 以前的代码：已有的模板模板形参大都没有约束，如果一律拒绝带约束的实参，标准库组件一加约束，大量用户代码就会失效。代价是，在 `P` 里写 `P<double>`，要到实例化时才会因约束不满足而报错。
 
-### 部分特化中的模板模板形参
-
-标准例 3 展示了一个常见陷阱，即试图用 `template<class, class...> class TT` 匹配任何类模板：
+### 不存在能匹配任何类模板的形参
 
 ```cpp title="eval.cpp" error
 template<class T> struct eval;
@@ -540,39 +500,41 @@ template<int N> struct C;
 template<class T1, int N> struct D;
 template<class T1, class T2, int N = 17> struct E;
 
-eval<A<int>> eA;           // OK: 匹配部分特化
+eval<A<int>> eA;           // OK：匹配部分特化
 eval<B<int, float>> eB;    // OK
-eval<C<17>> eC;            // error: C 的形参是常量形参，不匹配 TT
+eval<C<17>> eC;            // error: C 的形参是常量形参
 eval<D<int, 17>> eD;       // error: D 的第二个形参是常量形参
-eval<E<int, float>> eE;    // error: E 有一个常量形参（即使有默认实参）
+eval<E<int, float>> eE;    // error: E 有常量形参，即使有默认实参
 ```
 
-这里报错，是因为部分特化不匹配，于是用到了未定义的主模板 `eval`。能匹配任意类模板的模板模板形参并不存在，因为常量形参和类型形参永远不能互相匹配。
+`template<class, class...> class TT` 看起来能匹配任何类模板，但常量形参和类型形参永远不能互相匹配。后三行的部分特化不匹配，于是用到了只有声明的主模板 `eval`，因而报错。
 
 ## 实现视角
 
-!!! impl "实现视角"
-    - P0522 的推广：[[P0522R0]] 在 C++17 中被采纳，但它引入了新的偏序歧义（同一个模板实参可以匹配多个部分特化中的模板模板形参）。Clang 因此长期默认不启用它（需要 `-frelaxed-template-template-args`），直到相关歧义的解决方案落地后才默认开启；GCC 则较早默认启用。当前草案 ¶4 的第二句（含包时的逐形参匹配）就是为保持旧代码可编译而保留的规则。
-    - 模板形参对象的唯一性：类类型常量模板实参的唯一性由 COMDAT 常量（Itanium 修饰名 `_ZTA...`）保证，见 [[temp.param]]。
-    - 诊断：Clang 对 ¶6 的各项违规给出具体原因（"pointer to temporary object is not allowed in a template argument"、"reference to type_info object is not allowed in a template argument" 等）。
+!!! impl
+    - [[P0522R0]] 在 C++17 中放宽了模板模板实参的匹配，但它带来了新的偏序歧义：同一个实参可能同时匹配多个部分特化中的模板模板形参。Clang 因此长期默认不启用它，需要 `-frelaxed-template-template-args`；近年的版本已默认启用。本机 Clang 23 默认接受上面的 `Wrap<std::vector>`。
+    - Clang 对 ¶6 的各项违规给出具体原因，如 "pointer to temporary object is not allowed in a template argument"、"reference to type_info object is not allowed in a template argument"。
+    - 类类型常量实参的模板形参对象在目标文件中是一个可合并的只读常量，见 [[temp.param]] 的实现视角。
 
 ## 历史与演进
 
-!!! history "历史与演进"
-    - **C++98/03**：常量实参必须是整型常量表达式，或具有外部链接的对象/函数的地址（形如 `&obj`），不允许局部类型和无名类型作类型实参。
-    - **C++11**：允许具有内部链接的对象；局部类型、无名类型可以作类型实参；允许 `nullptr`；指针实参可以是值为空指针的常量表达式。
-    - **C++17**：[[N4268]] 允许所有常量模板实参都是一般的转换常量表达式（此前指针实参必须是 `&x` 的字面形式）；[[P0522R0]] 放宽模板模板实参匹配；`template<auto>`。
-    - **C++20**：类类型和浮点类型的常量模板实参（[[P0732R2]]、[[P1907R1]]）；允许指向子对象的指针/引用；约束参与模板模板实参的匹配。
-    - **C++26**：概念与变量模板作为模板模板实参（[[P2841]]）；*template-argument-name* 的解释规则（[temp.arg.general]/3）；术语"非类型"更名为"常量"。
+!!! history
+    - C++98/03：常量实参只能是整型常量表达式，或者具有外部链接的对象、函数的地址，且必须写成 `&obj` 的形式；局部类型和无名类型不能作类型实参。
+    - C++11：允许内部链接的对象、`nullptr` 和值为空指针的常量表达式；局部类型、无名类型可以作类型实参。
+    - C++17：所有常量实参都可以是一般的转换常量表达式（[[N4268]]）；放宽模板模板实参的匹配（[[P0522R0]]）；`template<auto>`。
+    - C++20：类类型和浮点类型的常量实参（[[P0732R2]]、[[P1907R1]]）；允许指向子对象的指针和引用；约束参与模板模板实参的匹配。
+    - C++26：概念和变量模板可以作模板模板实参（[[P2841]]）；名字形式实参的解释规则（¶3）；"非类型"改称"常量"。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "常见误解"
-    - 误以为 C++20 中 `X<"abc">` 总可以用。只有当 `X` 的形参是类类型（如 `fixed_string`）时才可以；`const char*` 形参永远不接受字符串字面量（¶6.2、¶9）。
-    - 误以为 `template<char c>` 接受 `X<300>` 并截断为 44。转换常量表达式禁止窄化，这样写非良构（¶2）。
-    - 误以为写实参时有访问权，模板内部访问模板实参的私有成员就没问题。实参书写处的访问检查只覆盖实参本身的名字，模板对实参类型的成员没有特殊访问权（¶5）。
-    - 误以为 `template<template<class> class C>` 不能接受 `std::vector`。C++17 起可以（P0522），只是旧编译器的默认行为不一定如此。
-    - 误以为无约束的模板模板形参会拒绝受约束的实参。它不拒绝，约束要到实例化时才起作用（¶4）。
+!!! pitfall "C++20 起字符串字面量总能作模板实参"
+    `X<"abc">` 只有当 `X` 的形参是类类型（如 `fixed_string`）时才可以。`const char*` 形参永远不接受字符串字面量（¶6.2、¶9）。
+
+!!! pitfall "`template<char c>` 接受 `X<300>` 并截断"
+    转换常量表达式不允许窄化，`X<300>` 非良构（¶2）。
+
+!!! pitfall "无约束的模板模板形参会拒绝带约束的实参"
+    不会。`P` 没有约束时忽略实参的约束，问题要到实例化时才暴露（¶4）。
 
 ## 思考题
 
@@ -591,9 +553,9 @@ eval<E<int, float>> eE;    // error: E 有一个常量形参（即使有默认�
 <details markdown="1">
 <summary>答案</summary>
 
-- (a) 合法：`a` 是具名数组（不是字符串字面量对象，只是用字面量初始化的），数组到指针转换。
-- (b) 非法：`q` 的值指向字符串字面量对象（¶6.2）。
-- (c) 合法（C++20 起）：指向具名数组的子对象（尾后指针，`a` 有 2 个元素：`'x'` 和 `'\0'`，`&a[1]` 指向 `'\0'`）。
+- (a) 合法。`a` 是用字面量初始化的具名数组，不是字符串字面量对象，做数组到指针转换即可。
+- (b) 非法。`q` 的值指向字符串字面量对象（¶6.2）。
+- (c) 合法（C++20 起）。`a` 有两个元素 `'x'` 和 `'\0'`，`&a[1]` 指向具名数组的一个元素。
 </details>
 
 !!! question "思考题 2"
@@ -612,21 +574,23 @@ eval<E<int, float>> eE;    // error: E 有一个常量形参（即使有默认�
 <details markdown="1">
 <summary>答案</summary>
 
-- `S1<I>` 合法：¶4，`P` 无约束时忽略 `A` 的约束。
-- `S2<J>` 非法：`P` 的约束是 `std::integral<T>`，`J` 的约束是 `std::signed_integral<T>`（标准库定义为 `integral<T> && is_signed_v<T>`），前者不包含后者，`P` 不比 `J` 特殊。
-- `S3<I>` 合法：`std::signed_integral<T>` 规范化后包含 `std::integral<T>` 的原子约束，所以 `P` 至少和 `I` 一样特殊。`S3` 内部只会用有符号整数实例化 `P`，这些 `I` 都能接受。
+- `S1<I>` 合法：`P` 没有约束，忽略 `I` 的约束（¶4）。
+- `S2<J>` 非法：`P` 的约束是 `std::integral<T>`，`J` 要求 `std::signed_integral<T>`。标准库把后者定义为 `integral<T> && is_signed_v<T>`，前者不包含后者，`P` 不比 `J` 特殊。
+- `S3<I>` 合法：`std::signed_integral<T>` 规范化后包含 `std::integral<T>`，`S3` 只会用有符号整数实例化 `P`，`I` 都能接受。
 
-判断包含关系必须看概念的定义（规范化结果），而不是名字。
+判断包含关系要看概念的定义规范化之后的结果，而不是概念的名字。
 </details>
 
-## 小结
+<details class="fine" markdown="1"><summary>其余条文</summary>
 
-!!! summary "小结"
-    | 实参种类 | 核心规则 |
-    |---|---|
-    | 通用 | 类型/表达式歧义取类型；访问检查在实参书写处；空 `<>` 不可省 |
-    | 类型实参 | 任何 *type-id*，包括局部、无名、不完整类型 |
-    | 常量实参（非类类型） | 转换常量表达式，禁止窄化 |
-    | 常量实参（类类型） | 虚构 `constexpr T v = A;`，复制初始化唯一的模板形参对象；须模板实参等价 |
-    | 指针/引用 | 不得指向临时对象、字符串字面量、`typeid` 结果、`__func__` 及其子对象；子对象地址 C++20 起可以 |
-    | 模板模板实参 | 种类兼容；`P` 至少和 `A` 一样特殊（改写为函数模板偏序）；`P` 无约束时忽略 `A` 的约束 |
+[temp.arg.general] ¶2 定义模板头的实参列表：第 n 个实参就是第 n 个形参本身，形参是包 `Ts` 时对应包展开 `Ts...`。它用来描述主模板自身，比如部分特化的实参列表不能与它完全相同（[[temp.spec.partial]]）。
+
+¶7 对类模板特化的对象显式调用析构函数时，可以写出模板实参：`p->A<int>::~A()` 和 `q->A<int>::~A<int>()` 都可以。本机 Clang 23 在 `-pedantic` 下对前一种给出 `-Wdtor-name` 警告，标准的例子把它标为 OK。
+
+¶8 使用某个模板实参导致特化的实例化中出现非良构的构造时，程序非良构。函数模板推导中的替换失败另由 [[temp.deduct]] 处理。
+
+¶10 template-id 不指称函数时，默认模板实参在需要它的值时才隐式实例化，例如 `S<bool>*` 要用到 `S<bool, int>` 中的 `int`。
+
+¶11 后面跟省略号的模板实参是包展开（[[temp.variadic]]）。
+
+</details>
