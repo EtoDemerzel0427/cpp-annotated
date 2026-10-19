@@ -1,201 +1,172 @@
 ---
 title: 常量初始化
-summary: 变量的组成值与组成引用、constexpr-referenceable 与 constexpr-representable（C++26）、constant-initializable / constant-initialized，以及可用于常量表达式的变量与对象。这些是静态初始化与 constexpr 变量的基础
+summary: 变量的初始化什么时候算常量初始化（决定静态变量在编译期还是运行期初始化），C++26 中常量里的指针和引用可以指向哪里，以及哪些变量可以在常量表达式中读取。
 status: done
 papers: P2686, P1143R2, P0595R2
-related: expr.const.core, expr.const.defns, basic.start.static, basic.start.dynamic, dcl.constexpr, dcl.constinit, topics/compile-time-programming
+related: expr.const.core, expr.const.const, expr.const.defns, basic.start.static, basic.start.dynamic, dcl.constexpr, dcl.constinit, topics/compile-time-programming
 tags: 常量求值, 初始化, constinit, 静态初始化
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-本节回答关于变量的两个问题：
+!!! tldr
+    - 静态或线程存储期的变量如果是常量初始化的（constant-initialized），值在程序开始前就已就绪，没有跨翻译单元的初始化顺序问题；否则在运行期动态初始化。`constinit` 把这一点变成编译期检查。
+    - 常量初始化的条件是：初始化器是常量表达式，并且变量中的指针和引用都指向从那里能以常量方式引用的对象。
+    - C++26 起，constexpr 指针或引用可以指向同一次函数调用中的局部变量，但不能把它存进静态变量，也不能在 lambda 里使用。
+    - 变量要在常量表达式中被读取，还必须是 constexpr、引用，或者 const 的整型、枚举类型。`const double` 不行。
+    - 判断时 `std::is_constant_evaluated()` 取 true：编译器先按编译期试算初始化器，失败了再改为运行期初始化。
 
-1. 变量 v 的初始化能否在编译期完成？这就是 **constant-initialized**（¶4–¶5）。对静态或线程存储期变量，它决定变量做静态初始化还是动态初始化（[[basic.start.static#2]]）；对 constexpr 变量和 `constinit` 变量，它都是必须满足的要求（[[dcl.constexpr#6]]、[[dcl.constinit]]）。
-2. 在程序点 P 处，常量求值能否读取 v 的值？这就是 **usable in constant expressions**（¶6–¶9），也是 [[expr.const.core#2.10]] 允许左值到右值转换的条件。
-
-C++26 通过 [[P2686]]（constexpr 结构化绑定与对 constexpr 变量的引用）重写了本节，引入 constexpr-referenceable 与 constexpr-representable 两个概念，取代了 C++23 中"常量表达式的允许结果必须具有静态存储期"的规则。下面逐段读。
-
-## 组成值与组成引用（¶1）
-
-变量 x 的**组成值**（constituent values）与**组成引用**（constituent references）定义如下：
-
-- ¶1.1 如果 x 声明的是对象，那个对象的组成值和组成引用（[[intro.object]]：对象展开后所有标量子对象的值与所有引用成员）就是 x 的组成值和组成引用；
-- ¶1.2 如果 x 声明的是引用，这个引用本身就是 x 的组成引用。
-
-此外，如果 x 的某个组成引用 r 绑定到一个生命期延长到 r 的临时对象（或其子对象），那个临时对象的组成值与组成引用也递归地算作 x 的。
-
-为什么要把临时对象算进来？考虑 `constexpr const int& r = 42;` 或 `struct A { const int& r; }; constexpr A a{2};`。生命期延长后的临时对象与变量同时存在、同时消亡，它的内容就是变量内容的一部分，判断变量能否在编译期确定时必须一起检查。
-
-## constexpr-referenceable（¶2）{{c++26}}
-
-如果满足下列条件之一，就说对象 o 从程序点 P **constexpr-referenceable**（可被 constexpr 引用）：
-
-- ¶2.1 o 具有静态存储期；
-- ¶2.2 o 具有自动存储期，并且令 v 为 o 的完整对象对应的变量（或 o 的生命期所延长到的那个变量），包含 v 的最小非块作用域与包含 P 的最小非块作用域是同一个函数形参作用域（寻找最小作用域时，跳过块作用域和与 *requirement-parameter-list* 关联的形参作用域）。
-
-直观地说，只有当引用者与一个自动变量处在同一次函数调用中时，才能以常量的方式引用这个变量的地址。原因如下：
-
-- 函数内部的所有块共享同一个栈帧，在同一个函数体内的任何地方，局部变量 `x` 的地址都指同一个东西。所以 `constexpr int* p = &x;`（p 也在这个函数里）是有意义的：每次调用，p 都指向这次调用的 x。编译器可以把 p 实现为 x 的栈偏移，不需要运行期存储。
-- 如果 P 在一个嵌套的 lambda 体内，情况就不同了。lambda 的调用是另一个栈帧（另一个函数形参作用域），外层的 x 在那里不是同一次函数调用中的对象，而且 lambda 可能被带到别处调用。
-- 线程存储期对象永远不是 constexpr-referenceable 的：每个线程有各自的实例，地址在编译期没有统一的含义。
-
-标准例子：
-
-```cpp
-struct A {
-    int m;
-    const int& r;
-};
-void f() {
-    static int sx;
-    thread_local int tx;                // tx 永远不是 constexpr-referenceable
-    int ax;
-    A aa = {1, 2};
-    static A sa = {3, 4};
-    // 在这里：sx、ax、aa.m、sa.m，以及 aa.r 和 sa.r 绑定的临时对象，
-    // 都是 constexpr-referenceable 的
-    auto lambda = [] {
-        int ay;
-        // 在这里：sx、sa.m、ay，以及 sa.r 绑定的临时对象是 constexpr-referenceable 的；
-        // ax 与 aa 不是（它们属于外层 f 的形参作用域）
-    };
-}
-```
-
-跳过 *requirement-parameter-list* 的形参作用域是一个细节：`requires (T t) { ... }` 里的形参作用域并不对应真正的函数调用，不应因此把 f 的局部变量隔开。
-
-## constexpr-representable（¶3）{{c++26}}
-
-如果对象或引用 x 的每个指向对象 o（或越过 o 末尾）的组成值、每个引用对象 o 的组成引用都满足 o 从 P constexpr-referenceable，就说 x 在程序点 P **constexpr-representable**（可被 constexpr 表示）。
-
-换句话说，从 P 看来，x 里所有的指针和引用都指向可以常量地引用的对象。这是对 C++23 中常量表达式允许结果的推广（那里要求指针指向静态存储期对象）：静态存储期对象在任何地方都可以引用，自动对象只能在同一次函数调用内引用。
-
-## constant-initializable（¶4）
-
-如果满足下列条件，变量 v 就是 **constant-initializable**（可常量初始化）的：
-
-- ¶4.1 把其初始化的完整表达式当作 *constant-expression* 解释时，它是常量表达式，其中所有契约断言（contract assertion）都按 *ignore* 求值语义处理（[[basic.contract.eval]]）{{c++26}}；
-- ¶4.2 紧接 v 的初始化声明之后，v 声明的对象或引用 x 是 constexpr-representable 的；
-- ¶4.3 如果 x 具有静态或线程存储期，那么在初始化声明之后第一个直接作用域为命名空间作用域的程序点处，x 也是 constexpr-representable 的。
-
-逐条看。
-
-¶4.1 是传统的要求，即初始化器是常量表达式。这一条附有两个注：
-
-- 注 1：做这个判断时，`std::is_constant_evaluated()` 的值为 true。也就是说，编译器先假设这是常量求值，据此试算初始化器；试算失败，再按运行期方式（`is_constant_evaluated()` 为 false）进行动态初始化。`std::is_constant_evaluated()` 的种种反直觉行为都源于此，见 [[expr.const.defns]]。
-- 注 2 {{c++26}}：判断时忽略契约断言；但如果初始化确实是显然常量求值的，翻译期的实际求值仍可以用其他求值语义检查契约，违反时导致诊断或程序 ill-formed。因此，契约检查失败本身不会把常量初始化悄悄变成动态初始化。
-
-¶4.2 与 ¶4.3 是 C++26 新增的可表示性检查：
-
-```cpp
-namespace N {
-    void f() {
-        int x;
-        constexpr int& ar = x;           // OK（C++26）：从 ar 的声明之后看，x 可被 constexpr 引用
-        static constexpr int& sr = x;    // error: sr 具有静态存储期，¶4.3 要在命名空间作用域的点检查，
-                                         //        那里 x（自动变量）不可被 constexpr 引用
-    }
-}
-```
-
-`sr` 的错误很好理解：静态变量保存了某次调用中局部变量的引用，到下一次调用时这个引用就悬空了。¶4.3 规定在下一个命名空间作用域的点检查，把这个直觉形式化：静态变量的可见范围超出了任何一次函数调用。
-
-!!! impl "实现状态"
-    本站测试的 Clang 23 仍按 C++23 规则拒绝上例中的 `ar`（"constexpr variable 'ar' must be initialized by a constant expression"）。在 C++23 中 `ar` 确实是 ill-formed 的，因为引用的允许结果必须是静态存储期对象。
-
-## constant-initialized（¶5）
-
-一个 constant-initializable 的变量，如果有初始化器，或者其类型是 **const-default-constructible** 的（[[dcl.init.general]]：类类型，且默认初始化会初始化所有成员，例如有用户提供的默认构造函数），就是 **constant-initialized**（已常量初始化）的。
-
-为什么需要这一条？`static int sx;` 没有初始化器，默认初始化什么也不做（随后的零初始化由 [[basic.start.static]] 另行处理）。它没有经历用常量表达式初始化的过程，因此不算 constant-initialized。
-
-标准例子（展示 ¶2–¶5 的综合效果）：
-
-```cpp
-void f() {
-    int ax = 0;                   // constant-initialized
-    thread_local int tx = 0;      // constant-initialized
-    static int sx;                // 不是：没有初始化器，int 不是 const-default-constructible
-    static int& rss = sx;         // constant-initialized：sx 是静态的
-    static int& rst = tx;         // 不是：tx 是线程局部的，永远不可被 constexpr 引用
-    static int& rsa = ax;         // 不是：静态引用指向自动变量（¶4.3）
-    thread_local int& rts = sx;   // constant-initialized
-    thread_local int& rtt = tx;   // 不是
-    thread_local int& rta = ax;   // 不是
-    int& ras = sx;                // constant-initialized
-    int& rat = tx;                // 不是
-    int& raa = ax;                // constant-initialized（C++26）：同一函数调用内
-}
-```
-
-注意 `ax`、`raa` 这些自动变量也可以是 constant-initialized 的。这个概念不只服务于静态初始化，也服务于可用于常量表达式的判断（¶7）。
-
-### 对静态存储期变量的后果：静态初始化
-
-[[basic.start.static#2]] 规定：静态或线程存储期变量如果是 constant-initialized 的，就执行**常量初始化**，否则先执行零初始化。常量初始化与零初始化合称**静态初始化**，其余的都是动态初始化；所有静态初始化都 strongly happens before 任何动态初始化。
-
-实际后果：
-
-| | 常量初始化 | 动态初始化 |
-|---|---|---|
-| 何时完成 | 程序开始前（值直接写在 `.data`/`.rodata` 中） | 运行期：`main` 之前（命名空间作用域）或首次经过时（块作用域 `static`） |
-| 初始化顺序问题 | 无 | 跨 TU 的顺序未指定（静态初始化顺序问题） |
-| 块作用域 `static` | 不需要守卫变量 | 需要线程安全的守卫变量（`__cxa_guard_acquire`） |
-| `thread_local` | 无需 TLS 初始化包装函数 | 每次跨 TU 访问可能经过 TLS wrapper 函数 |
+## 编译期初始化与运行期初始化
 
 ```cpp title="a.cpp"
-int compute();                  // 定义在别处，非 constexpr
+int compute();                  // 定义在别处，不是 constexpr
 int b_val = compute();          // 动态初始化
 ```
 
-```cpp title="b.cpp"
+```cpp title="b.cpp" unspecified
 extern int b_val;
-int a_val = b_val + 1;          // 动态初始化；b_val 可能尚未初始化（此时读到 0）
+int a_val = b_val + 1;          // 动态初始化；b_val 可能还是 0
 ```
 
-把 `b_val` 改为常量初始化（`constinit int b_val = 41;`，或用 constexpr 函数计算）就消除了顺序问题，因为它在任何动态初始化之前就已就绪。
+两个翻译单元中动态初始化的先后是未指定的（[[basic.start.dynamic]]）。如果 `a_val` 先初始化，它读到的 `b_val` 只是零初始化的 0。这就是常说的静态初始化顺序问题。
 
-!!! tip "constinit：把常量初始化变成断言"
-    `constinit`（C++20，[[P1143R2]]）要求变量具有静态初始化，否则程序 ill-formed（[[dcl.constinit#2]]）。它不像 `constexpr` 那样隐含 `const`，变量之后可以修改。典型用途：
+如果 `b_val` 用常量初始化，例如写成 `int b_val = 41;`，问题就不存在了。[[basic.start.static#2]] 规定，静态或线程存储期的变量如果是**常量初始化的**（[[g:constant-initialized]]），就执行常量初始化；否则先零初始化。这两种合称静态初始化，它们都发生在任何动态初始化之前。
+
+| | 常量初始化 | 动态初始化 |
+|---|---|---|
+| 什么时候完成 | 程序开始前，值直接写在 `.data` 或 `.rodata` 中 | 运行期：命名空间作用域的变量在 `main` 之前，块作用域的 `static` 在控制流第一次经过时 |
+| 初始化顺序问题 | 没有 | 跨翻译单元的顺序未指定 |
+| 块作用域的 `static` | 不需要守卫变量 | 需要线程安全的守卫变量（Itanium ABI 中是 `__cxa_guard_acquire`） |
+| `thread_local` | 不需要初始化包装函数 | 从其他翻译单元访问时可能要经过 TLS 包装函数 |
+
+实现也可以把本应动态初始化的变量提前做成静态初始化，只要结果不变（[[basic.start.static#3]]）。所以一个变量不是常量初始化的，并不说明它一定在运行期初始化，只是没有保证。
+
+!!! tip "constinit：要求常量初始化"
+    C++20 的 `constinit`（[[P1143R2]]）要求变量具有静态初始化，否则程序非良构（[[dcl.constinit#2]]）。它不像 `constexpr` 那样隐含 `const`，变量以后可以修改。
 
     ```cpp
-    constinit int counter = 0;                     // 可变的全局计数器，保证无初始化顺序问题
-    constinit thread_local int tls_depth = 0;      // 跨 TU 访问时编译器可以省去 TLS wrapper
-    extern constinit int late;                     // 在声明处加 constinit，告诉其他 TU 无需检查初始化
+    constinit int counter = 0;                  // 可修改的全局变量，没有初始化顺序问题
+    constinit thread_local int tls_depth = 0;   // 从其他翻译单元访问时可以省去 TLS 包装函数
+
+    const char* g() { return "dynamic"; }
+    constexpr const char* f(bool p) { return p ? "constant" : g(); }
+    constinit const char* c = f(true);          // OK
+    constinit const char* d = f(false);         // error: 不是常量初始化
     ```
 
-### 实现可以提前做静态初始化
+    `tls_depth` 的那条好处要求其他翻译单元中的声明也带上 `constinit`（`extern constinit thread_local int tls_depth;`），编译器才知道无需检查初始化。
 
-[[basic.start.static#3]] 允许实现把本应动态初始化的变量改为静态初始化，条件是：（3.1）动态版本不会在初始化之前改变其他静态或线程存储期对象；（3.2）静态版本产生的值，与所有不要求静态初始化的变量都做动态初始化时的值相同。所以一个变量不是 constant-initialized，并不意味着它一定在运行期初始化，只是没有保证。这也是不能根据有没有在 `main` 之前打印来推断常量性的原因。
+## 什么样的初始化是常量初始化（¶4–¶5）
 
-## potentially-constant（¶6）
+¶4 如果下面三个条件都满足，变量 v 就是 **constant-initializable**（可常量初始化）的：
 
-如果变量是 `constexpr` 的，或者具有引用类型，或者具有非 volatile 的 const 限定的整型或枚举类型，它就是 **potentially-constant**（潜在常量）的。
+1. 把初始化的完整表达式当作一个常量表达式来解释时，它确实是常量表达式（[[expr.const.const]]）；
+2. 紧接 v 的初始化声明之后，v 声明的对象或引用是 constexpr-representable 的；
+3. 如果它具有静态或线程存储期，那么在初始化声明之后、第一个直接位于命名空间作用域的程序点，它也是 constexpr-representable 的。
 
-这是可用于常量表达式的类型门槛。它保留了 C++ 一条历史悠久的特例：`const int n = 10;` 不需要 `constexpr` 就能用作数组边界（C++98 起），而 `const double d = 1.0;` 不能用于常量表达式。
+第 2、3 条是 C++26 新增的，检查变量里的指针和引用指向哪里，下一节再讲。
 
-## 可用于常量表达式的变量（¶7）
+第 1 条有两个注。注 1：判断时 `std::is_constant_evaluated()` 的值为 true，后文会看到它的后果。注 2 {{c++26}}：判断时所有契约断言都按 ignore 语义处理（[[basic.contract.eval]]），但如果这次初始化确实是在编译期求值的，编译器仍可以用其他语义检查契约，违反时给出诊断或使程序非良构。所以契约检查失败不会把常量初始化悄悄变成动态初始化。
 
-如果变量 V 是 constant-initialized 且 potentially-constant 的，V 的初始化声明 D 从 P 可达，并且满足下列条件之一，就说 V 在点 P **可用于常量表达式**（usable in constant expressions）：
+¶5 constant-initializable 的变量如果有初始化器，或者类型是 [[g:const-default-constructible]] 的（默认初始化就会初始化所有成员的类类型，[[dcl.init.general]]），就是常量初始化的。
 
-- ¶7.1 V 是 constexpr；
-- ¶7.2 V 没有被初始化为 TU-local 值（[[basic.link]]）；
-- ¶7.3 P 与 D 在同一个翻译单元中。
+为什么要加这一条？`static int sx;` 没有初始化器，默认初始化什么也不做，随后的零初始化由 [[basic.start.static]] 另外处理。它没有经历用常量初始化的过程，所以不算常量初始化。
+
+## 常量中的指针和引用可以指向哪里（¶1–¶3）{{c++26}}
 
 ```cpp
-const int a = 10;           // constant-initialized + const int → 可用于常量表达式
+void f() {
+  int x;
+  constexpr int& ar = x;           // C++26: OK
+  static constexpr int& sr = x;    // error: 静态引用指向局部变量
+}
+```
+
+`ar` 在每次调用 `f` 时都指向这次调用的 `x`，含义是确定的，编译器可以把它实现为栈上的偏移。`sr` 却是静态变量，它会把第一次调用中 `x` 的引用一直保留下去，下一次调用时就悬空了。C++26 用下面三个概念把这个直觉写成规则。
+
+¶1 变量 x 的**组成值和组成引用**（[[g:constituent-values|constituent values and references]]）：如果 x 声明的是对象，就是这个对象的组成值和组成引用（[[intro.object]]，即把对象展开后所有标量子对象的值和所有引用成员）；如果 x 声明的是引用，这个引用本身就是 x 的组成引用。此外，组成引用绑定到的、生命期被延长的临时对象，它的组成值和组成引用也递归地算作 x 的。
+
+临时对象要算进来，是因为 `struct A { const int& r; }; constexpr A a{2};` 中，生命期被延长的临时对象和 `a` 同时存在、同时销毁，它的内容就是 `a` 的一部分。
+
+¶2 满足下列条件之一时，对象 o 从程序点 P 是 **constexpr-referenceable** 的（可以被常量地引用）：
+
+- o 具有静态存储期；
+- o 具有自动存储期，并且包含 o 所属变量的最小作用域与包含 P 的最小作用域是同一个函数形参作用域。找最小作用域时跳过块作用域，也跳过 *requires* 表达式的形参作用域，因为后者并不对应一次真正的函数调用。o 所属的变量指它的完整对象对应的变量，或者 o 的生命期被延长到的那个变量。
+
+直观地说，只有当引用者和自动变量处在同一次函数调用中时，才能以常量的方式引用这个变量。同一个函数体内的所有块共用一个栈帧，局部变量的地址在函数体内任何地方都指同一个东西。lambda 体是另一个函数，它的调用是另一个栈帧，而且 lambda 可能被带到别处调用。线程存储期的对象则永远不是 constexpr-referenceable 的：每个线程有一个实例，地址在编译期没有统一的含义。
+
+```cpp
+struct A {
+  int m;
+  const int& r;
+};
+void f() {
+  static int sx;
+  thread_local int tx;    // tx 在哪里都不是 constexpr-referenceable
+  int ax;
+  A aa = {1, 2};
+  static A sa = {3, 4};
+  // 这里：sx、ax、aa.m、sa.m，以及 aa.r、sa.r 绑定的临时对象都是
+  auto lambda = [] {
+    int ay;
+    // 这里：sx、sa.m、ay，以及 sa.r 绑定的临时对象是；ax 和 aa 不是
+  };
+}
+```
+
+¶3 如果对象或引用 x 的每个组成值所指向（或越过末尾）的对象、每个组成引用所引用的对象，从 P 都是 constexpr-referenceable 的，x 在 P 就是 **constexpr-representable** 的。
+
+回到开头的例子。`ar` 的初始化声明之后，`x` 与它在同一个函数中，所以第 4.2 项满足。`sr` 是静态的，第 4.3 项要求在下一个命名空间作用域的程序点再检查一次，那里已经在 `f` 之外，`x` 不是 constexpr-referenceable 的，于是 `sr` 不是常量初始化的。
+
+¶5 标准的例子 2 把几种存储期组合在一起：
+
+```cpp
+void f() {
+  int ax = 0;                   // 常量初始化
+  thread_local int tx = 0;      // 常量初始化
+  static int sx;                // 不是：没有初始化器，int 也不是 const-default-constructible
+  static int& rss = sx;         // 常量初始化：sx 是静态的
+  static int& rst = tx;         // 不是：tx 是线程局部的
+  static int& rsa = ax;         // 不是：静态引用指向自动变量
+  thread_local int& rts = sx;   // 常量初始化
+  thread_local int& rtt = tx;   // 不是
+  thread_local int& rta = ax;   // 不是
+  int& ras = sx;                // 常量初始化
+  int& rat = tx;                // 不是
+  int& raa = ax;                // 常量初始化：同一次函数调用
+}
+```
+
+`ax`、`raa` 这些自动变量也可以是常量初始化的。这个概念不只决定静态初始化，也是变量能否用于常量表达式的前提（下一节）。
+
+!!! history "从允许的结果到 constexpr-representable"
+    C++23 及以前，常量表达式的结果中，指针和引用只能指向静态存储期的对象（[[expr.const.const]] 中的允许的结果），所以 `constexpr int& ar = x;` 非法。C++26 的 [[P2686]] 引入了上面三个概念，把要求从表达式移到变量上，于是同一函数中的 constexpr 引用成为可能，constexpr 结构化绑定也是借此实现的。
+
+!!! impl "实现状态"
+    Clang 23 仍按 C++23 的规则处理：它拒绝 `constexpr int& ar = x;`，报告 `constexpr variable 'ar' must be initialized by a constant expression`。
+
+## 可用于常量表达式的变量（¶6–¶9）
+
+常量求值中能读取哪些在求值之外创建的对象？[[expr.const.core#2.10]] 的回答是：可用于常量表达式的对象。
+
+```cpp
+const int a = 10;           // 常量初始化的 const int
 int arr1[a];                // OK
 
 int rt();
-const int b = rt();         // 不是 constant-initialized → 不可用
-int arr2[b];                // error（或 VLA 扩展）
+const int b = rt();         // 不是常量初始化
+int arr2[b];                // error: b 不可用于常量表达式
 
-const int c = 10;
-int& rc = const_cast<int&>(c);   // 引用类型 → potentially-constant；绑定到静态对象 → constant-initialized
-static_assert(rc == 10);    // OK：rc 可用于常量表达式，它指代的 c 也可用，读取被 [expr.const.core]/2.10 放行
+const double d = 1.0;       // 常量初始化，但类型是 double
+static_assert(d == 1.0);    // error: const double 不是 potentially-constant
 ```
 
-可达（reachable）的要求：
+¶6 如果一个变量是 constexpr 的，或者具有引用类型，或者具有非 volatile 的 const 整型或枚举类型，它就是 **potentially-constant**（[[g:potentially-constant]]）的。这道类型门槛保留了 C++98 以来的一条特例：`const int n = 10;` 不写 `constexpr` 也能用作数组边界，`const double` 则不行。
+
+¶7 变量 V 在程序点 P **可用于常量表达式**（[[g:usable-in-constant-expressions|usable in constant expressions]]），需要同时满足：
+
+- V 是常量初始化的，并且是 potentially-constant 的；
+- V 的初始化声明 D 从 P 可达；
+- 以下之一成立：V 是 constexpr（7.1）；V 没有被初始化为 TU-local 值（7.2）；P 与 D 在同一个翻译单元中（7.3）。
 
 ```cpp
 extern const int late;
@@ -204,124 +175,136 @@ const int late = 1;
 static_assert(late == 1);   // OK
 ```
 
-¶7.2–7.3 关于 TU-local 的规则主要服务于模块。一个导出的 `const int&` 变量如果绑定到内部链接的对象（TU-local 实体），在其他翻译单元中就不应当作常量使用，否则不同 TU 看到的常量可能指向不同的实体。constexpr 变量不受此限制（¶7.1），因为 constexpr 变量的值必须在任何地方都能得到一致的理解。
+第 7.2、7.3 项主要针对模块。TU-local 值是指向只在本翻译单元有效的实体（例如内部链接的对象）的值，见 [[basic.link]]。一个导出的非 constexpr 的 `const` 变量如果被初始化为这样的值，其他翻译单元就不能把它当常量使用。
 
-## 可用于常量表达式的对象与引用（¶8–¶9）
+¶8 下列对象或引用在 P **潜在可用于常量表达式**（potentially usable in constant expressions）：
 
-¶8：如果对象或引用属于下列情形之一，它在 P **潜在可用于常量表达式**（potentially usable in constant expressions）：
+- 在 P 可用于常量表达式的变量所声明的对象或引用（8.1）；
+- 生命期被延长到这样一个变量的、非 volatile const 字面类型的临时对象（8.2）；
+- 模板参数对象（8.3，[[temp.param]]）；
+- 字符串字面量对象（8.4，[[lex.string]]）；
+- 以上各项的非 mutable 子对象（8.5）和引用成员（8.6）。
 
-- ¶8.1 在 P 可用于常量表达式的变量所声明的对象或引用；
-- ¶8.2 非 volatile const 限定的字面类型临时对象，且其生命期延长到某个在 P 可用于常量表达式的变量；
-- ¶8.3 模板参数对象（[[temp.param]]）；
-- ¶8.4 字符串字面量对象（[[lex.string]]）；
-- ¶8.5 上述任一者的非 mutable 子对象；
-- ¶8.6 上述任一者的引用成员。
-
-¶9：如果对象或引用潜在可用于常量表达式，并且在 P 是 constexpr-representable 的，它就在 P 可用于常量表达式。
+¶9 潜在可用于常量表达式，并且在 P 是 constexpr-representable 的对象或引用，在 P **可用于常量表达式**。
 
 ```cpp
 struct A { int m; const int& r; };
-constexpr A ga = {1, 2};       // 临时对象 2 的生命期被延长到 ga
-static_assert(ga.r == 2);      // OK：¶8.2 + ¶8.6
+constexpr A ga = {1, 2};       // 临时对象 2 的生命期延长到 ga
+static_assert(ga.r == 2);      // OK: 第 8.2、8.6 项
 
 constexpr const char* s = "abc";
-static_assert(s[1] == 'b');    // OK：¶8.4 字符串字面量对象
+static_assert(s[1] == 'b');    // OK: 字符串字面量对象
 
 struct M { mutable int x; };
 constexpr M mm{1};
-static_assert(mm.x == 1);      // error: mutable 子对象被 ¶8.5 排除
+static_assert(mm.x == 1);      // error: mutable 子对象被排除
+
+const int c = 10;
+int& rc = const_cast<int&>(c); // 引用类型，绑定到静态对象
+static_assert(rc == 10);       // OK: rc 可用，它指代的 c 也可用
 ```
 
-¶9 的 constexpr-representable 条件处理的是 C++26 才出现的情形：constexpr 变量里存了指向局部变量的指针，它在另一次函数调用（例如 lambda）中不可用。
+第 9 段的 constexpr-representable 条件处理的是 C++26 才有的情形：constexpr 变量里存着指向局部变量的指针，到了另一次函数调用里（例如 lambda 中）就不能用了。
 
 ```cpp
-struct A { int* const& r; };
-void f(int x) {
-    constexpr A a = {&x};
-    static_assert(a.r == &x);             // OK（C++26）
-    [&] {
-        static_assert(a.r != nullptr);    // error: 在 lambda 中，a.r 引用的临时对象存着 &x，
-                                          //        而 x 在 lambda 的形参作用域中不可被 constexpr 引用
-    }();
+struct B { int* const& r; };
+void g(int x) {
+  constexpr B b = {&x};
+  static_assert(b.r == &x);             // C++26: OK
+  [&] {
+    static_assert(b.r != nullptr);      // error: 在 lambda 中，x 不是 constexpr-referenceable
+  }();
 }
 ```
 
-!!! impl "实现状态"
-    本站测试的 Clang 23 在 `constexpr A a = {&x};` 处就报错（按 C++23 规则，指向自动变量的指针不是允许的结果），因此后续两条 `static_assert` 也都失败。
+Clang 23 在 `constexpr B b = {&x};` 处就报错，因为按 C++23 的规则指向自动变量的指针不能是常量表达式的结果，后面两条 `static_assert` 也随之失败。
 
-## 与 is_constant_evaluated 的交互（概要）
+## 先按编译期试算，失败再到运行期
 
-¶4.1 注 1 规定判断时 `is_constant_evaluated()` 为 true，因此静态存储期变量的初始化分两个阶段：先按常量试算，失败了再按运行期执行。
+第 4.1 项的注 1 规定，判断初始化器是否为常量表达式时，`std::is_constant_evaluated()` 取 true。所以静态存储期变量的初始化分两步：编译器先按编译期试算，失败了，再按运行期的方式动态初始化，这时 `is_constant_evaluated()` 返回 false。
 
-```cpp ok
+```cpp run ok
+#include <cstdio>
 #include <type_traits>
 int y;
-const int a = std::is_constant_evaluated() ? y : 1;   // 试算：读 y 失败 → 动态初始化，a == 1
-const int b = std::is_constant_evaluated() ? 2 : y;   // 试算：得 2，成功 → 静态初始化，b == 2
+const int a = std::is_constant_evaluated() ? y : 1;  // 试算读 y 失败，动态初始化
+const int b = std::is_constant_evaluated() ? 2 : y;  // 试算得 2，常量初始化
+int main() { std::printf("%d %d\n", a, b); }         // 1 2
 ```
 
-`a` 的结果尤其反直觉：表达式中出现了 `is_constant_evaluated()`，最终却在运行期求值（得 false，于是取 1）。完整分析见 [[expr.const.defns]]。
+`a` 的结果尤其反直觉：表达式里写着 `is_constant_evaluated()`，最终却在运行期求值，得到 false，于是取 1。完整的分析见 [[expr.const.defns]]。
 
 !!! warning "Clang 的警告不完全准确"
-    Clang 对上面两行都会给出 `-Wconstant-evaluated` 警告，称 `is_constant_evaluated` "will always evaluate to 'true' in a manifestly constant-evaluated expression"。对 `a` 而言这并不成立：`a` 最终是动态初始化的，运行时 `is_constant_evaluated()` 返回 false。这条警告的本意是提醒这种用法很可能不是你想要的。
+    Clang 对这两行都给出 `-Wconstant-evaluated` 警告，说 `is_constant_evaluated` "will always evaluate to 'true' in a manifestly constant-evaluated expression"。对 `a` 来说并不成立，它是动态初始化的，运行时这个调用返回 false。这条警告的实际用意是提醒这种写法多半不是你想要的。
 
-## 历史与演进
+## 常见误解
 
-!!! history "从允许的结果到 constexpr-representable"
-    - C++11：常量初始化就是用常量表达式初始化；引用必须绑定到静态存储期对象或函数。
-    - C++20：引入 `constinit`（[[P1143R2]]）和 `std::is_constant_evaluated()`（[[P0595R2]]）。为了定义后者的行为，标准引入了显然常量求值和试算的表述（即 ¶4.1 注 1 的前身）。
-    - C++23：可用于常量表达式的定义已基本是 ¶7–¶9 的形状，但常量表达式的结果不能指向自动变量。
-    - C++26：[[P2686]] 引入 constexpr-referenceable / constexpr-representable，允许 `constexpr int& r = local;`，并使 constexpr 结构化绑定成为可能；判断时契约断言按 ignore 语义处理。
+!!! pitfall "`const int` 的常量性取决于初始化器"
+    `const int n = f();` 中的 `n` 能否用于常量表达式，完全取决于 `f()` 能否在编译期求值。在 `f` 里加一行非 constexpr 的日志调用，远处的 `int arr[n];` 就会出错，而 `n` 的声明处没有任何诊断。需要常量时写 `constexpr`，需要静态初始化时写 `constinit`。
 
-## 陷阱
+!!! pitfall "constexpr 局部变量就是静态变量"
+    函数内的 `constexpr int arr[1000] = {...};` 具有自动存储期，每次调用都是一个新对象。编译器通常会把它优化成直接引用 `.rodata` 中的数据，但标准不保证地址不变。需要唯一的地址，或者要返回它的指针，应写 `static constexpr`。
 
-!!! pitfall "constexpr 变量 ≠ 静态变量"
-    函数内的 `constexpr int arr[1000] = {...};` 是自动存储期变量，每次调用都可能在栈上构造一份。编译器通常会优化为从 `.rodata` 复制，甚至直接引用，但标准不保证地址稳定。如果需要唯一的地址，或者要返回它的指针，应写 `static constexpr`。
+!!! pitfall "块作用域 static 的初始化器一定在运行期执行"
+    如果初始化器能在编译期求值，块作用域的 `static` 变量就是常量初始化的，控制流经过时什么也不做：
 
-!!! pitfall "`const` 整型的常量性取决于初始化器"
-    `const int n = f();` 中的 n 能否用于常量表达式，完全取决于 `f()` 能否在编译期成功求值。在 `f` 里加一行非 constexpr 的日志调用，远处的 `int arr[n];` 就会出错，而 n 的声明处没有任何诊断。需要常量时写 `constexpr`，需要静态初始化时写 `constinit`。
-
-!!! pitfall "块作用域 static 的常量初始化"
-    对于 `static int cache = expensive();`，如果 `expensive()` 是 constexpr 且能成功求值，变量就是常量初始化的，首次经过时**不会**调用 `expensive()`。依赖其副作用（例如打印、计数）的代码，其行为会随编译器能否常量求值而不同。
+    ```cpp run ok
+    #include <cstdio>
+    int calls = 0;
+    constexpr int expensive() {
+      if !consteval { ++calls; }   // 只在运行期计数
+      return 42;
+    }
+    int get() {
+      static int cache = expensive();   // 常量初始化
+      return cache;
+    }
+    int main() {
+      get();
+      std::printf("%d\n", calls);       // 0
+    }
+    ```
 
 ## 思考题
 
 !!! question "思考题 1"
-    以下每个变量是否 constant-initialized？是否可用于常量表达式？
+    下面每个变量是不是常量初始化的？能不能用于常量表达式？
 
     ```cpp
     struct P { int v; constexpr P() : v(7) {} };
-    const P p1;          // (1)
-    const int i1 = P().v;// (2)
-    const double d1 = 1; // (3)
-    int& r1 = const_cast<int&>(i1); // (4)
+    const P p1;                       // (1)
+    const int i1 = P().v;             // (2)
+    const double d1 = 1;              // (3)
+    int& r1 = const_cast<int&>(i1);   // (4)
     ```
 
 <details markdown="1">
 <summary>答案</summary>
 
-1. `p1`：没有初始化器，但 P 有用户提供的 constexpr 默认构造函数，是 const-default-constructible 的，初始化是常量表达式，所以是 constant-initialized。但它是类类型，又不是 constexpr，所以不是 potentially-constant，**不可用于常量表达式**（`static_assert(p1.v == 7)` 失败）。
-2. `i1`：constant-initialized（`P().v` 是常量表达式），类型是 const int，可用于常量表达式。
-3. `d1`：constant-initialized（会做静态初始化），但 `const double` 不是 potentially-constant，不可用于常量表达式。
-4. `r1`：引用类型，因此是 potentially-constant；初始化器是引用一个静态存储期对象的常量表达式，因此是 constant-initialized，可用于常量表达式。`static_assert(r1 == 7)` 会读取 `i1`，而 `i1` 可用，所以成立。
+1. `p1` 没有初始化器，但 `P` 有用户提供的 constexpr 默认构造函数，是 const-default-constructible 的，所以它是常量初始化的。它是类类型，又不是 constexpr，不是 potentially-constant，因此不可用于常量表达式，`static_assert(p1.v == 7)` 会失败。
+2. `i1` 是常量初始化的（`P().v` 是常量表达式），类型是 `const int`，可用于常量表达式。
+3. `d1` 是常量初始化的（会做静态初始化），但 `const double` 不是 potentially-constant，不可用于常量表达式。
+4. `r1` 是引用，所以是 potentially-constant；初始化器是一个引用静态对象的常量表达式，所以是常量初始化的，可用于常量表达式。`static_assert(r1 == 7)` 会读 `i1`，而 `i1` 可用，所以成立。
+
+Clang 23 的结果与上面一致。
 </details>
 
 !!! question "思考题 2"
-    为什么 ¶2 把线程存储期对象一概排除在 constexpr-referenceable 之外，而静态存储期对象总是可以？
+    为什么第 2 段把线程存储期的对象一律排除在 constexpr-referenceable 之外，而静态存储期的对象总可以？
 
 <details markdown="1">
 <summary>答案</summary>
 
-静态存储期对象在整个程序中只有一个实例，其地址可以表示为符号加偏移，由链接器或加载器填入，对所有使用者都一致。线程存储期对象每个线程一个实例，地址只能在运行期通过线程指针（TLS 寄存器）计算，不存在一个能写进 `.data` 的统一值，也就无法作为常量存进 constexpr 变量。静态初始化的引用不能绑定到 `thread_local` 对象（例子中的 `rst`），也是同一个原因。
+静态存储期的对象在整个程序中只有一个实例，地址可以表示为符号加偏移，由链接器或加载器填入，对所有使用者都一样。线程存储期的对象每个线程一个实例，地址只能在运行期通过线程指针计算，不存在一个能写进 `.data` 的统一的值，也就不能作为常量存进 constexpr 变量。例子 2 中的 `rst` 不是常量初始化的，原因相同。
 </details>
 
 ## 小结
 
-| 概念 | 定义 | 用途 |
+| 概念 | 条件 | 作用 |
 |---|---|---|
-| constexpr-referenceable {{c++26}} | 静态存储期；或同一函数调用内的自动对象 | ¶3 |
-| constexpr-representable {{c++26}} | 所有组成指针/引用的目标都 constexpr-referenceable | constexpr 变量、模板实参 |
-| constant-initializable | 初始化器是常量表达式 + 可表示 | constexpr 变量的要求 |
-| constant-initialized | constant-initializable 且有初始化器或 const-default-constructible | 静态初始化、constinit |
-| potentially-constant | constexpr / 引用 / const 非 volatile 整型或枚举 | 可用性的类型门槛 |
-| usable in constant expressions | constant-initialized + potentially-constant + 可达（+TU-local 限制） | [[expr.const.core#2.10]] 的读取许可 |
+| constexpr-referenceable {{c++26}} | 静态存储期，或同一次函数调用中的自动对象 | 定义下一行 |
+| constexpr-representable {{c++26}} | 所有组成指针、组成引用的目标都是 constexpr-referenceable 的 | 常量初始化和可用性的条件 |
+| constant-initializable | 初始化器是常量表达式，且可表示 | constexpr 变量必须满足 |
+| 常量初始化的 | constant-initializable，并且有初始化器或 const-default-constructible | 静态初始化、`constinit` |
+| potentially-constant | constexpr、引用、const 非 volatile 的整型或枚举 | 可用性的类型门槛 |
+| 可用于常量表达式 | 常量初始化 + potentially-constant + 可达（+ TU-local 限制） | [[expr.const.core#2.10]] 允许读取 |
