@@ -1,37 +1,23 @@
 ---
 title: 类模板
-summary: 类模板定义一族类型；成员（函数、成员类、静态数据成员、枚举）的类外定义必须带等价的 template-head 并按原顺序写出模板实参列表；成员函数的模板实参由对象类型决定；推导指引的语法、查找方式与限制；类模板静态成员的定义与未知界数组
+summary: 类模板定义一族互不相关的类类型；怎样在类外定义它的成员函数、成员类、成员枚举和静态数据成员；推导指引怎样写、怎样被找到。
 status: done
 covers: temp.class.general, temp.mem.func, temp.deduct.guide, temp.mem.class, temp.static, temp.mem.enum
 since: c++98
 papers: P0091R3
 related: temp.decls, temp.mem, temp.local, temp.inst, over.match.class.deduct, dcl.type.class.deduct, temp.over.link, temp.spec.partial
 tags: 模板, 类模板, 推导指引, CTAD, 类外定义
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-[[g:class-template|**类模板**]]（class template）为一个**无界的**相关类型集合规定布局与操作：`std::vector<int>`、`std::vector<std::string>`……每个特化都是一个独立的类类型，但它们共享同一份"蓝图"。
+!!! tldr
+    - `Array<int>` 和 `Array<long>` 是两个毫无关系的类：没有转换，静态成员各有一份，私有成员互不可见。
+    - 在类外定义成员时，*template-head* 要与类模板的等价，模板名后按原顺序写出形参（包写成 `Ts...`）；形参名可以换。约束写法不同但效果相同时，程序是 IFNDR。
+    - 类模板的普通成员函数不是函数模板：它的模板实参来自对象的类型，调用时不做推导，实参可以隐式转换。
+    - 推导指引告诉 CTAD 某种构造实参该推出哪个特化。它不经名字查找，必须写在类模板所在的作用域；`explicit` 指引只参与直接初始化。
+    - 静态数据成员的类外定义本身是模板定义，可以放进头文件；未知界数组成员的显式特化可以换一个界。
 
-13.7.2 [temp.class] 分为六个小节，本页全部覆盖：
-
-| 小节 | 规定什么 |
-|---|---|
-| 13.7.2.1 [temp.class.general] | 类模板是什么；类外定义成员时 *template-head* 与实参列表的写法；*class-key* 一致性 |
-| 13.7.2.2 [temp.mem.func] | 类外定义成员函数；成员函数的模板实参从哪里来 |
-| 13.7.2.3 [temp.deduct.guide] | **推导指引**（CTAD 的用户可定制部分） |
-| 13.7.2.4 [temp.mem.class] | 类外定义成员类 |
-| 13.7.2.5 [temp.static] | 静态数据成员的定义 |
-| 13.7.2.6 [temp.mem.enum] | 类外定义成员枚举 |
-
-前置知识：模板声明的一般形式 [[temp.pre]]，注入类名 [[temp.local]]，隐式实例化 [[temp.inst]]。
-
----
-
-## 13.7.2.1 类模板概述
-
-### 类模板定义一族类型（¶1–2）
-
-¶1 类模板为无界的相关类型集合定义布局和操作。¶2 是一个例子（`Array<T>`）：前缀 `template<class T>` 说明正在声明一个模板，并且 *type-name* `T` 可以在声明中使用——换句话说，`Array` 是以 `T` 为参数的**参数化类型**。
+## 类模板定义一族类型 [temp.class.general]
 
 ```cpp run ok
 template<class T> class Array {
@@ -40,10 +26,9 @@ template<class T> class Array {
 public:
     explicit Array(int n) : v(new T[n]{}), sz(n) { }
     ~Array() { delete[] v; }
-    Array(const Array&) = delete;
+    Array(const Array&) = delete;      // Array 即 Array<T>
     T& operator[](int i) { return v[i]; }
-    T& elem(int i) { return v[i]; }       // 类内定义：隐式 inline
-    Array* self() { return this; }        // 注入类名：Array 在这里就是 Array<T>
+    T& elem(int i) { return v[i]; }
 };
 
 int main() {
@@ -53,44 +38,61 @@ int main() {
 }
 ```
 
-在类模板的作用域内，模板名 `Array` 单独出现时是**注入类名**（injected-class-name），指称当前特化 `Array<T>`（[[temp.local]]）。所以成员里可以直接写 `Array*`、`Array(const Array&)`，不必重复 `<T>`。
+¶1 **类模板**（class template）为一个无界的、彼此相关的类型集合规定布局和操作。¶2 的例子就是这个 `Array`：前缀 `template<class T>` 表示正在声明一个模板，声明里可以把 `T` 当作类型名使用。换句话说，`Array` 是以 `T` 为参数的参数化类型。
 
-!!! note "类模板不是类型"
-    `Array` 本身不是类型，`Array<int>` 才是。在需要类型的地方写 `Array`（在类模板作用域外），要么是 CTAD（[[dcl.type.class.deduct]]），要么非良构。每个特化是**完全无关**的类：`Array<int>` 与 `Array<long>` 之间没有任何继承或转换关系，静态成员各有一份，`Array<int>` 的私有成员对 `Array<long>` 不可访问（除非用友元打通，[[temp.friend]]）。
+`Array` 本身不是类型，`Array<int>` 才是。`Array<int>` 叫做类模板的一个**特化**（specialization）。在类模板外需要类型的地方只写 `Array`，要么触发类模板实参推导（CTAD，见下文的推导指引），要么非良构。
 
-### 类外定义成员：template-head 与实参列表（¶3）
+在类模板内部，单独出现的 `Array` 是**注入类名**（injected-class-name），指当前特化 `Array<T>`（[[temp.local]]）。所以上面的拷贝构造函数可以写成 `Array(const Array&)`，不必重复 `<T>`。
 
-¶3 是一个注（不具规范效力，规范规则散在 [[temp.mem.func]]、[[temp.over.link]]、[[dcl.meaning]] 中），但它把类外定义的三条要点说得最清楚：
+每个特化都是独立的类。`Array<int>` 与 `Array<long>` 之间没有继承或转换关系，静态成员各有一份，一个特化也不能访问另一个特化的私有成员，除非声明为友元（[[temp.friend]]）。
 
-1. 类外的成员定义本身是一个**模板定义**，它的 *template-head* 必须与类模板的**等价**（[[temp.over.link#6]]）；
-2. 模板形参的**名字**可以不同（`T` 可以写成 `U`）；
-3. 类模板名后面跟的是 *template-head* 的**模板实参列表**（[[temp.arg#2]]）——即**按原顺序**列出形参，形参包写成 `Ts...`。
+## 在类外定义成员（¶3）
 
-```cpp run ok
-template<class T1, class T2> struct A {
-    void f1();
-};
-template<class X, class Y> void A<X, Y>::f1() { }    // OK: 名字可以换，顺序不能换
+<div class="compare" markdown="1">
 
-template<class... Types> struct B {
-    void f3();
-};
-template<class... Ts> void B<Ts...>::f3() { }        // OK: 包必须写成展开
+```cpp ok
+template<class T1, class T2>
+struct A { void f1(); };
 
-int main() { A<int, char>{}.f1(); B<int>{}.f3(); }
+// 形参改名：OK
+template<class X, class Y>
+void A<X, Y>::f1() { }
+
+template<class... Types>
+struct B { void f3(); };
+
+template<class... Ts>
+void B<Ts...>::f3() { }
 ```
 
 ```cpp error
-template<class T1, class T2> struct A { void f2(); };
-template<class T2, class T1> void A<T1, T2>::f2() { }   // error: 实参顺序与 template-head 不一致
+template<class T1, class T2>
+struct A { void f2(); };
 
-template<class... Types> struct B { void f4(); };
-template<class... Types> void B<Types>::f4() { }        // error: 包未展开
+// 顺序与 template-head 不一致
+template<class T2, class T1>
+void A<T1, T2>::f2() { }  // error
+
+template<class... Types>
+struct B { void f4(); };
+
+template<class... Types>
+void B<Types>::f4() { }   // error: 包未展开
 ```
 
-为什么 `A<T1, T2>` 不行？因为 `template<class T2, class T1>` 的模板实参列表是 `<T2, T1>`——形参的**位置**才有意义，名字只是记号。写 `A<T1, T2>` 相当于指名了 `A` 的一个"交换了实参的"特化，它不是主模板本身，而是一个形如部分特化的东西——但它又不是部分特化的声明，于是找不到匹配的成员声明。
+</div>
 
-带约束的类模板，*template-head* 中的约束也要**等价**（不仅仅是"功能上等价"）：
+¶3 是一条注，把分散在 [[temp.mem.func]]、[[temp.over.link]] 里的规范规则归纳成三点：
+
+1. 类外的成员定义本身是一个模板定义，它的 *template-head*（`template<...>` 这一部分）必须与类模板的**等价**（[[temp.over.link#6]]）。
+2. 形参的名字可以与类模板定义里的不同。
+3. 类模板名后面跟的是这个 *template-head* 的模板实参列表（[[temp.arg]]），也就是按原顺序依次写出各个形参，形参包写成 `Ts...`。
+
+右边的 `A<T1, T2>` 为什么错？`template<class T2, class T1>` 的实参列表是 `<T2, T1>`，起作用的是形参的位置，名字只是记号。写成 `A<T1, T2>` 等于指名了一个交换了两个实参的特化，它不是主模板，类模板里找不到与之对应的成员声明。
+
+### 约束也要等价
+
+如果类模板带约束，类外定义的 *template-head* 里的约束必须写得和原来一样：
 
 ```cpp error
 template<typename T> concept C = true;
@@ -102,39 +104,41 @@ template<C T> struct S {
     template<D U> struct Inner;
 };
 
-template<C A> void S<A>::f() { }        // OK: template-head 等价
-template<typename T> void S<T>::g() { } // error: 没有约束，template-head 不等价
+template<C A> void S<A>::f() { }        // OK：template-head 等价
+template<typename T> void S<T>::g() { } // error: 少了约束，找不到匹配的声明
 template<C X> template<D Y>
-struct S<X>::Inner { };                 // OK: 两层 template-head 都等价
+struct S<X>::Inner { };                 // OK：两层 template-head 都等价
 ```
 
-!!! lawyer "功能等价但不等价（IFNDR）"
-    标准例子中还有一行：
+标准的例子里还有一种写法：
 
-    ```cpp
-    template<typename T> requires C<T>    // IFNDR
-    void S<T>::h() { }
-    ```
+```cpp ifndr
+template<typename T> concept C = true;
+template<C T> struct S { void h(); };
 
-    `template<C T>` 与 `template<typename T> requires C<T>` 接受且满足的模板实参集合完全相同——它们**功能等价**（functionally equivalent）但**不等价**（equivalent），按 [[temp.over.link#7]]，程序非良构、不要求诊断。为什么不直接要求诊断？因为判断"功能等价"一般是不可判定的（想想任意的常量表达式），标准只要求编译器按**字面结构**比较（"等价"），而把"结构不同但语义相同"的情形定为 IFNDR，免得编译器做"英雄式的努力"。实践中 Clang 23 对这一行直接报错（诊断为 template-head 中的类型约束与之前的声明不同），这是 IFNDR 允许的。
+template<typename T> requires C<T>   // IFNDR
+void S<T>::h() { }
+```
 
-### class-key 必须一致（¶4）
+`template<C T>` 与 `template<typename T> requires C<T>` 接受同样的模板实参，二者**功能等价**（functionally equivalent），但写法不同，所以不**等价**（equivalent）。按 [[temp.over.link#7]]，这样的程序非良构，不要求诊断（IFNDR）：标准对它没有任何要求，编译器可以报错，也可以默默接受。
 
-¶4 类模板的部分特化、显式特化、显式实例化中的 *class-key* 必须与原模板声明在**种类**上一致（[[dcl.type.elab]]）：`class` 与 `struct` 可以互换，但 `union` 只能与 `union` 对应。
+规则这样定，是因为判断两段任意的约束在语义上是否相同一般做不到。标准只要求编译器按书写结构比较，结构不同而语义相同的情形交给 IFNDR。Clang 23 对这一行直接报错（type constraint differs in template redeclaration），这是允许的。
+
+### class-key 要一致（¶4）
+
+¶4 类模板的部分特化、显式特化和显式实例化所用的 *class-key*，必须与原模板声明属于同一种（[[dcl.type.elab]]）。`class` 和 `struct` 算同一种，`union` 只能对应 `union`。
 
 ```cpp error
 template<class T> struct S { };
-template<class T> class S<T*> { };      // OK: class 与 struct 是同一种类
-template<> union S<int> { };            // error: union 与 struct 不同种类
+template<class T> class S<T*> { };      // OK：class 与 struct 同种
+template<> union S<int> { };            // error: union 与 struct 不同种
 ```
 
----
-
-## 13.7.2.2 类模板的成员函数
+## 成员函数 [temp.mem.func]
 
 ### 类外定义（¶1）
 
-¶1 类模板的成员函数可以在类模板定义之外定义。这时要写出完整的 *template-head*，并用 `ClassName<形参...>::` 限定：
+¶1 类模板的成员函数可以在类模板定义之外定义：
 
 ```cpp run ok
 #include <cstdio>
@@ -148,7 +152,7 @@ public:
     T& operator[](int);
 };
 
-template<class T> Array<T>::Array(int n) : v(new T[n]{}), sz(n) { }   // 构造函数：Array<T>::Array
+template<class T> Array<T>::Array(int n) : v(new T[n]{}), sz(n) { }
 template<class T> Array<T>::~Array() { delete[] v; }
 template<class T> T& Array<T>::operator[](int i) {
     if (i < 0 || sz <= i) { std::puts("Array: range error"); std::abort(); }
@@ -158,19 +162,21 @@ template<class T> T& Array<T>::operator[](int i) {
 int main() { Array<double> a(2); a[0] = 1.5; return int(a[0]) - 1; }
 ```
 
-注意 `Array<T>::Array(int)`：限定名部分要写实参列表，但构造函数名本身是注入类名 `Array`。进入 `Array<T>::` 之后（在声明符之后的参数列表和函数体里），可以直接用注入类名 `Array`；但在声明符**之前**的返回类型里还没进入类作用域，必须写全（或者使用尾置返回类型）：
+限定部分必须写成 `Array<T>::`。在类外 `Array` 不是注入类名，`template<class T> void Array::f()` 是错的。进入 `Array<T>::` 之后，参数列表和函数体都在类作用域内，可以只写 `Array`，所以构造函数写作 `Array<T>::Array`。
+
+写在声明符前面的返回类型还不在类作用域内，要写全；尾置返回类型已经在类作用域内：
 
 ```cpp run ok
 template<class T> struct Node {
     Node* next();
     Node* prev();
 };
-template<class T> Node<T>* Node<T>::next() { return this; }        // 返回类型在类作用域外：要写 Node<T>
-template<class T> auto Node<T>::prev() -> Node* { return this; }   // 尾置返回类型在类作用域内
+template<class T> Node<T>* Node<T>::next() { return this; }
+template<class T> auto Node<T>::prev() -> Node* { return this; }
 int main() { Node<int> n; return n.next() == n.prev() ? 0 : 1; }
 ```
 
-**带约束的成员函数**：类外定义必须重复同样的 *requires-clause*，否则它与类内声明不对应（[[basic.scope.scope]] 中"对应"的判定包括尾随 *requires-clause*）：
+带约束的成员函数，类外定义要重复同样的 *requires-clause*。判断类外定义对应哪个类内声明时，尾随的 *requires-clause* 也算在内（[[basic.scope.scope]]）：
 
 ```cpp error
 template<typename T> concept C = requires { typename T::type; };
@@ -186,52 +192,128 @@ template<typename T>
 void S<T>::g() { }                    // error: S<T> 中没有无约束的 g
 ```
 
-### 模板实参由对象决定（¶2）
+### 模板实参来自对象（¶2）
 
-¶2 类模板成员函数的模板实参由**调用该成员函数的对象的类型**的模板实参决定。`v1[3]` 中 `v1` 是 `Array<int>`，所以调用的是 `Array<int>::operator[]`。这句话的意义在于：普通成员函数（非成员模板）**不做模板实参推导**——它不是函数模板，而是"类模板特化的成员函数"，一旦类特化确定，它就是一个普通函数，参数可以进行任意隐式转换：
+¶2 类模板成员函数的模板实参，由调用它的那个对象的类型决定。`v1` 是 `Array<int>`，`v1[3]` 调用的就是 `Array<int>::operator[]`。
+
+由此可知，类模板的普通成员函数不是函数模板。类的特化一旦确定，它就是一个普通函数，参数类型已经固定，调用时不做模板实参推导，实参可以做任何隐式转换：
 
 ```cpp run ok
 template<class T> struct Wrap {
-    void set(T) { }                     // 不是函数模板：参数类型在 Wrap<T> 确定时就固定了
+    void set(T) { }                     // 参数类型在 Wrap<T> 确定时就固定了
 };
 template<class T> void free_set(Wrap<T>&, T) { }   // 函数模板：T 从两个实参分别推导
 
 int main() {
     Wrap<long> w;
-    w.set(1);                           // OK: int → long 隐式转换
+    w.set(1);                           // OK：int 隐式转换为 long
     // free_set(w, 1);                  // error: T 推导冲突（long 与 int）
-    free_set<long>(w, 1);               // OK: 显式指定
+    free_set<long>(w, 1);               // OK：显式指定
 }
 ```
 
-!!! note "按需实例化"
-    类模板被隐式实例化时，只实例化成员函数的**声明**；成员函数的**定义**只在被 odr-use（或需要其定义）时才实例化（[[temp.inst]]）。所以 `std::vector<std::unique_ptr<int>>` 可以使用，尽管它的拷贝构造函数（若被实例化）会因 `unique_ptr` 不可拷贝而失败——只要不调用它。
+类模板隐式实例化时，只实例化成员函数的声明；某个成员函数的定义要到需要它时才实例化（[[temp.inst]]）。所以 `std::vector<std::unique_ptr<int>>` 能用：它的拷贝构造函数一旦实例化就会出错，但只要不拷贝，它就不会被实例化。
 
----
+## 成员类 [temp.mem.class]
 
-## 13.7.2.3 推导指引
+¶1 类模板的成员类可以在类模板定义之外定义。注 1 提醒，定义必须出现在第一次需要实例化它的使用之前。只用到指针或引用时，成员类不必完整：
 
-[[g:deduction-guide|**推导指引**]]（deduction guide）是 C++17 类模板实参推导（CTAD）中由用户提供的部分：它告诉编译器"见到这样的构造实参时，推导出这样的特化"。完整的推导算法在 [[over.match.class.deduct]]，占位符本身在 [[dcl.type.class.deduct]]，本小节只管推导指引的**声明**。
+<div class="compare" markdown="1">
 
-### 何时使用、怎样被找到（¶1）
+```cpp ok
+template<class T>
+struct A { class B; };
 
-¶1 当 *template-name*（或指称类模板的 *splice-type-specifier*，{{c++26}}）作为**推导类类型**的类型说明符出现时，使用推导指引。
-
-!!! std
-    Deduction guides are not found by name lookup. Instead, when performing class template argument deduction, all reachable deduction guides declared for the class template are considered.
-
-推导指引**不通过名字查找**被找到：做 CTAD 时，考虑为该类模板声明的**所有可达的**（reachable，[[module.reach]]）推导指引。这意味着：
-
-- 推导指引不是函数，不能被调用，也没有名字可以被引用；
-- 不受 using-declaration、using-directive 的影响，也不受 ADL 影响；
-- 只要在 CTAD 发生处**可达**（在同一 TU 中，就是"出现在使用之前"），就会被考虑。
-
-```text
-deduction-guide:
-    explicit-specifier(opt) simple-template-name ( parameter-declaration-clause ) -> simple-template-id requires-clause(opt) ;
+A<int>::B* b1;  // OK：只需 A<int>
+template<class T>
+class A<T>::B { };
+A<int>::B b2;   // OK：定义已出现
 ```
 
-语法上它像一个带尾置返回类型的构造函数声明，但：没有函数体、没有返回类型前缀、名字是模板名、"返回类型"是一个 *simple-template-id*。推导指引可以是模板（前面加 *template-head*），也可以不是：
+```cpp error
+template<class T>
+struct A { class B; };
+
+A<int>::B b0;   // error: B 尚未定义
+template<class T>
+class A<T>::B { };
+```
+
+</div>
+
+## 成员枚举 [temp.mem.enum]
+
+¶1 类模板的成员枚举也可以在类外定义。前提是枚举在类内能先声明而不定义，也就是有固定底层类型或者是有作用域的枚举（[[dcl.enum]]）：
+
+```cpp run ok
+template<class T> struct A {
+    enum E : T;                         // 底层类型依赖于 T
+};
+template<class T> enum A<T>::E : T { e1, e2 };
+A<int>::E e = A<int>::e1;
+int main() { return e; }
+```
+
+## 静态数据成员 [temp.static]
+
+¶1 静态数据成员和静态数据成员模板的定义，可以写在包含该类模板定义的命名空间作用域中：
+
+```cpp run ok
+template<class T> class X {
+public:
+    static T s;
+};
+template<class T> T X<T>::s = 0;        // 本身是一个模板定义
+
+struct limits {
+    template<class T>
+    static const T min;                 // 静态数据成员模板：声明
+};
+template<class T>
+const T limits::min = { };              // 定义
+
+int main() { return X<int>::s + limits::min<int>; }
+```
+
+`template<class T> T X<T>::s = 0;` 是模板定义，可以放在头文件里被多个翻译单元包含，不违反 ODR（[[basic.def.odr]]）。普通类的静态数据成员定义如果放进头文件，就会导致多重定义。
+
+C++17 起更常见的写法是在类内用 `inline` 或 `constexpr`（隐式 inline）定义，不再需要类外定义：
+
+```cpp run ok
+template<class T> struct Counter {
+    static inline int count = 0;
+    static constexpr T zero{};
+};
+int main() {
+    ++Counter<int>::count;
+    ++Counter<long>::count;
+    return Counter<int>::count - 1 + int(Counter<long>::zero);
+}
+```
+
+`Counter<int>::count` 和 `Counter<long>::count` 是两个对象。想让所有特化共享一个计数器，要把静态成员放进一个非模板的基类。
+
+!!! warning "初始化顺序"
+    隐式实例化的类模板静态数据成员，初始化是无序的（[[basic.start.dynamic]]）：如果它需要动态初始化，就与其他任何动态初始化都没有先后保证，即使在同一个翻译单元里。用 `constexpr` 或 `constinit` 做常量初始化可以避开这个问题。
+
+### 未知界数组（¶2）
+
+¶2 如果静态数据成员声明为未知界数组，它的显式特化可以用与一般定义不同的界：
+
+```cpp run ok
+template<class T> struct A {
+    static int i[];
+};
+template<class T> int A<T>::i[4];       // 一般定义：4 个元素
+template<> int A<int>::i[] = { 1 };     // 显式特化：1 个元素
+static_assert(sizeof(A<char>::i) == 4 * sizeof(int));
+static_assert(sizeof(A<int>::i) == sizeof(int));
+int main() { }
+```
+
+`A<int>::i` 的显式特化不是从 `A<T>::i[4]` 实例化来的，它直接给出 `A<int>` 的成员 `i` 的定义，所以可以补成另一个界。
+
+## 推导指引 [temp.deduct.guide]
 
 ```cpp run ok
 #include <string>
@@ -240,43 +322,76 @@ template<class T> struct S {
     T data;
     S(T t) : data(t) { }
 };
-S(const char*) -> S<std::string>;                 // 非模板推导指引
+S(const char*) -> S<std::string>;       // 推导指引
 
-template<class T, class D = int> struct P { T data; };
-template<class U> P(U) -> P<typename U::type>;    // 模板推导指引（标准 ¶2 的例子）
+S a(42);                                // S<int>：从构造函数推出
+S b("hello");                           // S<std::string>：由推导指引决定
+static_assert(std::is_same_v<decltype(a), S<int>>);
+static_assert(std::is_same_v<decltype(b), S<std::string>>);
+int main() { }
+```
+
+C++17 起，可以只写类模板名来声明变量，由初始化器推出模板实参，这叫**类模板实参推导**（class template argument deduction，CTAD，[[dcl.type.class.deduct]]）。编译器根据类模板的构造函数生成一组隐式的推导规则，没有这条推导指引时，`S b("hello")` 会推出 `S<const char*>`。
+
+**推导指引**（deduction guide）是用户补充的推导规则：看到这样的构造实参，就推出这样的特化。完整的推导算法在 [[over.match.class.deduct]]，本节只管推导指引怎样声明。
+
+```text
+deduction-guide:
+    explicit-specifier(opt) simple-template-name ( parameter-declaration-clause ) -> simple-template-id requires-clause(opt) ;
+```
+
+它的写法像一个带尾置返回类型的构造函数声明，但没有函数体，箭头后是一个特化。推导指引前面可以加 *template-head* 成为模板，也可以不加。
+
+### 怎样被找到（¶1）
+
+¶1 当类模板名（或者 C++26 中指称类模板的 *splice-type-specifier*）用作推导类类型的说明符时，就使用推导指引。
+
+!!! std
+    Deduction guides are not found by name lookup. Instead, when performing class template argument deduction, all reachable deduction guides declared for the class template are considered.
+
+推导指引不是函数，不能调用，也没有可以引用的名字。using 声明、using 指令、ADL 都与它无关。做 CTAD 时，凡是在此处可达的（reachable，[[module.reach]]）、为这个类模板声明的推导指引都参与。在单个翻译单元里，可达大致就是出现在使用之前。
+
+¶2 的例子是一个模板推导指引：
+
+```cpp run ok
+#include <type_traits>
+template<class T, class D = int>
+struct S { T data; };
+
+template<class U>
+S(U) -> S<typename U::type>;
 
 struct A {
     using type = short;
     operator type() { return 0; }
 };
-
-S s("hello");
-P x{A()};
-static_assert(std::is_same_v<decltype(s), S<std::string>>);
-static_assert(std::is_same_v<decltype(x), P<short, int>>);   // D 用默认实参
+S x{A()};
+static_assert(std::is_same_v<decltype(x), S<short, int>>);
 int main() { }
 ```
 
-¶2 的例子值得细看：`P x{A()};` 中，聚合推导与 `P(U)` 指引都参与（[[over.match.class.deduct]]），推导指引给出 `P<short>`，默认模板实参补全为 `P<short, int>`。随后用 `A()` 初始化 `short data`——借助 `A` 的转换函数。
+推导指引给出 `S<short>`，默认模板实参把它补成 `S<short, int>`。之后用 `A()` 初始化 `short data`，用到的是 `A` 的转换函数。
 
-### 限制（¶3）
+推导指引只决定推出哪个特化。推导完成后，初始化按普通规则对那个特化进行：第一个例子里 `S b("hello")` 调用的是 `S<std::string>` 的构造函数，把 `const char*` 转换成 `std::string`。如果那个特化没有合适的构造函数，推导成功，初始化仍然失败。
 
-¶3 推导指引的声明有五条限制：
+### 五条限制（¶3）
 
-1. *parameter-declaration-clause* 的限制与函数声明相同（[[dcl.fct]]），**但不能**出现泛型参数类型占位符（`auto` 形参）——推导指引不能是"简写函数模板"。想要模板就显式写 *template-head*。
-2. 箭头后的 *simple-template-id* 必须指名一个**类模板特化**。
-3. 箭头前的 *simple-template-name* 必须与 *simple-template-id* 的模板名是**同一个标识符**——`X(...) -> Y<...>` 非良构。
-4. 推导指引必须**居于**（inhabit）类模板所属的作用域；如果是成员类模板，还要有**相同的访问权限**。
-5. 同一类模板的两个推导指引若有**等价的** *parameter-declaration-clause*，且其中一个对另一个可达，则非良构——推导指引不能"重声明"。
+¶3 对推导指引的声明有五条要求：
+
+1. 形参列表的限制与函数声明相同（[[dcl.fct]]），但不能出现 `auto` 形参。想要模板，就显式写 *template-head*。
+2. 箭头后的 *simple-template-id* 必须指名一个类模板特化。
+3. 箭头前的名字必须与箭头后的模板名是同一个标识符，`X(...) -> Y<...>` 非良构。
+4. 推导指引必须位于类模板所属的作用域；对成员类模板，访问权限也要与它相同。
+5. 同一个类模板的两个推导指引如果形参列表等价，且其中一个从另一个可达，程序非良构。推导指引不能重复声明。
 
 ```cpp error
 #include <string>
 template<class T> struct Z { Z(T) { } };
 Z(int) -> Z<int>;
-Z(int) -> Z<int>;                       // error: 等价的推导指引重复声明
+Z(int) -> Z<int>;                       // error: 重复声明
 
 template<class T> struct Q { Q(T) { } };
-Q(int) -> Z<int>;                       // error: 模板名必须相同
+Q(int) -> Z<int>;                       // error: 模板名不同
 
 class O {
     template<class T> struct In { In(T) { } };   // private
@@ -287,20 +402,20 @@ public:
 
 ```cpp
 template<class T> struct W { W(T) { } };
-W(auto) -> W<int>;                      // ill-formed: 推导指引中不能出现 auto 形参
+W(auto) -> W<int>;                      // 按 ¶3 非良构：不能有 auto 形参
 ```
 
-!!! warning "编译器现状"
-    按 ¶3，`W(auto) -> W<int>;` 非良构。截至写作时，本机 Clang 23 **接受**这条声明并把它当作模板推导指引使用，没有给出诊断。这是编译器与标准的偏差。
+!!! warning "Clang 的偏差"
+    本机 Clang 23 接受 `W(auto) -> W<int>;`，把它当作模板推导指引使用，不给任何诊断。这与标准不符，所以上面这段没有标判定。
 
-"居于类模板所属的作用域"意味着：命名空间作用域的类模板，推导指引要写在**同一个命名空间**中（不能在别的命名空间里"为 `std::vector` 添加推导指引"）；成员类模板的推导指引写在外围类里：
+第 4 条意味着，命名空间作用域的类模板，推导指引要写在同一个命名空间里，不能在自己的命名空间里给 `std::vector` 添加推导指引。成员类模板的推导指引写在外围类中：
 
 ```cpp run ok
 #include <string>
 #include <type_traits>
 struct Outer {
     template<class T> struct In { In(T) { } };
-    In(const char*) -> In<std::string>;       // 成员推导指引：在类中，访问权限相同（public）
+    In(const char*) -> In<std::string>;   // 与 In 同为 public
 };
 Outer::In i("x");
 static_assert(std::is_same_v<decltype(i), Outer::In<std::string>>);
@@ -309,7 +424,7 @@ int main() { }
 
 ### explicit 推导指引
 
-`explicit` 推导指引在**复制初始化**语境中不被考虑（与 explicit 构造函数相同的规则，见 [[over.match.class.deduct]] 中"概念上的构造函数继承 *explicit-specifier*"）；若在**复制列表初始化**中被选中则非良构。这给出一个常见的"惊喜"：同一个初始化器，`=` 与 `()` 推导出不同的类型。
+`explicit` 推导指引和 explicit 构造函数一样，在复制初始化中不参与；在复制列表初始化中被选中则非良构（[[over.match.class.deduct]]）。于是同一个初始化器，用 `=` 和用 `()` 可能推出不同的类型：
 
 ```cpp run ok
 #include <string>
@@ -320,8 +435,8 @@ template<class T> struct S {
 };
 explicit S(const char*) -> S<std::string>;
 
-S a("hi");             // 直接初始化：explicit 指引参与 → S<std::string>
-S b = "hi";            // 复制初始化：explicit 指引不参与 → 由构造函数生成的隐式指引 → S<const char*>
+S a("hi");             // 直接初始化：explicit 指引参与
+S b = "hi";            // 复制初始化：只剩构造函数生成的规则
 static_assert(std::is_same_v<decltype(a), S<std::string>>);
 static_assert(std::is_same_v<decltype(b), S<const char*>>);
 int main() { }
@@ -329,7 +444,7 @@ int main() { }
 
 ### 带约束的推导指引
 
-推导指引可以带尾随 *requires-clause*，也可以有受约束的模板形参。约束参与推导指引之间的重载决议（最终按 [[over.match.best]] 与 [[temp.func.order]] 比较）：
+推导指引可以带 *requires-clause* 或受约束的模板形参。几个指引都匹配时，约束参与比较（[[over.match.best]]、[[temp.func.order]]）：
 
 ```cpp run ok
 #include <concepts>
@@ -345,135 +460,16 @@ static_assert(std::is_same_v<decltype(b), Num<double>>);
 int main() { }
 ```
 
-!!! pitfall "推导指引不影响初始化本身"
-    推导指引只决定"推导出哪个特化"。推导完成后，初始化按普通规则对**那个特化**进行：`S(const char*) -> S<std::string>` 之后，真正调用的是 `S<std::string>` 的构造函数，并把 `const char*` 转换为 `std::string`。如果目标特化里没有合适的构造函数，推导成功但初始化失败。
-
-!!! history "历史与演进"
-    - **C++17**：CTAD 与推导指引由 [[P0091R3]] 引入。
-    - **C++20**：聚合的 CTAD、别名模板的 CTAD（见 [[over.match.class.deduct]]）。
-    - **C++26**：推导类类型可以由指称类模板的 *splice-type-specifier* 给出（静态反射），¶1 措辞相应扩展。
-
----
-
-## 13.7.2.4 类模板的成员类
-
-¶1 类模板的成员类可以在类模板定义之外定义。注释提醒：成员类必须在**首次需要实例化它的使用**之前定义——只用到指针或引用不需要成员类完整：
-
-```cpp run ok
-template<class T> struct A {
-    class B;
-};
-A<int>::B* b1;                          // OK: 需要 A<int> 完整，不需要 A<int>::B
-template<class T> class A<T>::B { };
-A<int>::B b2;                           // OK: 需要 A<int>::B 的定义——此时已经有了
-int main() { }
-```
-
-```cpp error
-template<class T> struct A { class B; };
-A<int>::B b0;                           // error: A<int>::B 是不完整类型（定义还未出现）
-template<class T> class A<T>::B { };
-```
-
-成员类本身是"类模板的成员"，不是独立的模板，但它是模板化实体（templated entity，[[temp.pre]]），按 [[temp.inst]] 按需实例化：实例化 `A<int>` 只会实例化 `A<int>::B` 的声明。
-
----
-
-## 13.7.2.5 类模板的静态数据成员
-
-### 类外定义（¶1）
-
-¶1 静态数据成员（或静态数据成员模板）的定义可以在**外围命名空间作用域**中提供：
-
-```cpp run ok
-template<class T> class X {
-public:
-    static T s;
-};
-template<class T> T X<T>::s = 0;        // 静态数据成员的定义：本身是一个模板定义
-
-struct limits {
-    template<class T>
-    static const T min;                 // 静态数据成员模板：声明
-};
-template<class T>
-const T limits::min = { };              // 定义
-
-int main() { return X<int>::s + limits::min<int>; }
-```
-
-`template<class T> T X<T>::s = 0;` 是一个**模板化的变量定义**，可以（也通常）放在头文件中，在多个 TU 中出现不违反 ODR——每个特化 `X<int>::s` 按模板实体的 ODR 规则（[[basic.def.odr]]）只对应一个对象。这与非模板类的静态数据成员不同：非模板类的静态成员定义放在头文件会导致多重定义。
-
-C++17 起更常见的写法是 `inline` 静态成员，或 `constexpr` 静态成员（隐式 inline），不需要类外定义：
-
-```cpp run ok
-template<class T> struct Counter {
-    static inline int count = 0;               // C++17：类内定义
-    static constexpr T zero{};                 // constexpr 静态成员隐式 inline
-};
-int main() { ++Counter<int>::count; ++Counter<long>::count; return Counter<int>::count - 1 + int(Counter<long>::zero); }
-```
-
-!!! note "每个特化一份"
-    `Counter<int>::count` 和 `Counter<long>::count` 是两个不同的对象。这是"每个特化是独立的类"的直接推论，也是"在类模板中用静态成员实现全局计数器"之所以失败的原因——需要真正共享时，把静态成员放到非模板基类里。
-
-!!! warning "静态成员的初始化顺序"
-    隐式实例化的类模板静态数据成员具有**无序初始化**（unordered initialization，[[basic.start.dynamic]]）：若它的初始化是动态的，它与其他任何动态初始化之间都没有顺序保证（即使在同一个 TU 中）。用常量初始化（`constexpr`/`constinit`）避开这个问题。
-
-### 未知界数组的显式特化（¶2）
-
-¶2 若静态数据成员被声明为**未知界数组**，它的显式特化可以有与（主模板的）定义**不同的**界：
-
-```cpp run ok
-template<class T> struct A {
-    static int i[];
-};
-template<class T> int A<T>::i[4];       // 一般定义：4 个元素
-template<> int A<int>::i[] = { 1 };     // 显式特化：1 个元素
-static_assert(sizeof(A<char>::i) == 4 * sizeof(int));
-static_assert(sizeof(A<int>::i) == sizeof(int));
-int main() { }
-```
-
-为什么需要专门写这一条？因为一般而言，同一实体的各个声明必须有一致的类型（[[basic.link]]），而 `int[4]` 与 `int[1]` 是不同的类型。显式特化 `A<int>::i` 是 `A<int>` 的成员 `i`（类型 `int[]`）的定义，它不是从 `A<T>::i[4]` 实例化来的；¶2 明确允许这种"补全成不同界"的情形。
-
----
-
-## 13.7.2.6 类模板的枚举成员
-
-¶1 类模板的枚举成员可以在类模板定义之外定义（需要是可以前置声明的枚举：有固定底层类型的枚举，或有作用域的枚举，[[dcl.enum]]）：
-
-```cpp run ok
-template<class T> struct A {
-    enum E : T;                          // 不透明枚举声明，底层类型依赖于 T
-};
-template<class T> enum A<T>::E : T { e1, e2 };
-A<int>::E e = A<int>::e1;
-int main() { return e; }
-```
-
----
-
-## 实现视角
+!!! history "演进"
+    CTAD 和推导指引由 C++17 的 [[P0091R3]] 引入。C++20 加入了聚合类和别名模板的 CTAD（[[over.match.class.deduct]]）。C++26 的静态反射允许用 *splice-type-specifier* 指称类模板来做 CTAD，¶1 的措辞随之扩展。
 
 !!! impl "实现视角"
-    - **按需实例化与代码体积**：每个被使用的成员函数在每个用到它的 TU 中都会被实例化并生成为 COMDAT（弱）符号，链接器去重。未被使用的成员函数不生成代码，这正是"类模板成员函数只在被使用时实例化"在目标文件层面的体现。
-    - **静态数据成员**：`X<int>::s` 这样的模板静态成员也以 COMDAT/弱符号形式输出，链接器保证只保留一份；动态初始化会被一个 guard 变量保护（与函数局部静态类似），因为多个 TU 可能都含有它的初始化代码。
-    - **推导指引不进入目标文件**：推导指引只在编译期参与 CTAD，不生成任何符号。
-
-## 陷阱
-
-!!! pitfall "常见误解"
-    - "类外定义时写 `template<class T> void A::f()` 就行"——必须写 `A<T>::f`。在类外，`A` 不是注入类名。
-    - "类外定义的约束可以换一种写法"——必须**等价**；换写法（如 `template<C T>` ↔ `requires C<T>`）是 IFNDR。
-    - "推导指引像函数一样可以放在任何命名空间、可以被 using 引入"——推导指引必须居于类模板所在的作用域，且不经名字查找。
-    - "`S s = x;` 与 `S s(x);` 推导结果一定相同"——explicit 推导指引只参与直接初始化。
-    - "类模板静态成员在所有特化之间共享"——每个特化一份。
+    每个用到的成员函数会在每个使用它的翻译单元里实例化，输出为 COMDAT（弱）符号，由链接器去重；没用到的不生成代码。`X<int>::s` 这样的模板静态成员同样以弱符号输出，如果需要动态初始化，会有一个 guard 变量保证只初始化一次。推导指引只在编译期参与 CTAD，不产生任何符号。
 
 ## 思考题
 
 !!! question "思考题 1"
-    下面的代码中 `x` 的类型是什么？如果把推导指引改为 `explicit`，`x` 和 `y` 的类型分别是什么？
+    `x` 和 `y` 的类型是什么？如果把推导指引改为 `explicit` 呢？
 
     ```cpp
     template<class T> struct Box { Box(T) {} };
@@ -485,13 +481,13 @@ int main() { return e; }
 <details markdown="1">
 <summary>答案</summary>
 
-不加 `explicit`：CTAD 的候选是从构造函数生成的隐式指引 `template<class T> Box(T) -> Box<T>` 与用户指引 `Box(int) -> Box<long>`。对实参 `1`，二者的转换序列都是精确匹配；按 [[over.match.best]]，非模板优于模板，选用户指引，`x`、`y` 都是 `Box<long>`。
+候选有两个：从构造函数生成的 `template<class T> Box(T) -> Box<T>`，和用户写的 `Box(int) -> Box<long>`。对实参 `1`，两者都是精确匹配；按 [[over.match.best]]，非模板优于模板，选用户指引，`x`、`y` 都是 `Box<long>`。
 
-加 `explicit`：`x` 是直接初始化，explicit 指引参与，仍为 `Box<long>`；`y` 是复制初始化，explicit 指引不是候选，只剩隐式指引，`y` 是 `Box<int>`。
+改成 `explicit` 后，`x` 是直接初始化，结果不变，仍为 `Box<long>`。`y` 是复制初始化，explicit 指引不参与，只剩构造函数生成的规则，`y` 是 `Box<int>`。
 </details>
 
 !!! question "思考题 2"
-    为什么下面第二个定义是错的，而第一个是对的？
+    为什么 #1 对、#2 错？
 
     ```cpp
     template<class T, class U> struct M { void f(); };
@@ -502,13 +498,5 @@ int main() { return e; }
 <details markdown="1">
 <summary>答案</summary>
 
-#1 的 *template-head* 是 `template<class U, class T>`，它的模板实参列表是 `<U, T>`，与 `M<U, T>` 一致——形参名只是记号，第一个形参叫 `U` 也无妨。#2 的 *template-head* 的实参列表是 `<T, U>`，而它写成了 `M<U, T>`，即"把第一、二个实参交换"的特化，这不是主模板的实参列表，因此找不到对应的成员声明——它试图定义一个并不存在的「部分特化」`M<U, T>` 的成员。
+#1 的 *template-head* 是 `template<class U, class T>`，实参列表是 `<U, T>`，与 `M<U, T>` 一致；第一个形参叫 `U` 并无妨碍。#2 的实参列表是 `<T, U>`，却写成了 `M<U, T>`，即交换了两个实参的特化。它不是主模板，找不到对应的成员声明。
 </details>
-
-!!! summary "小结"
-    - 类模板 = 一族互不相关的类类型；模板内部模板名是注入类名。
-    - 类外定义成员：*template-head* 等价（约束也要等价，否则 IFNDR 或不匹配）、形参名可换、实参列表按原顺序写（包写成展开）。
-    - 成员函数不是函数模板：模板实参由对象类型决定，参数可隐式转换；按需实例化。
-    - 推导指引：不经名字查找，所有可达指引都参与；不能用 `auto` 形参；模板名要相同；居于类模板的作用域并（成员类模板）同访问权限；不可重复声明；`explicit` 指引只参与直接初始化。
-    - 静态数据成员：类外定义本身是模板定义，可放头文件；每个特化一份；未知界数组的显式特化可以换界。
-    - 成员类、成员枚举可以类外定义；成员类须在需要完整类型的使用前定义。
