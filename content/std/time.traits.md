@@ -1,44 +1,54 @@
 ---
 title: 时间相关特征
-summary: treat_as_floating_point 决定 duration 之间能否隐式转换；duration_values 给出零值与极值；common_type 特化算出"两个周期的最大公约数"；is_clock 判定时钟——以及为什么给 is_clock 加特化是 UB
+summary: duration 通过四个特征了解它的表示类型：treat_as_floating_point 决定 duration 之间能否隐式转换，duration_values 给出零值和极值，common_type 特化取两个周期的最大公约数，is_clock 判定一个类型是不是时钟；程序为 is_clock 添加特化是 UB。
 status: done
 covers: *
 related: time.duration, time.clock.req, ratio, meta.trans.other, namespace.std
 tags: 标准库, chrono, 类型特征
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-本节的四个特征都是 `duration` 的"可定制点"：`duration` 本身对 `Rep` 一无所知，它要靠这些特征回答三个问题——这个表示类型能不能"无损地"做除法？它的零、最小值、最大值是什么？两个不同单位的时长相加，结果用什么单位？用户为自己的数值类型（定点数、区间算术、大整数）实例化 `duration` 时，就通过特化这些模板来回答。
+!!! tldr
+    - 整数表示的 duration 只有在不需要除法时才能隐式转换：`seconds` 能变成 `milliseconds`，反过来不行。`treat_as_floating_point` 为真的表示类型不受这个限制。
+    - `duration::zero()`、`min()`、`max()` 来自 `duration_values`，其中 `min()` 是 `numeric_limits<Rep>::lowest()`，不是 `numeric_limits<Rep>::min()`。
+    - 两个 duration 的公共类型取两个周期的最大公约数，两边都只靠乘法就能转换过去，所以 `1s + 1ms` 的类型是 `milliseconds`。乘法仍可能溢出。
+    - `is_clock` 只做语法层面的检查；程序为它添加特化，行为未定义。
 
 ## treat_as_floating_point（[time.traits.is.fp]）
+
+```cpp run title="treat-as-fp.cpp" ok
+#include <chrono>
+#include <type_traits>
+using namespace std::chrono;
+using std::is_convertible_v;
+
+struct fixed16 { /* 某个定点数类型，实现从略 */ };
+template<>
+struct std::chrono::treat_as_floating_point<fixed16>
+    : std::true_type {};
+
+// 浮点表示：允许
+static_assert(is_convertible_v<milliseconds, duration<double>>);
+// 整数表示且需要除法：拒绝
+static_assert(!is_convertible_v<milliseconds, seconds>);
+// 整数表示但只需乘法：允许
+static_assert(is_convertible_v<seconds, milliseconds>);
+static_assert(treat_as_floating_point_v<fixed16>);
+
+int main() {}
+```
 
 ```cpp
 template<class Rep> struct treat_as_floating_point : is_floating_point<Rep> { };
 ```
 
-¶1：`duration` 用它来判断"能否把一个 duration 转换成另一个计次周期不同的 duration"。若 `treat_as_floating_point_v<Rep>` 为真，duration 之间的隐式转换总是允许；否则是否允许取决于周期（见 [[time.duration]] 的构造函数规则）。
+¶1 `duration` 用这个特征判断能否把一个 duration 转换为计次周期不同的另一个 duration。如果 `treat_as_floating_point_v<Rep>` 为真，duration 之间总可以隐式转换；否则能否隐式转换取决于两者的周期（见 [[time.duration]] 的构造函数）。
 
-注 1 说明了用意：这个特征表示"这个类型像浮点数一样，做除法时损失一点精度是可以接受的"。为 `false` 时，`Rep` 被当作整数对待——除法会截断，所以 `duration` 拒绝一切需要除法的隐式转换。
+注 1 说明了用意：这个特征表示一个类型的行为像浮点数，做除法时损失一点精度是可以接受的。为 `false` 时，`Rep` 被当作整数，除法会截断。
 
-这里的设计思想是：**能否隐式转换，不看值，而看类型能否承受截断**。`milliseconds` → `seconds` 对 1000ms 来说是精确的，对 1500ms 就会丢掉 500ms；编译器在编译期不知道值，所以对整数 rep 一律拒绝，强迫你写出 `duration_cast` 或 `floor`/`round` 表明你知道会截断。
+`milliseconds` 转 `seconds` 对 1000ms 是精确的，对 1500ms 会丢掉 500ms。编译器在编译期不知道值，所以对整数表示一律拒绝需要除法的隐式转换，要求你写 `duration_cast`、`floor` 或 `round`，表明你知道会截断。
 
-```cpp title="treat-as-fp.cpp" ok
-#include <chrono>
-#include <type_traits>
-using namespace std::chrono;
-
-struct fixed16 { /* 某个定点数类型（演示用，省略实现） */ };
-template<> struct std::chrono::treat_as_floating_point<fixed16> : std::true_type {};
-
-static_assert( std::is_convertible_v<milliseconds, duration<double>>);   // 浮点：允许
-static_assert(!std::is_convertible_v<milliseconds, seconds>);            // 整数且需要除法：拒绝
-static_assert( std::is_convertible_v<seconds, milliseconds>);            // 整数但只需乘法：允许
-static_assert( treat_as_floating_point_v<fixed16>);
-
-int main() {}
-```
-
-`treat_as_floating_point` 是允许用户特化的（只要特化依赖于用户定义类型，[[namespace.std]]）；这与下文的 `is_clock` 正好相反。
+上例中 `fixed16` 的特化是允许的：按 [[namespace.std]]，程序可以特化标准库类模板，只要特化依赖于程序定义的类型。下文的 `is_clock` 正好相反。
 
 ## duration_values（[time.traits.duration.values]）
 
@@ -51,13 +61,27 @@ struct duration_values {
 };
 ```
 
-¶1：`duration::zero()`、`min()`、`max()`（[[time.duration]]）都转发到这里。之所以单独做成特征，是因为 `Rep` 可以是类类型，它的"零"可能需要别的方式构造，这时由类型作者特化 `duration_values`。
+¶1 `duration` 用这个特征构造表示类型的特殊值，`duration::zero()`、`min()`、`max()`（[[time.duration]]）都转发到这里。单独做成特征，是因为 `Rep` 可以是类类型，构造这些值可能需要别的办法，这时由类型的作者特化 `duration_values`。
 
-- ¶2–¶3：`zero()` 返回 `Rep(0)` 而不是 `Rep()`。注 1 解释：`Rep()` 对某些类型可能有别的含义，比如"未初始化值"。返回值必须是加法单位元。
-- ¶4–¶5：`min()` 返回 `numeric_limits<Rep>::lowest()`，且必须 `<= zero()`。注意是 `lowest()` 而不是 `numeric_limits::min()`——对浮点数，后者是最小正规格化数（一个正数）。
-- ¶6–¶7：`max()` 返回 `numeric_limits<Rep>::max()`，且必须 `> zero()`。
+- ¶2–¶3 `zero()` 返回 `Rep(0)`，返回值必须是加法单位元。注 1 解释为什么不用 `Rep()`：对某些类型，`Rep()` 可能有别的含义，比如一个未初始化的值。
+- ¶4–¶5 `min()` 返回 `numeric_limits<Rep>::lowest()`，必须小于等于 `zero()`。对浮点类型，`numeric_limits<Rep>::min()` 是最小的正规格化数，是个正数，所以这里用的是 `lowest()`。
+- ¶6–¶7 `max()` 返回 `numeric_limits<Rep>::max()`，必须大于 `zero()`。
 
 ## common_type 的特化（[time.traits.specializations]）
+
+```cpp run title="common-period.cpp" ok
+#include <chrono>
+#include <iostream>
+using namespace std::chrono;
+
+int main() {
+  using third = duration<int, std::ratio<1, 3>>;
+  using half  = duration<int, std::ratio<1, 2>>;
+  using C = std::common_type_t<third, half>;
+  static_assert(std::is_same_v<C::period, std::ratio<1, 6>>);
+  std::cout << third{1} + half{1} << '\n';   // 5[1/6]s，即 5/6 秒
+}
+```
 
 ```cpp
 template<class Rep1, class Period1, class Rep2, class Period2>
@@ -66,74 +90,47 @@ struct common_type<chrono::duration<Rep1, Period1>, chrono::duration<Rep2, Perio
 };
 ```
 
-¶1：结果的周期是 `Period1` 与 `Period2` 的**最大公约数**。注 1 给出算法：分子取两个分子的 gcd，分母取两个分母的 lcm。
+¶1 结果的周期是 `Period1` 与 `Period2` 的最大公约数。注 1 给出算法：分子取两个分子的最大公约数，分母取两个分母的最小公倍数。
 
-¶2（注 2）解释为什么是 gcd：它是"两个参数都能**只靠乘法**转换过去"的最大周期。只靠乘法意味着整数 rep 下不截断——这正是 duration 加减、比较都先转到 common type 的原因：`1s + 1ms` 的类型是 `milliseconds`，`1s` 被乘以 1000，没有任何信息丢失。
-
-两个"不整齐"的周期也能求出公共类型：
+¶2 注 2 解释为什么取最大公约数：它是两个 duration 都能不经除法转换过去的最大周期。只用乘法意味着整数表示也不会截断。duration 的加减和比较都先转换到公共类型，所以 `1s + 1ms` 的类型是 `milliseconds`，`1s` 乘以 1000，没有信息丢失。
 
 | `Period1` | `Period2` | 公共周期 |
 |---|---|---|
 | `ratio<1>`（秒） | `milli` | `milli` |
 | `ratio<60>`（分） | `ratio<3600>`（时） | `ratio<60>` |
 | `ratio<1, 3>` | `ratio<1, 2>` | `ratio<1, 6>` |
-| `ratio<1, 30>`（30 Hz 帧） | `ratio<1, 1000>` | `ratio<1, 3000>` |
+| `ratio<1, 30>`（30 Hz 的帧） | `milli` | `ratio<1, 3000>` |
 
-```cpp title="common-period.cpp" ok
-#include <chrono>
-#include <iostream>
-using namespace std::chrono;
+注 2 还说，公共类型的表示类型意在能无截断地容纳转换结果，但这只是意图，乘法本身仍可能溢出。`nanoseconds` 与 `years` 的公共类型是 `nanoseconds`，把 300 年换算成纳秒就超出了 64 位整数的范围（见 [[time.duration]]）。
 
-int main() {
-    using third = duration<int, std::ratio<1, 3>>;
-    using half  = duration<int, std::ratio<1, 2>>;
-    static_assert(std::is_same_v<std::common_type_t<third, half>::period, std::ratio<1, 6>>);
-    std::cout << third{1} + half{1} << '\n';     // 5[1/6]s：1/3 + 1/2 = 5/6 秒
-}
-```
-
-注 2 末尾提醒：公共类型的 rep 意在能无截断地容纳转换结果，但这只是"意图"——乘法本身仍可能**溢出**。`nanoseconds` 与 `years` 的公共类型是 `nanoseconds`，把 300 年转换过去就超出了 64 位（见 [[time.duration]] 的陷阱）。
-
-¶3：两个**同一时钟**的 time_point 的公共类型，是该时钟上以两个 duration 的公共类型为 duration 的 time_point。没有为不同时钟的 time_point 提供特化——它们本来就不能混用。
+¶3 同一个时钟的两个 time_point 的公共类型，是这个时钟上、以两者 duration 的公共类型为 duration 的 time_point。标准没有为不同时钟的 time_point 提供特化，它们本来就不能混用。
 
 ## is_clock（[time.traits.is.clock]）
 
-```cpp
-template<class T> struct is_clock;
-template<class T> constexpr bool is_clock_v = is_clock<T>::value;
-```
-
-¶1：若 `T` 满足 *Cpp17Clock* 要求（[[time.clock.req]]），`is_clock<T>` 派生自 `true_type`，否则派生自 `false_type`。实现能多精确地判定是未指明的，但至少要检查：
-
-- ¶1.1：`T::rep`、`T::period`、`T::duration`、`T::time_point` 都是有效的类型名；
-- ¶1.2：`T::is_steady` 作为不求值操作数是良构的；
-- ¶1.3：`T::now()` 作为不求值操作数是良构的。
-
-也就是说，这是一个**语法检查**：`is_clock` 不能验证 `now()` 是否真的单调、`period` 是否真的是 `ratio`。实现可以检查得更多，但不能更少。libc++ 的实现就更严格：它还要求 `rep` 是算术类型或类类型、`period` 是 `ratio` 的特化、`duration` 恰好是 `duration<rep, period>`、`is_steady` 的类型是 `const bool`、`now()` 返回 `time_point`。`local_t` 没有 `now()`，所以 `is_clock_v<local_t>` 为假。
-
-¶2：程序为 `is_clock` 添加特化，行为未定义（{{ub}}）。为什么禁止？因为标准库内部用 `is_clock` 做约束（例如格式化、`clock_cast` 的实现），如果用户能把一个不是时钟的类型"声明"成时钟，库的内部假设就会崩溃；反过来，满足要求的类型本来就会自动得到 `true`，没有特化的必要。
-
-!!! impl "libc++ 会诊断这种特化"
-    libc++ 给 `is_clock` 与 `is_clock_v` 加了内部宏 `_LIBCPP_NO_SPECIALIZATIONS`，它展开为 Clang 的 `[[clang::no_specializations]]` 属性，于是用户写出特化时编译器会报错。标准只说是 UB，这是实现提供的额外保护。
-
-```cpp title="is-clock.cpp" ok
+```cpp run title="is-clock.cpp" ok
 #include <chrono>
 using namespace std::chrono;
 
 static_assert( is_clock_v<system_clock>);
 static_assert( is_clock_v<steady_clock>);
 static_assert( is_clock_v<file_clock>);
-static_assert(!is_clock_v<local_t>);        // 伪时钟：没有 now()
+static_assert(!is_clock_v<local_t>);   // 伪时钟，没有 now()
 static_assert(!is_clock_v<seconds>);
 
 int main() {}
 ```
 
-## 小结
+¶1 如果 `T` 满足 *Cpp17Clock* 要求（[[time.clock.req]]），`is_clock<T>` 派生自 `true_type`，否则派生自 `false_type`。实现在多大程度上判定一个类型不满足要求是未指定的，但至少要检查：
 
-| 特征 | 作用 | 用户可特化？ |
-|---|---|---|
-| `treat_as_floating_point` | 决定 duration 间是否允许需要除法的隐式转换 | 可以 |
-| `duration_values` | `zero()`=`Rep(0)`、`min()`=`lowest()`、`max()` | 可以 |
-| `common_type<duration, duration>` | 周期取 gcd：只靠乘法、不截断 | —（标准已提供） |
-| `is_clock` | 语法层面检查 *Cpp17Clock* | **不可以**，特化即 UB |
+- ¶1.1 `T::rep`、`T::period`、`T::duration`、`T::time_point` 都有效，且都是类型；
+- ¶1.2 `T::is_steady` 作为不求值操作数是良构的；
+- ¶1.3 `T::now()` 作为不求值操作数是良构的。
+
+这是一个语法检查。它不能验证 `now()` 是否真的单调，也不能验证 `is_steady` 是否如实声明。实现可以检查更多，但不能更少。
+
+`local_t` 是一个伪时钟，用来构成 `local_time`，表示还没有确定时区的本地时间。它没有 `now()`，所以 `is_clock_v<local_t>` 为假。
+
+¶2 程序为 `is_clock` 添加特化，行为未定义（{{ub}}）。这与 `<type_traits>` 中大多数类型特征的规则一致（[[meta.rqmts]]）：`is_clock` 的值应当如实反映类型是否满足要求，满足要求的类型本来就会得到 `true`，不需要特化；允许特化只会让一个不是时钟的类型冒充时钟。
+
+!!! impl "libc++ 会诊断这种特化"
+    libc++ 给 `is_clock` 和 `is_clock_v` 加了 Clang 的 `[[clang::no_specializations]]` 属性。本机对 `template<> struct std::chrono::is_clock<X> : std::true_type {};` 报错 `'is_clock' cannot be specialized`。标准只说是 UB，这是实现提供的额外保护。
