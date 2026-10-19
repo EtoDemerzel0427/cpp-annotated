@@ -1,82 +1,53 @@
 ---
 title: 输入流 basic_istream
-summary: basic_istream 的全部规则——sentry 构造时做的三件事（检查 good、刷新 tie、跳过空白），格式化输入的"局部错误状态"模型，算术提取器如何借 num_get 解析并在溢出时截断为极值，字符数组提取只接受数组（C++20），非格式化输入 get/getline/read/readsome/ignore/peek/putback/unget/sync/tellg/seekg 的逐条语义与 gcount，ws 操纵符，右值流提取，basic_iostream；以及 eof 循环、>> 后接 getline、int8_t、错误恢复等常见陷阱
+summary: basic_istream 怎样读入：每次输入前 sentry 做的准备，格式化输入（>>）与非格式化输入（get、getline、read 等）各自的规则与错误状态，数值解析失败和越界时得到什么，以及 eof 循环、>> 后接 getline、读 uint8_t 等常见陷阱。
 status: done
 covers: *
 related: iostream.format, iostreams.base, stream.buffers, output.streams, string.io, facet.num.get.virtuals, stream.iterators, depr.istream.extractors
 tags: 标准库, iostream, istream, 输入, sentry
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[input.streams] 规定 `<istream>` 中的 `basic_istream`、`ws` 操纵符、右值提取，以及同时派生自输入和输出流的 `basic_iostream`。这一节的条文冗长，但几乎都由两个"公共要求"驱动：[istream.formatted.reqmts]（格式化输入）和 [istream.unformatted] ¶1（非格式化输入）。先把这两段读懂，每个具体函数只是在它们上面加几条特殊规则。
+!!! tldr
+    - 每次输入都先构造一个 sentry：流不处于 good 状态就追加 `failbit` 并放弃；否则先刷新绑定的输出流（`cin` 绑定 `cout`），格式化输入还要跳过前导空白。
+    - 格式化输入（`>>`）跳过空白、按 locale 解析，失败位先记在局部错误状态里，最后一次写回流。非格式化输入（`get`、`getline`、`read` 等）不跳空白，读了几个字符记在 `gcount()` 里。
+    - 数值解析交给 `num_get`：格式不对时得到 0，越界时得到该类型的最大值或最小值，两种情况都置 `failbit`。
+    - 循环读取要写 `while (in >> x)`，不要写 `while (!in.eof())`。在 `>>` 之后调用 `getline` 前，用 `std::ws` 吃掉残留的换行。
+    - 回退（`putback`、`unget`）失败置的是 `badbit`；`tellg` 在 `eofbit` 已置位时返回 −1，`seekg` 则会先清掉 `eofbit`。
 
-## 概述（[input.streams.general]、[istream.general]）
+## 为什么 `while (!in.eof())` 是错的
 
-[input.streams.general] ¶1：`<istream>` 定义两个类模板（`basic_istream`、`basic_iostream`）和一个函数模板（`ws`），以及一个从流右值提取的函数模板。
+```cpp title="eof-loop.cpp" run ok
+#include <iostream>
+#include <sstream>
 
-[istream.general] ¶1：用占位符 *extended-floating-point-type* 声明的函数，实现要为**每个**无 cv 限定的扩展浮点类型（[[basic.fundamental]]，如 `std::float16_t`）提供重载 {{c++23}}。
+int main() {
+  std::istringstream a("1 2 3\n");
+  int x, sum = 0, n = 0;
+  while (!a.eof()) {           // 错误的循环条件
+    a >> x;
+    sum += x; ++n;
+  }
+  std::cout << "wrong: n=" << n << " sum=" << sum << '\n';  // n=4 sum=9
 
-概要要点：
-
-```cpp
-template<class charT, class traits = char_traits<charT>>
-class basic_istream : virtual public basic_ios<charT, traits> {
-public:
-  explicit basic_istream(basic_streambuf<charT, traits>* sb);
-  virtual ~basic_istream();
-  class sentry;
-
-  // 格式化输入（提取器）
-  basic_istream& operator>>(basic_istream& (*pf)(basic_istream&));      // 操纵符
-  basic_istream& operator>>(basic_ios<charT, traits>& (*pf)(basic_ios<charT, traits>&));
-  basic_istream& operator>>(ios_base& (*pf)(ios_base&));
-  basic_istream& operator>>(bool& / short& / ... / long double& / extended-floating-point-type&);
-  basic_istream& operator>>(void*& p);
-  basic_istream& operator>>(basic_streambuf<char_type, traits>* sb);
-
-  // 非格式化输入
-  streamsize gcount() const;
-  int_type get();   basic_istream& get(char_type& c);
-  basic_istream& get(char_type* s, streamsize n [, char_type delim]);
-  basic_istream& get(basic_streambuf<char_type, traits>& sb [, char_type delim]);
-  basic_istream& getline(char_type* s, streamsize n [, char_type delim]);
-  basic_istream& ignore(streamsize n = 1, int_type delim = traits::eof());
-  basic_istream& ignore(streamsize n, char_type delim);                 // C++26
-  int_type peek();
-  basic_istream& read(char_type* s, streamsize n);
-  streamsize readsome(char_type* s, streamsize n);
-  basic_istream& putback(char_type c);
-  basic_istream& unget();
-  int sync();
-  pos_type tellg();
-  basic_istream& seekg(pos_type);
-  basic_istream& seekg(off_type, ios_base::seekdir);
-protected:
-  basic_istream(basic_istream&& rhs);                 // 复制被删除
-  basic_istream& operator=(basic_istream&& rhs);
-  void swap(basic_istream& rhs);
-};
-// 非成员：operator>>(istream&, charT&)、operator>>(istream&, charT(&)[N])
+  std::istringstream b("1 2 3\n");
+  sum = n = 0;
+  while (b >> x) { sum += x; ++n; }   // 以提取本身的成败为条件
+  std::cout << "right: n=" << n << " sum=" << sum << '\n';  // n=3 sum=6
+}
 ```
 
-¶2–¶3：成员分为两组——**格式化输入函数**（formatted input functions，又称**提取器**，[[g:formatted-input-function]]）和**非格式化输入函数**（[[g:unformatted-input-function]]）。两组都被描述为通过 `rdbuf()->sbumpc()` 或 `rdbuf()->sgetc()` 获取（"提取"）字符，可以使用 `istream` 的其他公有成员。
+读完 `3` 时，后面还有一个 `'\n'`。`num_get` 遇到它就停止解析，没有撞到流尾，所以 `eof()` 仍为假。第四次 `>>` 先跳过 `'\n'`，然后才撞到流尾，于是置 `failbit` 和 `eofbit`，`x` 保持 3 不变，循环体又加了一次 3。
 
-注意 `std::getline(istream&, string&)` 和 `operator>>(istream&, string&)` **不在**这里，而在字符串章的 [[string.io]]；它们按这里的规则"表现为"非格式化/格式化输入函数。
+`eofbit` 只表示某次读取撞到了流尾，不能预告下一次读取会不会成功。要弄清楚每一步发生了什么，需要先看每次输入前的准备工作。
 
-## 构造、赋值、析构（[istream.cons]、[istream.assign]）
+## sentry：每次输入前的准备 [istream.sentry]
 
-- `explicit basic_istream(sb)`：¶1 用 `basic_ios::init(sb)` 初始化基类；¶2 后条件 `gcount() == 0`。
-- 移动构造（受保护）：¶3 默认构造基类，复制 `rhs` 的 `gcount()`，调用 `basic_ios::move(rhs)`，再把 `rhs` 的 `gcount` 置 0。
-- 析构函数：¶4 不对 `rdbuf()` 做任何操作。
-- `operator=(&&)`：[istream.assign] ¶1 等价于 `swap(rhs)`；`swap`：¶3 调用 `basic_ios::swap(rhs)` 并交换 `gcount()`。
-
-移动操作是**受保护**的：`basic_istream` 本身是"接口 + 状态"，真正拥有 streambuf 的是派生类（`ifstream`、`istringstream`），由它们提供公有的移动构造并在其中调用 `set_rdbuf`（[[iostreams.base]]）。
-
-## sentry：每次输入的前置工作（[istream.sentry]）
+**sentry** 是 `basic_istream` 的嵌套类，负责每次输入前后的固定步骤。每个输入函数开始时都构造一个 sentry 对象，再检查它转换成 `bool` 的结果，决定是否继续读取。
 
 ```cpp
 class basic_istream<charT, traits>::sentry {
-  bool ok_;                       // 说明专用
+  bool ok_;                       // 仅用于说明
 public:
   explicit sentry(basic_istream& is, bool noskipws = false);
   ~sentry();
@@ -86,23 +57,39 @@ public:
 };
 ```
 
-¶1：`sentry`（[[g:sentry]]）负责异常安全的前缀和后缀操作。构造函数（¶2）按顺序：
+¶2 构造函数按顺序做三件事：
 
-1. 若 `is.good()` 为假，调用 `is.setstate(failbit)`，结束。——**流已经处于任何错误状态（包括仅仅是 `eofbit`）时，下一次输入操作会追加 `failbit`。**
-2. 否则准备输入。首先，若 `is.tie()` 非空，调用 `is.tie()->flush()`，使输出序列与关联的外部 C 流同步。例外：被绑定流的 put 区为空时可以省略；实现还可以把这次刷新**推迟**到 `is.rdbuf()->underflow()` 被调用时，若直到 sentry 析构都没有发生这样的调用，刷新可以完全省略（脚注：这只可能在库自己的函数里做到）。
-3. 若 `noskipws` 为假且 `is.flags() & skipws` 非零，逐个提取并丢弃空白字符。若 `sbumpc()` 或 `sgetc()` 返回 `eof()`，调用 `setstate(failbit | eofbit)`。
+1. 如果 `is.good()` 为假，调用 `is.setstate(failbit)`，准备结束。也就是说，流已经处于任何错误状态时，哪怕只是置了 `eofbit`，下一次输入都会追加 `failbit`。
+2. 否则，如果 `is.tie()` 非空，调用 `is.tie()->flush()`。`cin` 默认绑定 `cout`，所以读输入前，屏幕上的提示一定已经输出（[[iostream.objects]]）。被绑定流的 put 区为空时可以省掉这次刷新；实现还可以把它推迟到真正需要从设备读数据，也就是调用 `underflow()` 的时候。
+3. 如果参数 `noskipws` 为假，且流的 `skipws` 标志开着，就逐个提取并丢弃空白字符。读到流尾时调用 `setstate(failbit | eofbit)`。
 
-¶3–¶4：判断空白使用 `is` 当前的 locale，如同 `use_facet<ctype<charT>>(is.getloc()).is(ctype.space, c)`。¶5：所有准备完成后，若 `is.good()` 为真则 `ok_` 为真，否则为假；准备期间可能调用 `setstate(failbit)`（可能抛异常）。脚注：构造函数和析构函数还可以做额外的、依赖实现的操作（例如对流加锁）。
+¶3–¶4 判断一个字符是否是空白，用的是流当前 locale 中的 `ctype` facet，如同 `use_facet<ctype<charT>>(is.getloc()).is(ctype.space, c)`。
 
-¶6：析构函数无效果。¶7：`operator bool` 返回 `ok_`。
+¶5 准备完成后，`is.good()` 为真则 `ok_` 为真，否则为假。¶6 析构函数没有效果，¶7 `operator bool` 返回 `ok_`。
 
-第 3 步解释了一个反直觉的现象：**输入只剩空白时，`>>` 会同时置 `eofbit` 和 `failbit`**——空白在 sentry 里被吃掉，然后撞到流尾，根本没机会开始解析。
+第 3 步解释了一个常见现象：输入只剩空白时，`>>` 会同时置 `eofbit` 和 `failbit`。空白在 sentry 里被吃掉，然后撞到流尾，解析根本没有开始。
+
+## 格式化输入：`>>` [istream.formatted.reqmts]
+
+`istream` 的函数分成两组（[istream.general] ¶3）：[[g:formatted-input-function|格式化输入函数]]，又叫**提取器**（extractor），以及[[g:unformatted-input-function|非格式化输入函数]]。两组都通过 `rdbuf()->sbumpc()` 或 `rdbuf()->sgetc()` 从流缓冲区取字符（[[stream.buffers]]）。
+
+¶1 每个格式化输入函数按同样的步骤执行：
+
+1. 创建一个 `iostate` 类型的**局部错误状态**，初始为 `goodbit`。
+2. 以 `noskipws = false` 构造 sentry。sentry 的构造抛出异常或转换为 `false` 时，不尝试读取，直接返回。
+3. 尽力读取所需的输入。`sbumpc()` 或 `sgetc()` 返回 `eof()` 时，在局部错误状态里置 `eofbit`，停止读取。
+4. 读取中抛出异常时，在局部错误状态里置 `badbit`，把它写进流；如果 `exceptions()` 包含 `badbit`，重新抛出这个异常，否则吞掉它。
+5. 读取结束后调用 `setstate`，把局部错误状态写进流。这一步可能按 `exceptions()` 抛出 `ios_base::failure`。
+
+错误位先攒起来，最后一次写回，所以至多因为状态位抛一次异常，而且抛出时流的状态已经完整，例如 `eofbit` 和 `failbit` 同时可见。
+
+`std::getline(istream&, string&)` 和 `operator>>(istream&, string&)` 不在这一节，而在 [[string.io]]，它们分别按这里的规则表现为非格式化和格式化输入函数。
 
 ### 用 sentry 写自定义提取器
 
-自定义 `operator>>` 如果直接读 streambuf，就应当自己构造 sentry，以获得与标准提取器一致的行为（跳过空白、`tie` 刷新、状态检查），并在最后一次性 `setstate`：
+直接读流缓冲区的自定义 `operator>>` 应当自己构造 sentry，这样就有了与标准提取器一致的行为：跳过空白、刷新绑定的流、检查状态。错误位同样最后一次写回：
 
-```cpp title="hex-extractor.cpp" ok
+```cpp title="hex-extractor.cpp" run ok
 #include <cctype>
 #include <iostream>
 #include <sstream>
@@ -110,22 +97,25 @@ public:
 struct Hex { unsigned value = 0; };
 
 std::istream& operator>>(std::istream& in, Hex& h) {
-  std::istream::sentry s(in);                   // 跳过前导空白、刷新 tie、检查状态
+  std::istream::sentry s(in);            // 跳过空白、刷新 tie、检查状态
   if (!s) return in;
   std::ios_base::iostate err = std::ios_base::goodbit;   // 局部错误状态
   auto* sb = in.rdbuf();
-  if (sb->sbumpc() != '0' || sb->sbumpc() != 'x') err |= std::ios_base::failbit;
-  unsigned v = 0; int digits = 0;
+  if (sb->sbumpc() != '0' || sb->sbumpc() != 'x')
+    err |= std::ios_base::failbit;
+  unsigned v = 0;
+  int digits = 0;
   for (;;) {
     auto c = sb->sgetc();
     if (c == std::char_traits<char>::eof()) { err |= std::ios_base::eofbit; break; }
     if (!std::isxdigit(c)) break;
     v = v * 16 + (std::isdigit(c) ? c - '0' : std::tolower(c) - 'a' + 10);
-    ++digits; sb->sbumpc();
+    ++digits;
+    sb->sbumpc();
   }
   if (digits == 0) err |= std::ios_base::failbit;
   else h.value = v;
-  in.setstate(err);                             // 一次性写回（可能抛异常）
+  in.setstate(err);                      // 一次写回，可能抛异常
   return in;
 }
 
@@ -139,77 +129,68 @@ int main() {
 }
 ```
 
-更简单的做法通常是**基于已有提取器组合**（先 `in >> str` 再解析），那样 sentry 由内层提取器负责。
+更简单的做法通常是在已有的提取器上组合，例如先 `in >> str` 再解析 `str`，sentry 就由内层的提取器负责。
 
-## 格式化输入的公共要求（[istream.formatted.reqmts]）
+## 读数值 [istream.formatted.arithmetic]
 
-¶1 是理解所有 `>>` 的钥匙，按步骤拆开：
+```cpp title="overflow-clamp.cpp" run ok
+#include <iostream>
+#include <sstream>
 
-1. 构造一个 `iostate` 类型的**局部错误状态**，初始为 `goodbit`。
-2. 以 `noskipws = false` 构造 sentry。若 sentry 构造抛异常或转换为 `false`，函数不尝试获取任何输入，直接返回。
-3. 否则尽力获取输入。若 `sbumpc()` 或 `sgetc()` 返回 `eof()`，在局部错误状态中置 `eofbit` 并停止。
-4. 若输入过程中抛出异常：在局部错误状态中置 `badbit`，把 `*this` 的错误状态设为局部错误状态，若 `(exceptions() & badbit) != 0` 则**重新抛出**（否则吞掉）。
-5. 提取完成后调用 `setstate(局部错误状态)`——这可能抛异常。
-6. 无论如何销毁 sentry；没有异常时返回 `*this`。
+int main() {
+  std::istringstream in("99999999999 abc");
+  int x = 0, y = 5;
+  in >> x;
+  std::cout << x << ' ' << in.fail() << '\n';   // 2147483647 1
+  in.clear();
+  in >> y;
+  std::cout << y << ' ' << in.fail() << '\n';   // 0 1
+}
+```
 
-"局部错误状态"的意义在于：状态位被**攒起来最后一次写入**，所以至多因状态位抛一次异常，而且抛异常时流的状态已经完整（例如 `eofbit` 与 `failbit` 同时可见）。
-
-## 算术提取器（[istream.formatted.arithmetic]）
-
-¶1：`unsigned short`、`unsigned int`、`long`、`unsigned long`、`long long`、`unsigned long long`、`float`、`double`、`long double`、`bool`、`void*` 的提取器作为格式化输入函数工作；sentry 构造之后，转换如同：
+¶1 `long`、`unsigned`、浮点、`bool`、`void*` 等类型的提取器在 sentry 之后，如同执行：
 
 ```cpp
 using numget = num_get<charT, istreambuf_iterator<charT, traits>>;
 use_facet<numget>(loc).get(*this, 0, *this, state, val);
 ```
 
-其中 `loc` 是流的 locale，`state` 是局部错误状态。注：第一个实参构造了一个 `istreambuf_iterator`，**绕过 istream、直接读 streambuf**；`locale` 借助这个迭代器类型作为与 istream 的接口，不必直接依赖 istream。
+其中 `loc` 是流的 locale，`state` 是局部错误状态。第一个实参构造出的 `istreambuf_iterator` 绕过 `istream`，直接读流缓冲区。
 
-所以数值如何解析、何时置 `failbit`、失败时 `val` 得到什么值，都由 `num_get` 决定（[[facet.num.get.virtuals]]）：
+所以数值怎样解析、何时失败、失败时得到什么，都由 `num_get` 决定（[[facet.num.get.virtuals]]）：
 
-- 格式不对（一个可用字符都没有）：`val` 置 0，`failbit`；
-- 超出目标类型范围：`val` 置为该类型的最大值或最小值，`failbit`；
-- 无符号类型读到负号：`num_get` 按 `strtoull` 的规则解析，负号表示对结果取反。本机 libc++ 上 `"-1"` 读进 `unsigned`、`unsigned short`、`unsigned long long` 分别得到各自的最大值，**不**置 `failbit`；
-- `bool`：没有 `boolalpha` 时只接受 `0` 和 `1`，有 `boolalpha` 时接受 `numpunct` 的 `truename()`/`falsename()`。
+- 一个可用的字符都没有，例如读到 `abc`：`val` 置 0，置 `failbit`。
+- 超出目标类型的范围：`val` 置为该类型的最大值或最小值，置 `failbit`。
+- 无符号类型读到负号：`num_get` 按 `strtoull` 的规则解析，负号表示对结果取反。本机 libc++ 把 `"-1"` 读进 `unsigned` 得到 `4294967295`，不置 `failbit`。
+- `bool`：没有 `boolalpha` 时只接受 `0` 和 `1`；有 `boolalpha` 时接受 locale 中 `numpunct` 的 `truename()` 和 `falsename()`，默认是 `true`、`false`。
 
-`short` 与 `int` 没有对应的 `num_get::get` 重载，于是 ¶2–¶3 规定先读成 `long`，再检查范围：
+¶2–¶3 `num_get` 没有接受 `short&` 和 `int&` 的重载，所以这两个提取器先读成 `long`，再检查范围：越界时置 `failbit`，结果取该类型的最小值或最大值。
 
-```cpp
-long lval;
-use_facet<numget>(loc).get(*this, 0, *this, state, lval);
-if (lval < numeric_limits<int>::min()) {
-  state |= ios_base::failbit;  val = numeric_limits<int>::min();
-} else if (numeric_limits<int>::max() < lval) {
-  state |= ios_base::failbit;  val = numeric_limits<int>::max();
-} else
-  val = static_cast<int>(lval);
-```
+¶4–¶6 {{c++23}} 扩展浮点类型（如 `std::float16_t`，[[basic.fundamental]]）的提取器先读成一个不比它窄的标准浮点类型，再检查范围、转换。扩展类型比 `long double` 还宽时，这个提取器是有条件支持的。注 2 提醒，转换中可能发生两次舍入，需要最高精度时用 `from_chars`（[[charconv]]）。
 
-扩展浮点类型（¶4–¶6）{{c++23}}：若其转换等级大于 `long double`，调用该运算符是**有条件支持**的，语义由实现定义；否则选一个等级不低于它的标准浮点类型 `FP`（`float`、`double` 或 `long double` 中最小的那个），读成 `FP`，再按与上面相同的方式检查范围、转换。注 2：若扩展类型的等级不等于任何标准类型，可能发生两次舍入而不精确；需要最高精度时用 `from_chars`（[[charconv]]）。
+!!! pitfall "`std::uint8_t` 读入的是字符"
+    ```cpp title="uint8-read.cpp" run ok
+    #include <cstdint>
+    #include <iostream>
+    #include <sstream>
 
-```cpp title="overflow-clamp.cpp" ok
-#include <iostream>
-#include <sstream>
+    int main() {
+      std::istringstream in("7");
+      std::uint8_t c;
+      in >> c;                        // 读入的是字符 '7'
+      std::cout << int(c) << '\n';    // 55，而不是 7
+    }
+    ```
 
-int main() {
-  std::istringstream in("99999999999");
-  int x = 0;
-  in >> x;
-  std::cout << x << ' ' << in.fail() << '\n';   // 2147483647 1
-}
-```
+    `std::uint8_t` 通常是 `unsigned char` 的别名，`>>` 选中的是读一个字符的重载。当前草案把 `signed char`、`unsigned char` 的提取器移到了附录 D（[[depr.istream.extractors]]），这是 C++23 之后的新措辞 {{deprecated}}，目的是让这类代码将来得到诊断。本机 libc++ 截至写作时还没有对它发出弃用警告。要读数字，先读进 `int` 再转换。
 
-## 其他提取器（[istream.extractors]）
+## 其他提取器 [istream.extractors]
 
 ### 操纵符（¶1–¶6）
 
-三个接受函数指针的 `operator>>` **不是**格式化输入函数：不构造 sentry，只调用 `pf(*this)`。所以 `in >> std::hex` 在流处于失败状态时照样生效。脚注举例：`ws(basic_istream&)` 和 `dec(ios_base&)`。
+¶1–¶6 接受函数指针的三个 `operator>>` 不是格式化输入函数：不构造 sentry，只调用 `pf(*this)`。所以流处于失败状态时，`in >> std::hex` 照样生效。脚注举的例子是 `ws` 和 `dec`。
 
-### 字符数组：`operator>>(istream&, charT(&)[N])`（¶7–¶11）
-
-作为格式化输入函数：sentry 之后提取字符存入 `s`。若 `width() > 0`，最多存 `n = min(size_t(width()), N)` 个（包括结尾的空字符），否则 `n = N`。提取持续到以下任一发生：存了 `n - 1` 个字符；输入序列到达文件尾；下一个字符是空白（按流的 locale）。然后存一个 `charT()`，调用 `width(0)`；一个字符都没提取到则置 `failbit`。
-
-C++20 之前这个重载接受的是 `charT*`，无法知道缓冲区大小，只能靠 `setw` 防止溢出——忘了 `setw` 就是缓冲区溢出。现在参数是数组引用，`N` 从类型推导，溢出在类型层面被杜绝；代价是 `char*` 不再能用 `>>` 读（[[diff.cpp17.input.output]]）：
+### 字符数组（¶7–¶11）
 
 ```cpp title="char-array.cpp" error
 #include <iomanip>
@@ -223,115 +204,102 @@ int main() {
 }
 ```
 
-### 单个字符：`operator>>(istream&, charT&)`（¶12–¶13）
+¶7 这个提取器的参数是数组引用 `charT (&s)[N]`。`width()` 大于 0 时最多存 `n = min(width(), N)` 个字符（包括结尾的空字符），否则 `n = N`。¶8 提取持续到存了 `n - 1` 个字符、到达流尾，或者下一个字符是空白。¶9 然后存一个空字符，调用 `width(0)`。¶10 一个字符都没提取到时置 `failbit`。
 
-作为格式化输入函数（所以**会跳过空白**）：若有可用字符就提取并存入 `c`，否则置 `failbit`。想读包括空白在内的下一个字符，用 `get(c)` 或 `>> std::noskipws`。
+C++20 之前参数是 `charT*`，函数无法知道缓冲区多大，只能靠 `setw` 防止溢出，忘了写就是缓冲区溢出。现在 `N` 从类型推导出来，溢出不再可能；代价是 `char*` 不能再用 `>>` 读（[[diff.cpp17.input.output]]）。
 
-### 读入 streambuf：`operator>>(basic_streambuf*)`（¶14–¶16）
+### 单个字符（¶12–¶13）
 
-表现为**非格式化**输入函数。`sb` 为空则 `setstate(failbit)`。否则从 `*this` 提取字符插入 `sb` 的输出序列，直到：输入到达文件尾；插入失败（该字符不被提取）；发生异常（异常被捕获）。一个字符都没插入则置 `failbit`。
+¶12 `in >> c` 是格式化输入函数，所以会跳过空白。有可用字符就提取并存入 `c`，否则置 `failbit`。想读包括空白在内的下一个字符，用 `in.get(c)`，或者先 `in >> std::noskipws`。
 
-### 已弃用：`signed char`/`unsigned char` 的提取 {{deprecated}}
+### 读进另一个流缓冲区（¶14–¶16）
 
-当前草案把 `operator>>(basic_istream<char, traits>&, unsigned char&)`、`signed char&` 以及对应的数组版本移到了附录 D（[[depr.istream.extractors]]），这是 C++23 之后的新措辞。它们的行为与 `char` 版本相同——**读一个字符，而不是一个数**。这正是 `std::uint8_t`（通常是 `unsigned char` 的别名）读数字时的著名陷阱：
+¶14 `in >> sb`（`sb` 是 `basic_streambuf*`）表现为非格式化输入函数。`sb` 为空时置 `failbit`。否则把字符从 `*this` 搬到 `sb` 的输出序列，直到流尾、插入失败（这个字符不被提取）或者发生异常（异常被捕获）。¶15 一个字符都没插入时置 `failbit`。
 
-```cpp title="uint8-read.cpp" ok
-#include <cstdint>
-#include <iostream>
-#include <sstream>
+## 非格式化输入 [istream.unformatted]
 
-int main() {
-  std::istringstream in("7");
-  std::uint8_t c;
-  in >> c;                        // 读入的是字符 '7'
-  std::cout << int(c) << '\n';    // 55，而不是 7
-}
-```
+### 公共步骤（¶1）
 
-弃用的目的就是让这类代码将来得到诊断。本机 libc++ 截至写作时还没有对这些重载发出弃用警告。
+¶1 非格式化输入函数与格式化输入函数的步骤基本相同，区别是：
 
-## 非格式化输入（[istream.unformatted]）
+- sentry 以 `noskipws = true` 构造，所以不跳过空白，但仍然检查流状态、刷新绑定的流。
+- sentry 失败时，提取计数置 0；接受字符数组的函数还要在数组第一个位置存一个空字符。
+- 没有异常时，把提取的字符数存进一个成员，就是 `gcount()` 的返回值。
 
-### 公共要求（¶1）
+¶2–¶3 `gcount()` 返回最后一次非格式化输入成员函数提取的字符数，无法表示时返回 `numeric_limits<streamsize>::max()`。格式化输入（`>>`）不更新它。
 
-每个非格式化输入函数：构造局部错误状态（初始 `goodbit`）；以 **`noskipws = true`** 构造 sentry——所以**不跳过空白**，但仍然检查 `good()` 并刷新 `tie`。若 sentry 失败，不获取任何输入；无论哪种情况，**提取计数都被置 0**，并且接受非零大小字符数组的函数还要在数组第一个位置存一个空字符。
+### `get`（¶4–¶17）
 
-其余与格式化输入相同：`eof()` → `eofbit` 并停止；异常 → `badbit`，按掩码决定是否重新抛出；没有异常时把提取的字符数存进一个成员对象（即 `gcount()` 的返回值）；最后 `setstate` 一次。
-
-### `gcount`（¶2–¶3）
-
-返回**最后一次**非格式化输入成员函数提取的字符数；它本身不是非格式化输入函数。无法表示时返回 `numeric_limits<streamsize>::max()`。注意：格式化输入（`>>`）**不更新** `gcount`；`peek`、`putback`、`unget`、`sync`、`tellg`、`seekg` 也不计数（后几个明确规定"不影响 `gcount()`"，`putback`/`unget` 的注说下一次 `gcount()` 返回 0）。
-
-### `get` 的各个重载（¶4–¶17）
-
-| 调用 | 行为 | 失败条件 |
+| 调用 | 行为 | 失败 |
 |---|---|---|
-| `int_type get()` | ¶4–¶5 提取一个字符并返回；无字符可读返回 `eof()` | 无字符 → `failbit` |
-| `get(char_type& c)` | ¶6–¶7 提取一个字符存入 `c` | 无字符 → `failbit` |
-| `get(s, n, delim)` | ¶8–¶10 提取并存储，直到：`n < 1` 或已存 `n - 1` 个；文件尾；下一个字符等于 `delim`（**不提取**它）。`n > 0` 时总会存结尾空字符 | 一个都没存 → `failbit` |
-| `get(s, n)` | ¶11 `get(s, n, widen('\n'))` | |
-| `get(sb, delim)` | ¶13–¶15 提取并插入 `sb`，直到文件尾、插入失败、下一个字符等于 `delim`（不提取）或发生异常（被捕获但不重新抛出） | 一个都没插入 → `failbit` |
-| `get(sb)` | ¶16 `get(sb, widen('\n'))` | |
+| `get()` | ¶4–¶5 提取一个字符并返回；没有字符时返回 `eof()` | 没有字符时置 `failbit` |
+| `get(c)` | ¶6 提取一个字符存入 `c` | 同上 |
+| `get(s, n, delim)` | ¶8–¶9 提取并存储，直到存了 `n - 1` 个、到达流尾，或下一个字符是 `delim`（不提取它）；`n > 0` 时总会补一个空字符 | 一个都没存时置 `failbit` |
+| `get(s, n)` | ¶11 即 `get(s, n, widen('\n'))` | |
+| `get(sb, delim)` | ¶13–¶14 把字符插入流缓冲区 `sb`，停止条件同上，另加插入失败和异常（异常被捕获，不重新抛出） | 一个都没插入时置 `failbit` |
+| `get(sb)` | ¶16 即 `get(sb, widen('\n'))` | |
 
-`get(s, n)` 与 `getline(s, n)` 的关键区别是：`get` **把分隔符留在流里**。连续两次 `get(buf, n)` 读两行，第二次会立刻遇到上次留下的 `'\n'`，一个字符都存不了，于是置 `failbit`。
+`get(s, n)` 与 `getline(s, n)` 的区别在于，`get` 把分隔符留在流里。连续两次 `get(buf, n)` 读两行时，第二次一开始就遇到上次留下的 `'\n'`，一个字符也存不了，于是置 `failbit`。
 
 ### `getline`（¶18–¶24）
 
-`getline(s, n, delim)` 提取字符存入 `s`，直到以下之一发生（**按顺序检查**，¶19）：
-
-1. 输入序列到达文件尾；
-2. 下一个字符等于 `delim`——它被**提取但不存储**（脚注：因为被提取了，所以计入 `gcount()`）；
-3. `n < 1` 或已存了 `n - 1` 个字符——此时调用 `setstate(failbit)`。
-
-脚注解释顺序的意义：先检查分隔符、再检查长度，于是**恰好填满缓冲区的一行**不会置 `failbit`；这与历史上 AT&T 实现的行为不同。¶20：一个字符都没**提取**才置 `failbit`——脚注强调，所以**空行不会**置 `failbit`（换行符被提取了）。¶21：`n > 0` 时总会在下一个位置存空字符。
-
-```cpp title="getline-array.cpp" ok
+```cpp title="getline-array.cpp" run ok
 #include <iostream>
 #include <sstream>
 
 int main() {
   std::istringstream in("abcd\nabcdefgh\n");
   char buf[5];
-  in.getline(buf, sizeof buf);    // "abcd" 恰好 4 个字符：成功，gcount 含换行
-  std::cout << buf << " gcount=" << in.gcount() << " fail=" << in.fail() << '\n';  // abcd gcount=5 fail=0
+  in.getline(buf, sizeof buf);    // "abcd" 正好 4 个字符
+  std::cout << buf << " gcount=" << in.gcount()
+            << " fail=" << in.fail() << '\n';   // abcd gcount=5 fail=0
   in.getline(buf, sizeof buf);    // 行太长：存 4 个字符后置 failbit
-  std::cout << buf << " gcount=" << in.gcount() << " fail=" << in.fail() << '\n';  // abcd gcount=4 fail=1
+  std::cout << buf << " gcount=" << in.gcount()
+            << " fail=" << in.fail() << '\n';   // abcd gcount=4 fail=1
 }
 ```
 
-标准在 ¶23 给了一个完整的逐行读取例子：用 `while (cin.getline(buffer, size, '\n') || cin.gcount())` 作循环条件——`|| gcount()` 让"太长被截断的行"（`failbit` 但提取了字符）也进入循环体，在体内用 `cin.clear(cin.rdstate() & ~ios_base::failbit)` 清掉 `failbit` 继续读剩余部分；`eof()` 为真表示最后一行没有换行符。
+¶18 `getline(s, n, delim)` 提取字符存入 `s`，按下面的顺序检查停止条件（¶19）：
+
+1. 到达流尾；
+2. 下一个字符是 `delim`：提取它但不存储，所以它计入 `gcount()`；
+3. 已经存了 `n - 1` 个字符：调用 `setstate(failbit)`。
+
+先检查分隔符、后检查长度，所以正好填满缓冲区的一行不会置 `failbit`。脚注说明这与历史上 AT&T 实现的行为不同。¶20 一个字符都没提取时才置 `failbit`，所以空行不会置 `failbit`，因为换行符被提取了。¶21 `n > 0` 时总会补一个空字符。
+
+¶23 标准的例子用 `while (cin.getline(buf, size) || cin.gcount())` 逐行读取。`|| cin.gcount()` 让被截断的长行（置了 `failbit`，但提取了字符）也进入循环体，在体内用 `cin.clear(cin.rdstate() & ~ios_base::failbit)` 清掉 `failbit`，继续读这一行的剩余部分。`eof()` 为真表示最后一行没有换行符。
 
 ### `ignore`（¶25–¶28）
 
-`ignore(n = 1, delim = eof())`：提取并丢弃字符，直到：`n != numeric_limits<streamsize>::max()` 且已提取 `n` 个；文件尾（调用 `setstate(eofbit)`）；下一个字符 `c` 满足 `eq_int_type(to_int_type(c), delim)`（**提取**它）。注：`delim` 是 `eof()` 时最后一个条件永远不会发生。`n` 等于 `numeric_limits<streamsize>::max()` 表示**不限个数**。
+¶25 `ignore(n = 1, delim = eof())` 提取并丢弃字符，直到提取了 `n` 个、到达流尾（置 `eofbit`），或者遇到 `delim`（提取它）。`n` 等于 `numeric_limits<streamsize>::max()` 时不限个数。`delim` 是 `eof()` 时，只有前两个条件会生效。
 
-`ignore(n, char_type delim)` {{c++26}}：¶27 *Constraints*：`char_type` 是 `char`；¶28 等价于 `ignore(n, traits::to_int_type(delim))`。
+¶27–¶28 {{c++26}} 新增 `ignore(n, char_type delim)`，只对 `char` 流提供，等价于 `ignore(n, traits::to_int_type(delim))`。
 
-为什么要加这个重载？旧的签名第二个参数是 `int_type`，传入 `char` 时发生整型提升：在 `char` 有符号的平台上，`'\xA1'` 提升为负数 −95，而流里的字符经 `to_int_type` 得到的是 161，永远不相等，于是 `ignore` 一路读到文件尾。[[diff.cpp23.io]] 记录了这一变化：
+旧签名的第二个参数是 `int_type`。在 `char` 有符号的平台上，`'\xA1'` 转成 `int` 是 −95，而流里的字符经 `to_int_type` 得到 161，两者永远不相等，`ignore` 会一路读到流尾。新重载修正了这个问题（[[diff.cpp23.io]]）：
 
-```cpp title="ignore-char.cpp" ok
+```cpp title="ignore-char.cpp" run ok
 #include <iostream>
 #include <sstream>
 #include <string>
 
 int main() {
   std::istringstream in("\xF0\x9F\xA4\xA1 Clown Face");
-  in.ignore(100, '\xA1');            // C++26：char 重载，正确停在 '\xA1' 之后
+  in.ignore(100, '\xA1');            // 停在 '\xA1' 之后
   std::string rest;
   std::getline(in, rest);
   std::cout << '[' << rest << "]\n"; // [ Clown Face]
 }
 ```
 
-附录 C 同时指出副作用：第二个实参既不是 `int` 也不是 `char` 的调用（如 `in.ignore(100, -1L)`）现在有歧义，变成非良构。本机 libc++ 已提供这个重载，并把它作为缺陷修复应用到所有语言模式。
+附录 C 同时指出，第二个实参既不是 `int` 也不是 `char` 的调用，例如 `in.ignore(100, -1L)`，现在有歧义，变成非良构。本机 libc++ 已经提供这个重载，并在所有语言模式下都启用。
 
 ### `peek`、`read`、`readsome`（¶29–¶34）
 
-- `peek()`：¶29–¶30 构造 sentry 后读但不提取当前字符；`good()` 为假时返回 `eof()`，否则返回 `rdbuf()->sgetc()`。
-- `read(s, n)`：¶31–¶32 构造 sentry 后，若 `!good()` 调用 `setstate(failbit)` 并返回；否则提取字符存入 `s`，直到存满 `n` 个，或到达文件尾——此时调用 `setstate(failbit | eofbit)`。**短读是失败**：读不满 `n` 个就置 `failbit`，实际读到的个数用 `gcount()` 取得。
-- `readsome(s, n)`：¶33–¶34 只读**已经可用**的字符：若 `rdbuf()->in_avail() == -1`，置 `eofbit`、不提取；为 0 则不提取；大于 0 则提取 `min(in_avail(), n)` 个。返回提取的个数。它从不阻塞等待设备，但正因如此，对于默认 `showmanyc()` 返回 0 的 streambuf，它在 get 区为空时总是返回 0。
+¶29–¶30 `peek()` 读取但不提取当前字符。流不处于 good 状态时返回 `eof()`，否则返回 `rdbuf()->sgetc()`。
 
-```cpp title="read-short.cpp" ok
+¶31 `read(s, n)` 提取字符存入 `s`，直到存满 `n` 个或到达流尾。到达流尾时调用 `setstate(failbit | eofbit)`，也就是说读不满 `n` 个就算失败，实际读到的个数用 `gcount()` 取得。
+
+```cpp title="read-short.cpp" run ok
 #include <iostream>
 #include <sstream>
 
@@ -339,24 +307,28 @@ int main() {
   std::istringstream r("xyz");
   char out[8];
   r.read(out, 8);       // 只有 3 个字符
-  std::cout << "gcount=" << r.gcount() << " eof=" << r.eof() << " fail=" << r.fail() << '\n';
-  // gcount=3 eof=1 fail=1
+  std::cout << "gcount=" << r.gcount() << " eof=" << r.eof()
+            << " fail=" << r.fail() << '\n';   // gcount=3 eof=1 fail=1
 }
 ```
 
+¶33–¶34 `readsome(s, n)` 只读已经在缓冲区里的字符，从不等待设备。`rdbuf()->in_avail()` 为 −1 时置 `eofbit`，不提取；为 0 时不提取；大于 0 时提取 `min(in_avail(), n)` 个。返回提取的个数。对 `showmanyc()` 保持默认实现的流缓冲区，get 区为空时它总是返回 0（[[stream.buffers]]）。
+
 ### `putback`、`unget`、`sync`（¶35–¶39）
 
-- `putback(c)`、`unget()`：¶35、¶37 表现为非格式化输入函数，**但先清除 `eofbit`**。sentry 之后若 `!good()` 则 `setstate(failbit)` 返回；否则调用 `rdbuf()->sputbackc(c)` / `sungetc()`；`rdbuf()` 为空或它们返回 `eof()` 时调用 `setstate(badbit)`。注意失败置的是 **`badbit`**——回退失败被视为流完整性的问题。注：它们不提取字符，下一次 `gcount()` 返回 0。
-- `sync()`：¶39 不计数；sentry 之后，`rdbuf()` 为空返回 −1；否则调用 `rdbuf()->pubsync()`，返回 −1 时置 `badbit` 并返回 −1，否则返回 0。对输入流，`sync` 的含义由 streambuf 决定：`filebuf` 的 get 区 `sync` 效果由实现定义（[[file.streams]]）。
+¶35、¶37 `putback(c)` 和 `unget()` 先清掉 `eofbit`，再构造 sentry；流不处于 good 状态时置 `failbit` 并返回。否则调用 `rdbuf()->sputbackc(c)` 或 `sungetc()`，`rdbuf()` 为空或者它们返回 `eof()` 时置 `badbit`。注意置的是 `badbit` 而不是 `failbit`。它们不提取字符，所以之后的 `gcount()` 是 0。
+
+¶39 `sync()` 不影响 `gcount()`。`rdbuf()` 为空时返回 −1；否则调用 `rdbuf()->pubsync()`，它返回 −1 时置 `badbit` 并返回 −1，否则返回 0。对输入流，`sync` 的具体效果由流缓冲区决定，例如 `basic_filebuf` 的效果由实现定义（[[file.streams]]）。
 
 ### `tellg`、`seekg`（¶40–¶45）
 
-- `tellg()`：¶40–¶41 表现为非格式化输入函数（不计数）。构造 sentry 之后，若 `fail()` 为真，返回 `pos_type(-1)`；否则返回 `rdbuf()->pubseekoff(0, cur, in)`。
-- `seekg(pos)` / `seekg(off, dir)`：¶42–¶45 **先清除 `eofbit`**，不计数；构造 sentry 之后若 `fail()` 不为真，调用 `rdbuf()->pubseekpos(pos, in)` / `pubseekoff(off, dir, in)`；失败时 `setstate(failbit)`。
+¶40–¶41 `tellg()` 不影响 `gcount()`。构造 sentry 之后，`fail()` 为真时返回 `pos_type(-1)`，否则返回 `rdbuf()->pubseekoff(0, cur, in)`。
 
-`tellg` 与 `seekg` 的不对称是一个真实的坑：`seekg` 先清 `eofbit` 再构造 sentry，而 `tellg` 不清。所以**在 `eof()` 状态下调用 `tellg()`，sentry 会因 `good()` 为假而追加 `failbit`，返回 −1**：
+¶42–¶45 `seekg(pos)` 和 `seekg(off, dir)` 先清掉 `eofbit`，构造 sentry 之后，如果 `fail()` 为假，调用 `rdbuf()->pubseekpos(pos, in)` 或 `pubseekoff(off, dir, in)`，失败时置 `failbit`。
 
-```cpp title="tellg-at-eof.cpp" ok
+`seekg` 先清 `eofbit`，`tellg` 不清，这个不对称很容易踩到。在 `eofbit` 已置位时调用 `tellg()`，sentry 看到流不 good，追加 `failbit`，于是返回 −1：
+
+```cpp title="tellg-at-eof.cpp" run ok
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -364,33 +336,30 @@ int main() {
 int main() {
   std::istringstream in("hello");
   std::string s;
-  in >> s;                                    // 成功，但撞到流尾：eofbit
-  std::cout << in.fail() << ' ';              // 0
-  std::cout << in.tellg() << ' ';             // -1：sentry 见到 !good()，置 failbit
-  std::cout << in.fail() << '\n';             // 1
+  in >> s;                          // 成功，但撞到流尾：eofbit
+  std::cout << in.fail() << ' ';    // 0
+  std::cout << in.tellg() << ' ';   // -1：sentry 追加了 failbit
+  std::cout << in.fail() << '\n';   // 1
   in.clear();
-  in.seekg(0);                                // seekg 自己会先清 eofbit
+  in.seekg(0);
   in >> s;
-  std::cout << s << '\n';                     // hello
+  std::cout << s << '\n';           // hello
 }
 ```
 
-## `ws` 操纵符（[istream.manip]）
+## `ws`：跳过空白 [istream.manip]
 
-¶1：`ws` 的每个实例化都是指定可寻址函数。¶2：表现为非格式化输入函数（不计数），构造 sentry 后只要下一个字符是空白就提取（判断标准同 sentry）。**因为没有更多字符而停止时，置 `eofbit` 但不置 `failbit`**——与 `>>` 跳空白撞到流尾时置 `failbit | eofbit` 形成对比。
-
-`ws` 最常见的用途是在 `>>` 之后、`getline` 之前吃掉残留的换行：
-
-```cpp title="getline-after-extract.cpp" ok
+```cpp title="getline-after-extract.cpp" run ok
 #include <iostream>
 #include <sstream>
 #include <string>
 
 int main() {
   std::istringstream in("42\nAlice Smith\n");
-  int age; std::string name;
+  int age;
+  std::string name;
   in >> age;
-  std::getline(in, name);              // 读到的是 42 后面剩下的空行
+  std::getline(in, name);              // 读到 42 后面剩下的空行
   std::cout << '[' << name << "]\n";   // []
 
   std::istringstream in2("42\nAlice Smith\n");
@@ -400,61 +369,15 @@ int main() {
 }
 ```
 
-## 右值流提取（[istream.rvalue]）
+`>>` 读完 `42` 后停在换行符前面，紧接着的 `getline` 读到的是这个换行符之前的空串。
 
-```cpp
-template<class Istream, class T>
-  Istream&& operator>>(Istream&& is, T&& x);
-```
+¶2 `ws` 表现为非格式化输入函数，但不影响 `gcount()`。构造 sentry 之后，只要下一个字符是空白就提取它，判断标准与 sentry 相同。因为没有更多字符而停止时，它只置 `eofbit`，不置 `failbit`。对比 `>>`：它跳空白时撞到流尾会同时置两个位。¶1 `ws` 是指定可寻址函数，程序可以取它的地址。
 
-¶1 *Constraints*：`is >> std::forward<T>(x)` 作为不求值操作数良构，且 `Istream` 公开且无歧义地派生自 `ios_base`。¶2：等价于 `is >> std::forward<T>(x); return std::move(is);`。
+## 读失败之后
 
-它让临时流对象可以直接使用：`std::istringstream("17") >> v;`。返回 `Istream&&`（而不是 `basic_istream&`）是 C++20 的改进，使得 `std::istringstream("1 2") >> a >> b` 链式调用时仍然保持派生类型。
+置了 `failbit` 之后，所有输入操作的 sentry 都会立即失败，流看起来就像卡住了。要从坏输入中恢复，必须先 `clear()`，再丢掉导致失败的字符：
 
-## `basic_iostream`（[iostreamclass]）
-
-```cpp
-template<class charT, class traits = char_traits<charT>>
-class basic_iostream : public basic_istream<charT, traits>,
-                       public basic_ostream<charT, traits> { ... };
-```
-
-- ¶1（[iostreamclass.general]）：继承读写由同一个流缓冲区控制的序列的函数。
-- [iostream.cons] ¶1–¶2：`basic_iostream(sb)` 以 `basic_istream(sb)` 和 `basic_ostream(sb)` 初始化两个基类，后条件 `rdbuf() == sb`、`gcount() == 0`。由于 `basic_ios` 是虚基类，它由 `basic_iostream`（作为最终派生类时）初始化一次。¶3：移动构造以 `std::move(rhs)` 构造 `basic_istream` 基类——`basic_ostream` 基类没有额外状态需要移动。
-- [iostream.dest] ¶1：析构函数不对 `rdbuf()` 做任何操作。
-- [iostream.assign]：移动赋值等价于 `swap(rhs)`，`swap` 调用 `basic_istream::swap(rhs)`。
-
-## 陷阱汇总
-
-### `while (!in.eof())`
-
-```cpp title="eof-loop.cpp" ok
-#include <iostream>
-#include <sstream>
-
-int main() {
-  std::istringstream a("1 2 3\n");
-  int x, sum = 0, n = 0;
-  while (!a.eof()) {           // 错误：eof 只有在"撞到"流尾之后才置位
-    a >> x;
-    sum += x; ++n;
-  }
-  std::cout << "wrong: n=" << n << " sum=" << sum << '\n';   // n=4 sum=9
-
-  std::istringstream b("1 2 3\n");
-  sum = n = 0;
-  while (b >> x) { sum += x; ++n; }   // 正确：以提取本身的成败为条件
-  std::cout << "right: n=" << n << " sum=" << sum << '\n';   // n=3 sum=6
-}
-```
-
-读完 `3` 时后面还有 `'\n'`，`num_get` 遇到它就停止，没有撞到流尾，`eof()` 仍为假。第四次 `>>` 在 sentry 里跳过 `'\n'` 后撞到流尾，置 `failbit | eofbit`，`x` 保持 3（sentry 失败，根本没有转换），于是多加了一次 3。
-
-### 读失败后流"卡死"
-
-一旦置了 `failbit`，之后所有输入操作的 sentry 都会立刻失败。从坏输入中恢复必须先 `clear()`，再丢弃导致失败的字符：
-
-```cpp title="recover.cpp" ok
+```cpp title="recover.cpp" run ok
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -464,48 +387,74 @@ int main() {
   int x, sum = 0;
   while (true) {
     if (in >> x) { sum += x; continue; }
-    if (in.eof()) break;                        // 真正读完了
-    in.clear();                                 // 清掉 failbit
-    in.ignore(std::numeric_limits<std::streamsize>::max(), ' ');   // 丢弃坏词
+    if (in.eof()) break;                // 真正读完了
+    in.clear();                         // 清掉 failbit
+    in.ignore(std::numeric_limits<std::streamsize>::max(), ' ');  // 丢掉坏词
   }
   std::cout << sum << '\n';   // 102
 }
 ```
 
-### 一次性复制整个流
+## 右值流提取 [istream.rvalue]
 
-`out << in.rdbuf()` 是把一个流的剩余内容整体复制到另一个流的惯用法（插入器版本见 [[output.streams]]）；注意源为空时它会给**输出流**置 `failbit`。
+```cpp
+template<class Istream, class T>
+  Istream&& operator>>(Istream&& is, T&& x);
+```
+
+¶1 约束：`is >> std::forward<T>(x)` 良构，且 `Istream` 公开、无歧义地派生自 `ios_base`。¶2 效果是执行 `is >> std::forward<T>(x)`，再返回 `std::move(is)`。
+
+成员形式的 `>>`（读 `int` 等）本来就能在临时对象上调用，但读 `std::string`、`char` 的 `>>` 是非成员函数，第一个参数是左值引用，不能绑定到临时对象。这个重载让 `std::istringstream("abc") >> s` 也能编译。它返回 `Istream&&` 而不是 `basic_istream&`，保留了派生类型，所以 C++20 起可以直接在结果上调用 `istringstream` 自己的成员。
+
+## 构造与 `basic_iostream`
+
+[istream.cons] ¶1–¶2 `basic_istream(sb)` 用 `basic_ios::init(sb)` 初始化基类，之后 `gcount() == 0`。¶4 析构函数不对 `rdbuf()` 做任何操作。
+
+¶3 移动构造函数和 [istream.assign] 中的移动赋值、`swap` 都是受保护的，它们移动或交换 `basic_ios` 的状态和 `gcount()`，但不涉及流缓冲区。`basic_istream` 只持有指向流缓冲区的指针；拥有缓冲区的是 `ifstream`、`istringstream` 这类派生类，由它们提供公有的移动操作，并在其中调用 `set_rdbuf`（[[iostreams.base]]）。
+
+[iostreamclass] `basic_iostream` 同时派生自 `basic_istream` 和 `basic_ostream`，两者共享同一个流缓冲区。[iostream.cons] ¶1–¶2 构造函数用同一个 `sb` 初始化两个基类，之后 `rdbuf() == sb`、`gcount() == 0`。`basic_ios` 是虚基类，只有一份。[iostream.dest] 析构函数同样不对 `rdbuf()` 做任何操作。
 
 ## 思考题
 
-<details markdown="1">
-<summary>1. 输入是 <code>"  "</code>（两个空格）。<code>in &gt;&gt; x</code>（<code>int x</code>）之后状态是什么？<code>in.get()</code> 呢？<code>in &gt;&gt; std::ws</code> 呢？</summary>
+!!! question "思考题 1"
+    输入是两个空格。对 `int x`，`in >> x` 之后流是什么状态？换成 `in.get()` 呢？换成 `in >> std::ws` 呢？
 
-- `in >> x`：sentry 跳过两个空格后撞到流尾，置 `failbit | eofbit`（[[istream.sentry#2]]），`x` 不变。
-- `in.get()`：sentry 以 `noskipws = true` 构造，不跳空白，读走第一个空格并返回 `' '`，状态 `good`。
-- `in >> std::ws`：吃掉两个空格后没有更多字符，置 `eofbit` 但**不**置 `failbit`（[[istream.manip#2]]），`operator bool` 仍为真。
+<details markdown="1">
+<summary>答案</summary>
+
+`in >> x`：sentry 跳过两个空格后撞到流尾，置 `failbit | eofbit`（[[istream.sentry#2]]），`x` 不变。
+
+`in.get()`：sentry 以 `noskipws = true` 构造，不跳空白，读走第一个空格并返回 `' '`，流状态仍是 good。
+
+`in >> std::ws`：吃掉两个空格后没有更多字符，只置 `eofbit`，不置 `failbit`（[[istream.manip#2]]），所以 `operator bool` 仍为真。
 </details>
 
-<details markdown="1">
-<summary>2. 为什么 <code>in.read(buf, n)</code> 读到文件末尾的不足 <code>n</code> 个字节时，循环 <code>while (in.read(buf, n)) process(buf, n);</code> 会丢数据？</summary>
+!!! question "思考题 2"
+    文件末尾剩下不足 `n` 个字节时，`while (in.read(buf, n)) process(buf, n);` 会怎样？
 
-`read` 短读时调用 `setstate(failbit | eofbit)`（[[istream.unformatted#31]]），于是循环条件为假，最后那一块虽然已经读进了 `buf`，却没有被处理。正确写法是在循环外再处理一次 `in.gcount()` 个字节：`while (in.read(buf, n) || in.gcount()) process(buf, in.gcount());`——与标准 ¶23 例子中 `getline` 的写法同一思路。
+<details markdown="1">
+<summary>答案</summary>
+
+会丢掉最后一块数据。`read` 读不满 `n` 个时调用 `setstate(failbit | eofbit)`（[[istream.unformatted#31]]），循环条件为假，已经读进 `buf` 的最后几个字节没有被处理。可以改成 `while (in.read(buf, n) || in.gcount()) process(buf, in.gcount());`，思路与标准中 `getline` 的例子相同。
 </details>
 
-<details markdown="1">
-<summary>3. <code>in.putback('x')</code> 失败时置的是哪个位？为什么不是 <code>failbit</code>？</summary>
+!!! question "思考题 3"
+    `in.putback('x')` 失败时置哪个位？之后 `if (in)` 为真还是假？
 
-`badbit`（[[istream.unformatted#35]]）。`failbit` 表示"没能读到期望的字符"，是可恢复的输入问题；回退失败意味着 streambuf 无法维持它的指针约束，流已经不能保证后续读取的正确性，属于完整性问题。这也意味着 `operator bool` 为假（`fail()` 包括 `badbit`），而且 `clear()` 之后再读，读到的位置也可能不是你以为的那里。
+<details markdown="1">
+<summary>答案</summary>
+
+置 `badbit`（[[istream.unformatted#35]]），而不是表示没读到期望输入的 `failbit`。`fail()` 在 `badbit` 或 `failbit` 置位时都为真，所以 `if (in)` 为假。要继续使用这个流，必须先 `clear()`。
 </details>
 
 ## 小结
 
-| 类别 | sentry 的 `noskipws` | 跳过空白 | 计入 `gcount` | 典型失败 |
+| 类别 | sentry 的 `noskipws` | 跳过空白 | 更新 `gcount` | 典型失败 |
 |---|---|---|---|---|
-| 格式化（`>>` 数值、字符、数组） | `false` | 是（`skipws` 时） | 否 | 格式错误 / 溢出 → `failbit`；只剩空白 → `failbit|eofbit` |
-| 操纵符 `>>` | 不构造 | — | — | — |
-| `get`/`getline`/`read`/`ignore` | `true` | 否 | 是 | 一个字符都没得到 → `failbit`；`read` 短读 → `failbit|eofbit` |
-| `putback`/`unget` | `true`，先清 `eofbit` | 否 | 置 0 | 回退失败 → `badbit` |
-| `tellg` | `true`，**不**清 `eofbit` | 否 | 不影响 | 流不 `good()` → 追加 `failbit`，返回 −1 |
-| `seekg` | `true`，先清 `eofbit` | 否 | 不影响 | 定位失败 → `failbit` |
-| `ws` | `true` | 是 | 不影响 | 到尾只置 `eofbit` |
+| 格式化 `>>`（数值、字符、数组） | `false` | 是（`skipws` 时） | 否 | 格式错误、越界：`failbit`；只剩空白：`failbit` 和 `eofbit` |
+| 操纵符 `>>` | 不构造 | 否 | 否 | |
+| `get`、`getline`、`read`、`ignore` | `true` | 否 | 是 | 一个字符都没得到：`failbit`；`read` 读不满：`failbit` 和 `eofbit` |
+| `putback`、`unget` | `true`，先清 `eofbit` | 否 | 置 0 | 回退失败：`badbit` |
+| `tellg` | `true`，不清 `eofbit` | 否 | 不影响 | 流不 good：追加 `failbit`，返回 −1 |
+| `seekg` | `true`，先清 `eofbit` | 否 | 不影响 | 定位失败：`failbit` |
+| `ws` | `true` | 是 | 不影响 | 到流尾只置 `eofbit` |

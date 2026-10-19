@@ -1,200 +1,23 @@
 ---
 title: 流缓冲区 basic_streambuf
-summary: iostream 真正做 I/O 的一层——输入/输出序列各由三个指针描述（eback/gptr/egptr、pbase/pptr/epptr），公有非虚接口（sgetc/sbumpc/sputc/sputn…）在缓冲区够用时只做指针运算、不够用时才调用受保护的虚函数（underflow/uflow/overflow/pbackfail/sync/seekoff…）；逐一讲清每个虚函数的契约（待处理序列、结果字符、备份序列、"消费"字符），以及如何正确地写一个自定义 streambuf
+summary: iostream 中真正搬运字符的一层：输入、输出缓冲区各由三个指针描述，公有接口在缓冲区够用时只做指针运算，不够用时才调用 underflow、overflow 等虚函数；以及如何正确地写一个自定义 streambuf。
 status: done
 covers: *
 related: input.output, iostreams.base, input.streams, output.streams, string.streams, span.streams, file.streams, syncstream, stream.iterators, iostreams.requirements
 tags: 标准库, iostream, streambuf, 缓冲, 虚函数
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-`basic_streambuf` 是 iostream 中唯一真正与"外部世界"打交道的类。`istream`/`ostream` 负责把字符解析成值、把值格式化成字符；至于字符从哪来、到哪去、什么时候真正搬运，全由 streambuf 决定。理解这一层，才能写自己的流（日志重定向、压缩、网络、内存映射），也才能读懂 [[string.streams]]、[[file.streams]]、[[span.streams]]、[[syncstream]] 中那些"覆写的虚函数"条文。
+!!! tldr
+    - `istream`、`ostream` 只负责把字符解析成值、把值格式化成字符；字符从哪来、到哪去，由它们持有的 `basic_streambuf` 决定。
+    - 输入缓冲区（get 区）和输出缓冲区（put 区）各由三个指针描述。缓冲区里有数据或空位时，读写一个字符只是一次指针运算；缓冲区耗尽时才调用虚函数。
+    - 自定义输出 streambuf 最少覆写 `overflow`，设置了 put 区还要覆写 `sync`；自定义输入 streambuf 覆写 `underflow`，并用 `setg` 把读到的数据放进 get 区。
+    - `underflow` 返回下一个字符但不消费它；`overflow(c)` 交出攒下的字符再接收 `c`，`c` 为 `eof()` 时只刷新。成功时要返回 `traits_type::not_eof(c)`。
+    - 基类的析构函数不刷新，复制只复制指针，定位函数默认一律失败；这些都要由派生类自己处理。
 
-它的设计目标是**每个字符的开销接近一次指针运算**：只要缓冲区里还有数据（或空位），读写一个字符只是 `*gptr()++` 或 `*pptr()++`；只有缓冲区耗尽时才进行一次虚函数调用。
+## 一个最小的 streambuf
 
-## `<streambuf>`（[streambuf.syn]）
-
-声明 `basic_streambuf` 及别名 `streambuf`、`wstreambuf`。¶1：该头文件定义控制**字符**序列输入和输出的类型。
-
-## 流缓冲区的要求（[streambuf.reqts]）
-
-### 可能的约束（¶1）
-
-流缓冲区可以对它控制的序列施加各种限制：输入序列可能不可读（¶1.1），输出序列可能不可写（¶1.2）；序列可以与其他表示（如外部文件）关联（¶1.3）；可以支持直接对关联序列的读写（¶1.4）；可以限制程序如何读、写、回退字符或改变流位置（¶1.5）。换句话说，`basic_streambuf` 的接口是"能力的上限"，具体派生类可以只实现其中一部分——默认的虚函数实现基本都是"失败"。
-
-### 三个指针（¶2–¶3）
-
-¶2：每个序列（输入、输出各一个）由三个指针描述；它们若非空，都指向**同一个** `charT` 数组对象，这个数组在任意时刻表示序列的一个（子）序列：
-
-- **起始指针**（beginning pointer）`xbeg`：数组的最低地址；
-- **下一指针**（next pointer）`xnext`：当前读或写的候选位置；
-- **结束指针**（end pointer）`xend`：数组末尾之后的第一个位置。
-
-输入序列的三个指针是 `eback()`、`gptr()`、`egptr()`（构成 **get 区**，[[g:get-area]]）；输出序列的是 `pbase()`、`pptr()`、`epptr()`（构成 **put 区**，[[g:put-area]]）。
-
-```text
- get 区：  eback()        gptr()                  egptr()
-             │  已读（可回退） │   待读（读位置可用）    │
-             ▼               ▼                       ▼
-           [ a  b  c  d  e  f  g  h  i  j  k  l ]
-             └ putback 位置 ┘└──── read 位置 ─────┘
-
- put 区：  pbase()            pptr()               epptr()
-             │  已写、尚未交出  │     空位（写位置可用） │
-             ▼                 ▼                     ▼
-           [ H  e  l  l  o  ,  _  _  _  _  _  _  _ ]
-```
-
-¶3 规定任何时刻都必须满足的语义约束：
-
-- ¶3.1：`xnext` 非空时，`xbeg` 和 `xend` 也必须是指向同一数组的非空指针；`xnext` 为空时，另外两个也必须为空。
-- ¶3.2：对输出序列，若 `xnext` 非空且 `xnext < xend`，则**写位置**可用，`*xnext` 可被赋值为下一个要写入的元素。
-- ¶3.3：对输入序列，若 `xnext` 非空且 `xbeg < xnext`，则**回退位置**（putback position）可用，`xnext[-1]` 必须有确定的值，是回退一个字符时要存放的位置。
-- ¶3.4：对输入序列，若 `xnext` 非空且 `xnext < xend`，则**读位置**可用，`*xnext` 必须有确定的值，是下一个要读的元素。
-
-## `basic_streambuf` 的整体结构（[streambuf.general]）
-
-¶1：`basic_streambuf` 作为各种**流缓冲区**的基类，每个对象控制两个字符序列：一个**输入序列**、一个**输出序列**。它的接口采用"公有非虚函数调用受保护虚函数"的模式（NVI）：
-
-| 公有（非虚） | 对应的受保护虚函数 | 何时调用虚函数 |
-|---|---|---|
-| `pubimbue(loc)` | `imbue(loc)` | 总是 |
-| `pubsetbuf(s, n)` | `setbuf(s, n)` | 总是 |
-| `pubseekoff(off, way, which)` | `seekoff(...)` | 总是 |
-| `pubseekpos(sp, which)` | `seekpos(...)` | 总是 |
-| `pubsync()` | `sync()` | 总是 |
-| `in_avail()` | `showmanyc()` | 读位置不可用时 |
-| `sgetc()` | `underflow()` | 读位置不可用时 |
-| `sbumpc()` | `uflow()` | 读位置不可用时 |
-| `snextc()` | 经 `sbumpc()`/`sgetc()` | — |
-| `sgetn(s, n)` | `xsgetn(s, n)` | 总是 |
-| `sputbackc(c)` | `pbackfail(c)` | 回退位置不可用或 `c` 与 `gptr()[-1]` 不同时 |
-| `sungetc()` | `pbackfail()` | 回退位置不可用时 |
-| `sputc(c)` | `overflow(c)` | 写位置不可用时 |
-| `sputn(s, n)` | `xsputn(s, n)` | 总是 |
-
-受保护的非虚成员（`eback`/`gptr`/`egptr`/`gbump`/`setg`、`pbase`/`pptr`/`epptr`/`pbump`/`setp`）供派生类管理缓冲区；`istream`/`ostream` 只使用公有接口。
-
-## 构造、复制、析构（[streambuf.cons]、[streambuf.assign]）
-
-- 默认构造函数（受保护，脚注说明目的：保证只有派生类对象能被构造）：¶1 所有指针置空，`getloc()` 初始化为构造时全局 locale `locale()` 的副本。¶2：一旦 `getloc()` 初始化，调用 locale 成员函数及所得 facet 成员的结果可以**安全缓存**，直到下一次调用 `imbue`。
-- 复制构造函数（受保护）：¶3 后条件是六个指针和 `getloc()` 都与 `rhs` 相同——这是**浅复制**：新对象的指针指向 `rhs` 的缓冲区。派生类若有自己的缓冲区，必须在自己的复制/移动构造函数里重新 `setg`/`setp`，否则两个对象会共享同一块内存。
-- `operator=`（受保护）：[streambuf.assign] ¶1 同样复制六个指针和 locale。`swap`：¶3 交换数据成员。
-- 析构函数：¶4 无效果（不刷新！刷新是派生类析构函数的事，如 `~basic_filebuf` 调用 `close()`）。
-
-## 公有成员函数（[streambuf.members]）
-
-### locale（[streambuf.locales]）
-
-- `pubimbue(loc)`：¶1 调用 `imbue(loc)`；¶2 后条件 `loc == getloc()`；¶3 返回旧值。
-- `getloc()`：¶4 若调用过 `pubimbue`，返回最后一次传入的 locale，否则返回构造时的全局 locale；若在 `pubimbue` 调用期间（即从 `imbue()` 内部）调用，返回**旧值**——派生类在 `imbue(loc)` 里可以通过 `getloc()` 拿到旧 locale、通过参数拿到新 locale 进行比较。
-
-### 缓冲区管理与定位（[streambuf.buffer]）
-
-`pubsetbuf`、`pubseekoff`、`pubseekpos`、`pubsync`（¶1–¶4）分别直接返回对应虚函数的结果。
-
-### get 区（[streambuf.pub.get]）
-
-| 函数 | 读位置可用时 | 不可用时 |
-|---|---|---|
-| `in_avail()` | ¶1 `egptr() - gptr()` | `showmanyc()` |
-| `sgetc()` | ¶5 `to_int_type(*gptr())`，**不移动** | `underflow()` |
-| `sbumpc()` | ¶4 `to_int_type(*gptr())`，然后 `gptr()` 加一 | `uflow()` |
-| `snextc()` | ¶2–¶3 先 `sbumpc()`；若它返回 `eof()` 则返回 `eof()`，否则返回 `sgetc()` | |
-| `sgetn(s, n)` | ¶6 `xsgetn(s, n)` | |
-
-`sgetc` 是"看一眼"（peek），`sbumpc` 是"读走"（get），`snextc` 是"跳过当前、看下一个"。
-
-### 回退（[streambuf.pub.pback]）
-
-- `sputbackc(c)`：¶1 若回退位置不可用，或 `traits::eq(c, gptr()[-1])` 为假，返回 `pbackfail(to_int_type(c))`；否则 `gptr()` 减一并返回 `to_int_type(*gptr())`。
-- `sungetc()`：¶2 若回退位置不可用，返回 `pbackfail()`；否则 `gptr()` 减一并返回该字符。
-
-所以"回退一个与原来相同的字符"在缓冲区内永远成功，不需要虚函数；回退一个**不同**的字符则要看派生类的 `pbackfail` 是否允许修改缓冲区（`stringbuf` 只在可写模式下允许，见 [[string.streams]]）。
-
-### put 区（[streambuf.pub.put]）
-
-- `sputc(c)`：¶1 若写位置不可用，返回 `overflow(to_int_type(c))`；否则把 `c` 存到 `*pptr()`、`pptr()` 加一，返回 `to_int_type(c)`。
-- `sputn(s, n)`：¶2 返回 `xsputn(s, n)`。
-
-## 受保护的指针访问（[streambuf.get.area]、[streambuf.put.area]）
-
-| get 区 | put 区 | 含义 |
-|---|---|---|
-| `eback()` | `pbase()` | 起始指针 |
-| `gptr()` | `pptr()` | 下一指针 |
-| `egptr()` | `epptr()` | 结束指针 |
-| `gbump(int n)` | `pbump(int n)` | 下一指针加 `n` |
-| `setg(gbeg, gnext, gend)` | `setp(pbeg, pend)` | 重设整个区 |
-
-- `setg`：¶5 前置条件是 `[gbeg, gnext)`、`[gbeg, gend)`、`[gnext, gend)` 都是有效范围；¶6 后条件三个指针等于实参。
-- `setp`：¶5 前置条件 `[pbeg, pend)` 是有效范围；¶6 后条件 `pbase() == pbeg`、**`pptr() == pbeg`**、`epptr() == pend`。注意 `setp` 没有"next"参数，总是把写位置放回开头；要在设置后保留已写入的内容，得接着调用 `pbump(n)`。
-
-!!! pitfall "`gbump`/`pbump` 的参数是 `int`"
-    缓冲区大于 `INT_MAX` 个字符时，一次 `pbump(n)` 无法前进到末尾——参数类型是 `int`，大于 `INT_MAX` 的 `streamsize` 转换后会变成负数或被截断。派生类处理超大缓冲区时要分多次调用。本机 libc++ 的 `xsgetn` 实现里就能看到按 `INT_MAX` 分块调用 `gbump` 的代码。
-
-## 虚函数的契约（[streambuf.virtuals]）
-
-每个虚函数的条文都分为 *Effects*（派生类覆写时应达到的效果）和 *Default behavior*（基类版本做什么）。基类版本几乎都是"什么也不做"或"返回失败"，因为它不知道外部序列是什么。
-
-### `imbue`（[streambuf.virt.locales]）
-
-¶1 改变基于 locale 的转换；¶2 让派生类在 locale 改变时得到通知，两次调用之间可以安全缓存 locale 和 facet 成员的结果；¶3 默认什么也不做。`basic_filebuf` 覆写它来切换 `codecvt`。
-
-### `setbuf`、`seekoff`、`seekpos`、`sync`（[streambuf.virt.buffer]）
-
-- `setbuf(s, n)`：¶1 以各派生类分别规定的方式影响缓冲；¶2 默认什么也不做，返回 `this`。`stringbuf` 的 `setbuf` 是实现定义的（`setbuf(0, 0)` 无效果），`filebuf` 的 `setbuf(0, 0)` 在 I/O 之前调用会使流无缓冲，`spanbuf` 的 `setbuf` 换掉底层 span。
-- `seekoff`/`seekpos`：¶3–¶6 以派生类规定的方式改变流位置；默认返回 `pos_type(off_type(-1))`（失败）。所以一个只覆写了 `overflow` 的 streambuf 上，`tellp()` 总是返回 −1。
-- `sync()`：¶7 把控制的序列与数组同步——若 `pbase()` 非空，把 `[pbase(), pptr())` 写到受控序列，然后可以重置指针；¶8 失败返回 −1（何为失败由派生类决定）；¶9 默认返回 0。`ostream::flush()` 最终调用的就是它。
-
-### get 区：`showmanyc`、`xsgetn`、`underflow`、`uflow`（[streambuf.virt.get]）
-
-**`showmanyc()`**（脚注：读作 "es-how-many-see"，不是 "show-manic"）：¶1 返回序列中可用字符数的**估计**，或 −1。若返回正数，后续调用 `underflow()` 在至少提取了那么多字符之前不会返回 `eof()`；若返回 −1，`underflow()`/`uflow()` 将会失败（脚注：意图是它们会"立即"返回失败，而不仅仅是最终失败）。¶2 默认返回 0，即"不知道"。`istream::readsome` 依赖它（[[input.streams]]）。
-
-**`xsgetn(s, n)`**：¶4 如同反复调用 `sbumpc()`，把至多 `n` 个字符存入 `s`，在存满 `n` 个或 `sbumpc()` 将返回 `eof()` 时停止；¶5 返回存入的个数。脚注：派生类可以覆写它提供更高效的实现（例如对文件直接读入用户缓冲区，绕过 get 区）。
-
-**`underflow()`** 是输入方向的核心。条文先定义三个概念：
-
-- ¶7 **待处理序列**（pending sequence，[[g:pending-sequence]]）：若 `gptr()` 为空则为空序列，否则是 `[gptr(), egptr())` 中的字符，**再接上**从输入序列读入的某个（可能为空的）字符序列。
-- ¶8 **结果字符**（result character）：待处理序列非空时是它的第一个字符，否则是将从输入序列读到的下一个字符。
-- ¶9 **备份序列**（backup sequence）：`eback()` 为空时为空，否则是 `[eback(), gptr())` 中的字符。
-
-¶10 *Effects*：设置 `gptr()` 和 `egptr()`，使得若待处理序列非空，则 `egptr()` 非空且 `[gptr(), egptr())` 正是待处理序列；否则 `gptr()` 为空或 `gptr() == egptr()`。¶11：对 `eback()` 与 `gptr()` 之间的内容不作约束，但"通常的备份条件"是这段内容与备份序列的末尾（或整个备份序列）一致——换句话说，`underflow` 应尽量保留最近读过的字符，让回退可以在缓冲区内完成。
-
-¶12 *Returns*：结果字符的 `to_int_type(c)`，**不越过它**；待处理序列为空时返回 `eof()` 表示失败。¶13 默认返回 `eof()`。¶14：`basic_streambuf` 的公有成员只在 `gptr()` 为空或 `gptr() >= egptr()` 时调用它。
-
-翻成白话：**`underflow` 的职责是"把 get 区重新填满，并返回下一个字符但不消费它"**。
-
-**`uflow()`**：¶15 约束与 `underflow` 相同，只是结果字符要从待处理序列**移到**备份序列（即被消费），且转移前待处理序列不为空。¶16 默认行为：调用 `underflow()`，若返回 `eof()` 则返回 `eof()`；否则返回 `*gptr()` 并使 `gptr()` 加一。所以只要派生类正确实现了 `underflow` 并设置了 get 区，就**不需要**覆写 `uflow`。只有不使用 get 区缓冲的派生类（每次直接从外部读一个字符）才必须覆写 `uflow`，否则默认版本在 `underflow` 返回后对 `*gptr()` 的读取没有意义。
-
-### 回退：`pbackfail`（[streambuf.virt.pback]）
-
-¶1：待处理序列的定义同 `underflow`，但若 `c` 是 `eof()`，先把输入序列后退一个字符再确定待处理序列；若 `c` 不是 `eof()`，则把 `c` 加在前面——是否真的后退或修改输入序列是**未指定**的。¶2：返回时 `gptr()`、`eback()`、`pptr()` 的约束与 `underflow` 相同。¶3–¶4：返回 `eof()` 表示失败（可能因为无法后退，或无法使指针满足约束），其他值表示成功；`pbackfail()` **只在回退真正失败时**才被调用。¶5 默认返回 `eof()`。¶6：公有函数只在 `gptr()` 为空、`gptr() == eback()`、或 `c` 与 `gptr()[-1]` 不同时调用它；其他调用者也必须满足这个约束。
-
-### put 区：`xsputn`、`overflow`（[streambuf.virt.put]）
-
-**`xsputn(s, n)`**：¶1 如同反复调用 `sputc(c)`，写出至多 `n` 个字符，在写满 `n` 个或 `sputc` 将返回 `eof()` 时停止。**`pptr() == epptr()` 时是否调用 `overflow()`，还是用其他方式达到同样效果，是未指定的。** ¶2 返回写出的个数。本机 libc++ 的默认实现是：put 区有空位就整块 `copy`，满了就对下一个字符调用 `overflow(c)`。
-
-**`overflow(c)`** 是输出方向的核心：
-
-- ¶3 *Effects*：**消费**待处理序列的某个初始子序列。这里的待处理序列是：`pbase()` 为空时为空，否则是从 `pbase()` 开始的 `pptr() - pbase()` 个字符；再接上 `c`（若 `c` 不是 `eof()`）。
-- ¶4 每个覆写版本都必须遵守：
-    - ¶4.1 "消费一个字符"对关联输出序列的效果是有规定的（脚注：对本章的每个派生类都给出了规定；对程序定义的类没有要求）；
-    - ¶4.2 设未消费的字符数为 `r`：若 `r` 非零，则设置 `pbase()` 和 `pptr()` 使得 `pptr() - pbase() == r`，且从 `pbase()` 开始的 `r` 个字符就是那些未消费的字符；若 `r` 为零（全部消费），则要么把 `pbase()` 置空，要么把 `pbase()` 和 `pptr()` 设为同一个非空值；
-    - ¶4.3 向关联输出序列追加字符失败，或无法按上述规则设置指针时，函数可以失败。
-- ¶5 失败时返回 `eof()` **或抛异常**；成功时返回非 `eof()` 的值（脚注：通常返回 `c`，但 `c` 为 `eof()` 时返回 `traits::not_eof(c)`）。
-- ¶6 默认返回 `eof()`。
-- ¶7：`sputc()` 和 `sputn()` 在 put 区放不下实参字符序列时调用它。
-
-翻成白话：**`overflow(c)` 的职责是"把 put 区里攒着的字符（加上 `c`）交出去，腾出空间"**；`c == eof()` 的调用表示"只刷新，没有新字符"，这正是 `filebuf::close()` 用 `overflow(eof())` 刷新缓冲区的原因。
-
-## 写一个自定义 streambuf
-
-### 最小的输出 streambuf：只覆写 `overflow`
-
-不调用 `setp`，put 区始终为空，于是**每个**字符都会经过 `overflow`。简单，但每个字符一次虚调用：
-
-```cpp title="counting-buf.cpp" ok
+```cpp title="counting-buf.cpp" run ok
 #include <iostream>
 #include <streambuf>
 
@@ -214,15 +37,77 @@ int main() {
   counting_buf cb;
   std::ostream os(&cb);
   os << "pi = " << 3.14159 << '\n' << 42 << '\n';
-  std::cout << cb.count << " chars, " << cb.newlines << " lines\n";   // 16 chars, 2 lines
+  std::cout << cb.count << " chars, " << cb.newlines << " lines\n";
+  // 16 chars, 2 lines
 }
 ```
 
-### 带缓冲的输出 streambuf：`overflow` + `sync`
+`os << 3.14159` 的格式化（数字转字符、精度、locale）全部在 `ostream` 里完成，生成的字符逐个交给 `cb`。`counting_buf` 只覆写了一个虚函数 `overflow`，就得到了一个能配合所有标准插入器的输出目标。
 
-真正的实现应当设置 put 区，让大部分字符走 `sputc` 的快速路径。下面的 streambuf 把字符转成大写后转交给另一个 streambuf（"过滤器"模式）：
+这就是 iostream 的分层：`basic_ostream`、`basic_istream` 处理格式，**流缓冲区**（stream buffer）处理字符的来源和去向。文件、字符串、内存块、同步输出各有一个派生类：[[file.streams]] 的 `basic_filebuf`、[[string.streams]] 的 `basic_stringbuf`、[[span.streams]] 的 `basic_spanbuf`、[[syncstream]] 的 `basic_syncbuf`。理解了基类的契约，这些派生类的条文就只是在说它们各自怎样覆写虚函数。
 
-```cpp title="upper-buf.cpp" ok
+头文件 `<streambuf>` 声明 `basic_streambuf` 以及别名 `streambuf`、`wstreambuf`（[streambuf.syn]）。
+
+## 三个指针 [streambuf.reqts]
+
+¶2 每个 `basic_streambuf` 控制一个输入序列和一个输出序列。每个序列由三个指针描述，它们非空时指向同一个 `charT` 数组。这个数组是缓冲区，任一时刻保存着外部序列的一段：
+
+- **起始指针**（beginning pointer）：数组的最低地址；
+- **下一指针**（next pointer）：下一次读或写的位置；
+- **结束指针**（end pointer）：数组末尾之后的第一个位置。
+
+输入序列的三个指针是 `eback()`、`gptr()`、`egptr()`，它们围出的区域叫 [[g:get-area|get 区]]。输出序列的三个指针是 `pbase()`、`pptr()`、`epptr()`，围出 [[g:put-area|put 区]]。
+
+```text
+ get 区：  eback()         gptr()                  egptr()
+             │ 已读，可回退  │       待读                │
+             ▼               ▼                         ▼
+           [ a  b  c  d  e  f  g  h  i  j  k  l ]
+
+ put 区：  pbase()           pptr()                epptr()
+             │ 已写，尚未交出  │        空位            │
+             ▼                 ▼                       ▼
+           [ H  e  l  l  o  ,  _  _  _  _  _  _  _ ]
+```
+
+¶3 任何时刻都必须满足的约束：
+
+- ¶3.1 下一指针非空时，另外两个指针也非空，且指向同一数组；下一指针为空时，三个都为空。
+- ¶3.2 输出序列中 `pptr() < epptr()` 时，**写位置**（write position）可用，下一个字符可以直接存到 `*pptr()`。
+- ¶3.3 输入序列中 `eback() < gptr()` 时，**回退位置**（putback position）可用，`gptr()[-1]` 有确定的值，回退一个字符就是把 `gptr()` 往回移。
+- ¶3.4 输入序列中 `gptr() < egptr()` 时，**读位置**（read position）可用，`*gptr()` 就是下一个要读的字符。
+
+¶1 列举了流缓冲区可以施加的限制：输入序列可以不可读，输出序列可以不可写，可以关联外部文件，可以限制回退和改变流位置。也就是说，`basic_streambuf` 的接口给出的是能力的上限，派生类只实现自己需要的部分，基类的虚函数默认都返回失败。
+
+## 公有接口：先走指针，不够再调虚函数 [streambuf.general]
+
+`istream`、`ostream` 只调用 `basic_streambuf` 的公有成员。这些成员都不是虚函数；它们先检查读写位置是否可用，可用就直接操作指针，不可用才调用对应的受保护虚函数。
+
+| 公有成员 | 位置可用时 | 否则调用 |
+|---|---|---|
+| `sgetc()` | 返回 `*gptr()`，不移动 | `underflow()` |
+| `sbumpc()` | 返回 `*gptr()`，`gptr()` 加一 | `uflow()` |
+| `snextc()` | 先 `sbumpc()`，不是 `eof()` 就再 `sgetc()` | 经由前两者 |
+| `in_avail()` | 返回 `egptr() - gptr()` | `showmanyc()` |
+| `sputbackc(c)` | `c == gptr()[-1]` 时 `gptr()` 减一 | `pbackfail(c)` |
+| `sungetc()` | `gptr()` 减一 | `pbackfail()` |
+| `sputc(c)` | 存到 `*pptr()`，`pptr()` 加一 | `overflow(c)` |
+| `sgetn(s, n)`、`sputn(s, n)` | 总是调用 `xsgetn`、`xsputn` | |
+| `pubsync()`、`pubsetbuf`、`pubseekoff`、`pubseekpos`、`pubimbue` | 总是调用 `sync`、`setbuf`、`seekoff`、`seekpos`、`imbue` | |
+
+`sgetc` 是看一眼（peek），`sbumpc` 是读走，`snextc` 是跳过当前字符再看下一个（[[streambuf.pub.get]]）。
+
+回退一个与原来相同的字符永远可以在缓冲区内完成，不需要虚函数（[[streambuf.pub.pback]]）。回退一个不同的字符要由派生类的 `pbackfail` 决定是否允许修改缓冲区；`basic_stringbuf` 只在以可写模式打开时允许。
+
+受保护的非虚成员供派生类管理缓冲区：`eback`、`gptr`、`egptr`、`gbump`、`setg` 管理 get 区，`pbase`、`pptr`、`epptr`、`pbump`、`setp` 管理 put 区。
+
+这种公有非虚函数调用受保护虚函数的结构使得大多数字符的读写不经过虚调用，派生类只需在缓冲区边界上介入。
+
+## 写一个输出 streambuf：`overflow` 与 `sync`
+
+上面的 `counting_buf` 没有设置 put 区，`pptr()` 始终为空，所以每个字符都经过一次 `overflow` 虚调用。实际的实现应当用 `setp` 提供一块缓冲区，让大部分字符走 `sputc` 的快速路径。下面的例子把字符转成大写后转交给另一个 streambuf：
+
+```cpp title="upper-buf.cpp" run ok
 #include <cctype>
 #include <iostream>
 #include <streambuf>
@@ -231,17 +116,18 @@ class upper_buf : public std::streambuf {
   std::streambuf* dest_;
   char buf_[8];
 
-  bool drain() {                                   // 把 [pbase, pptr) 交给 dest_
-    for (char* p = pbase(); p != pptr(); ++p)
-      if (dest_->sputc(static_cast<char>(std::toupper(static_cast<unsigned char>(*p))))
-          == traits_type::eof())
-        return false;
-    setp(buf_, buf_ + sizeof buf_);                // 全部消费：pptr 回到 pbase
+  bool drain() {                         // 把 [pbase, pptr) 交给 dest_
+    for (char* p = pbase(); p != pptr(); ++p) {
+      unsigned char u = static_cast<unsigned char>(*p);
+      char up = static_cast<char>(std::toupper(u));
+      if (dest_->sputc(up) == traits_type::eof()) return false;
+    }
+    setp(buf_, buf_ + sizeof buf_);      // 全部消费：pptr 回到 pbase
     return true;
   }
 
 protected:
-  int_type overflow(int_type c) override {         // put 区满（或无 put 区）时由 sputc 调用
+  int_type overflow(int_type c) override {   // put 区满时由 sputc 调用
     if (!drain()) return traits_type::eof();
     if (!traits_type::eq_int_type(c, traits_type::eof())) {
       *pptr() = traits_type::to_char_type(c);
@@ -249,32 +135,57 @@ protected:
     }
     return traits_type::not_eof(c);
   }
-  int sync() override {                            // flush() → pubsync() → sync()
+  int sync() override {                      // flush() → pubsync() → sync()
     return drain() && dest_->pubsync() == 0 ? 0 : -1;
   }
 
 public:
-  explicit upper_buf(std::streambuf* d) : dest_(d) { setp(buf_, buf_ + sizeof buf_); }
-  ~upper_buf() override { sync(); }                // 基类析构函数不刷新，派生类要自己做
+  explicit upper_buf(std::streambuf* d) : dest_(d) {
+    setp(buf_, buf_ + sizeof buf_);
+  }
+  ~upper_buf() override { sync(); }      // 基类析构函数不刷新
 };
 
 int main() {
   upper_buf ub(std::cout.rdbuf());
   std::ostream os(&ub);
-  os << "hello, streambuf " << 42 << '\n';         // HELLO, STREAMBUF 42
+  os << "hello, streambuf " << 42 << '\n';   // HELLO, STREAMBUF 42
   os.flush();
 }
 ```
 
-要点：
+### `overflow` 的契约 [streambuf.virt.put]
 
-1. `overflow` 满足 ¶4.2——全部消费后把 `pptr()` 设回 `pbase()`（通过 `setp`）。
-2. `sync` 先交出缓冲内容，再刷新下游；任何一步失败返回 −1，`ostream::flush()` 会据此置 `badbit`（[[ostream.unformatted]]）。
-3. 析构函数自己调用 `sync()`：`~basic_streambuf` 什么也不做（[[streambuf.cons#4]]）。注意在析构函数里调用的是本类的 `sync`——此时派生部分还活着；若把这一步留给更深的基类就晚了。
+¶3 `overflow(c)` 面对的**待处理序列**是 put 区里已写的字符 `[pbase(), pptr())`，后面再接上 `c`（`c` 为 `eof()` 时不接）。它的职责是把这个序列的某个开头部分交给外部序列，这叫做**消费**（consume）。
 
-### 输入 streambuf：覆写 `underflow`
+¶4 每个覆写版本都要遵守：
 
-```cpp title="gen-buf.cpp" ok
+- ¶4.2 设没被消费的字符有 `r` 个。`r` 非零时，要让 `pptr() - pbase() == r`，且从 `pbase()` 开始的 `r` 个字符就是这些剩余字符。`r` 为零时，要么把 `pbase()` 置空，要么让 `pbase()` 和 `pptr()` 相等。`upper_buf` 用 `setp` 把 `pptr()` 放回开头，满足后一种情况。
+- ¶4.3 向外部追加字符失败，或者无法按上面的规则设置指针时，函数可以失败。
+- ¶4.1 消费一个字符对外部序列有什么效果，标准为自己的派生类都作了规定，对程序定义的类不作要求。
+
+¶5 失败时返回 `eof()` 或抛出异常，成功时返回任何不等于 `eof()` 的值。脚注建议的写法是返回 `c`，但 `c` 本身是 `eof()` 时返回 `traits::not_eof(c)`，`traits_type::not_eof(c)` 一次涵盖了两种情况。¶6 基类版本直接返回 `eof()`。¶7 `sputc` 和 `sputn` 在 put 区放不下时调用它。
+
+`c == eof()` 的调用表示只刷新，没有新字符。`basic_filebuf::close()` 就是用 `overflow(eof())` 把缓冲区写出去的。
+
+### `sync` 与 `xsputn` [streambuf.virt.buffer]
+
+¶7 `sync()` 把缓冲区与外部序列同步：`pbase()` 非空时，把 `[pbase(), pptr())` 写到外部序列，然后可以重置指针。¶8 失败返回 −1，什么算失败由派生类决定；¶9 基类版本返回 0。`ostream::flush()` 经由 `pubsync()` 调用它，返回 −1 时给流置 `badbit`（[[ostream.unformatted]]）。
+
+`xsputn(s, n)` 的效果（[[streambuf.virt.put#1]]）如同反复调用 `sputc`，写满 `n` 个或某次 `sputc` 会返回 `eof()` 时停止，返回写出的个数。put 区满时它是调用 `overflow()` 还是用别的方式达到同样效果，标准没有规定。本机 libc++ 的基类版本在 put 区有空位时整块复制，满了就对下一个字符调用 `overflow(c)`。
+
+`upper_buf` 体现了三条要点：
+
+1. `overflow` 消费全部字符后用 `setp` 把 `pptr()` 放回 `pbase()`，满足第 4.2 项。
+2. `sync` 先交出缓冲内容，再刷新下游，任何一步失败都返回 −1。
+3. 析构函数自己调用 `sync()`，因为 `~basic_streambuf` 什么也不做。这一步要放在派生类的析构函数里，此时派生部分还活着；留给更上层的基类就太晚了。
+
+!!! lawyer "格式化输出只会用到三个虚函数"
+    [[ostream.general#3]] 规定，`basic_ostream` 的输出函数除了 `overflow()`、`xsputn()`、`sync()` 之外，不得调用 `rdbuf()` 的任何虚成员。所以自定义输出 streambuf 只要这三个行为正确（`xsputn` 用基类的也可以），就能配合所有标准插入器；`seekoff` 只在用户调用 `seekp`、`tellp` 时才会被用到。
+
+## 写一个输入 streambuf：`underflow`
+
+```cpp title="gen-buf.cpp" run ok
 #include <iostream>
 #include <streambuf>
 #include <string>
@@ -285,37 +196,71 @@ class gen_buf : public std::streambuf {
   int n_ = 0;
 protected:
   int_type underflow() override {
-    if (gptr() < egptr()) return traits_type::to_int_type(*gptr());  // 防御：get 区未空
+    if (gptr() < egptr())                    // get 区还有字符
+      return traits_type::to_int_type(*gptr());
     if (n_ == 3) return traits_type::eof();
     cur_ = "line " + std::to_string(++n_) + "\n";
     setg(cur_.data(), cur_.data(), cur_.data() + cur_.size());
-    return traits_type::to_int_type(*gptr());     // 返回下一个字符，但不消费
+    return traits_type::to_int_type(*gptr());  // 返回但不消费
   }
 };
 
 int main() {
   gen_buf gb;
   std::istream in(&gb);
-  for (std::string s; std::getline(in, s); ) std::cout << '[' << s << "]\n";
-  std::cout << "eof=" << in.eof() << " fail=" << in.fail() << '\n';   // eof=1 fail=1
+  for (std::string s; std::getline(in, s); )
+    std::cout << '[' << s << "]\n";
+  std::cout << "eof=" << in.eof() << " fail=" << in.fail() << '\n';
+  // [line 1] [line 2] [line 3]（各占一行），然后 eof=1 fail=1
 }
 ```
 
-不需要覆写 `uflow`：默认版本调用 `underflow()` 后读 `*gptr()` 并 `gbump(1)`，正好适用于设置了 get 区的实现。
+### `underflow` 的契约 [streambuf.virt.get]
 
-这个实现每次重新填充时都把 get 区换成新的一行，**不保留**上一行的字符——不满足 ¶11 的"通常的备份条件"。后果是：回退只能在当前行内进行。
+条文先定义了三个序列：
 
-```cpp title="putback-boundary.cpp" ok
+- ¶7 [[g:pending-sequence|待处理序列]]（pending sequence）：get 区里还没读的字符 `[gptr(), egptr())`，后面再接上从外部序列读入的某段字符（可以为空）。
+- ¶8 **结果字符**（result character）：待处理序列非空时是它的第一个字符，否则是将要从外部读到的下一个字符。
+- ¶9 **备份序列**（backup sequence）：已经读过的字符 `[eback(), gptr())`。
+
+¶10 `underflow` 要设置 `gptr()` 和 `egptr()`，使待处理序列非空时 `[gptr(), egptr())` 正好是待处理序列；为空时 `gptr()` 为空或等于 `egptr()`。¶12 返回结果字符，但读位置不越过它；待处理序列为空时返回 `eof()` 表示失败。¶13 基类版本返回 `eof()`。
+
+换句话说，`underflow` 的职责是把 get 区重新填满，并返回下一个字符但不消费它。第 14 段说明，公有成员只在 `gptr()` 为空或 `gptr() >= egptr()` 时才调用它。
+
+¶11 对 `[eback(), gptr())` 的内容不作约束，但描述了通常的备份条件：这段内容应当与备份序列的末尾一致。也就是说，重新填充时最好保留最近读过的几个字符，让回退能在缓冲区内完成。`gen_buf` 每次都把 get 区换成新的一行，不满足这个条件，后果在下文的回退一节里可以看到。
+
+### `uflow`：通常不必覆写
+
+¶15 `uflow` 的约束与 `underflow` 相同，只是结果字符要从待处理序列移到备份序列，也就是被消费掉。¶16 基类版本调用 `underflow()`，失败就返回 `eof()`，否则返回 `*gptr()` 并让 `gptr()` 加一。
+
+所以只要 `underflow` 正确设置了 get 区，就不需要覆写 `uflow`。只有不使用 get 区、每次直接从设备读一个字符的实现才必须覆写它，因为基类版本会在 `underflow` 返回后读取 `*gptr()`。
+
+### `showmanyc` 与 `xsgetn`
+
+¶1 `showmanyc()` 返回可用字符数的估计值，或 −1。返回正数时，在至少提取那么多字符之前 `underflow()` 不会返回 `eof()`；返回 −1 时，`underflow()` 和 `uflow()` 一定会失败，脚注说明意图是立即失败。¶2 基类版本返回 0，意思是不知道。脚注特意说明它的名字读作 es-how-many-see，不是 show-manic。`in_avail()` 和 `istream::readsome` 依赖它（[[input.streams]]）。
+
+¶4–¶5 `xsgetn(s, n)` 如同反复调用 `sbumpc()`，最多存 `n` 个字符到 `s`，返回实际存入的个数。脚注说派生类可以覆写它和 `xsputn`，提供更高效的实现，例如文件流在用户缓冲区足够大时绕过 get 区直接读写。
+
+## 回退：`pbackfail` [streambuf.virt.pback]
+
+¶1 `pbackfail(c)` 的待处理序列与 `underflow` 相同，只是先作调整：`c` 是 `eof()` 时，先把输入序列后退一个字符；`c` 不是 `eof()` 时，把 `c` 放在最前面。外部序列是否真的后退或被修改，标准没有规定。
+
+¶3–¶4 返回 `eof()` 表示失败，其他值表示成功。¶5 基类版本返回 `eof()`。¶6 公有函数只在缓冲区内无法回退时调用它：`gptr()` 为空、`gptr() == eback()`，或者 `c` 与 `gptr()[-1]` 不同。
+
+用上面的 `gen_buf` 可以看到回退的边界：
+
+```cpp title="putback-boundary.cpp" run ok
 #include <iostream>
 #include <streambuf>
 #include <string>
 
-class gen_buf : public std::streambuf {            // 同上例
+class gen_buf : public std::streambuf {        // 同上例
   std::string cur_;
   int n_ = 0;
 protected:
   int_type underflow() override {
-    if (gptr() < egptr()) return traits_type::to_int_type(*gptr());
+    if (gptr() < egptr())
+      return traits_type::to_int_type(*gptr());
     if (n_ == 3) return traits_type::eof();
     cur_ = "line " + std::to_string(++n_) + "\n";
     setg(cur_.data(), cur_.data(), cur_.data() + cur_.size());
@@ -327,50 +272,87 @@ int main() {
   gen_buf gb;
   std::istream in(&gb);
   std::string s;
-  std::getline(in, s);          // 消费 "line 1\n"，get 区已用完
-  in.get();                     // 触发 underflow，get 区换成 "line 2\n"，读走 'l'
-  in.unget();                   // OK：gptr() > eback()，在缓冲区内回退
-  std::cout << in.bad() << ' '; // 0
-  in.unget();                   // gptr() == eback() → pbackfail() → 默认返回 eof
-  std::cout << in.bad() << '\n';// 1：istream::unget 置 badbit
+  std::getline(in, s);  // 消费 "line 1\n"，get 区用完
+  in.get();             // underflow 换上 "line 2\n"，读走 'l'
+  in.unget();           // gptr() > eback()：缓冲区内回退
+  std::cout << in.bad() << ' ';   // 0
+  in.unget();           // gptr() == eback() → pbackfail() → eof
+  std::cout << in.bad() << '\n';  // 1：istream::unget 置 badbit
 }
 ```
 
-C 的 `ungetc` 保证至少能回退一个字符；`basic_streambuf` 层面没有这种保证，能回退多少完全取决于派生类如何保留备份序列。
+C 的 `ungetc` 保证至少能回退一个字符，`basic_streambuf` 没有这种保证。能回退多少，取决于派生类在 `underflow` 里保留了多少备份序列。
 
-!!! tip "什么时候需要覆写 `xsgetn`/`xsputn`"
-    默认实现正确但逐块经过 get/put 区。若外部设备支持大块读写（文件、socket），覆写它们可以在用户缓冲区足够大时直接读写、绕过中间拷贝——`basic_filebuf` 的实现通常就是这样做的。覆写时要记得维护 get/put 区指针的一致性。
+## 其他虚函数
 
-!!! lawyer "格式化输出只能调用三个虚函数"
-    [[ostream.general#3]] 规定：`basic_ostream` 的输出函数除了 `overflow()`、`xsputn()`、`sync()` 之外，**不得**调用 `rdbuf()` 的任何虚成员。所以自定义输出 streambuf 只要正确实现这三个（`xsputn` 用默认的也行），就能与所有标准插入器配合；`seekoff` 只在用户调用 `seekp`/`tellp` 时才会被用到。
+### `imbue` 与 `setbuf` [streambuf.virt.locales] [streambuf.virt.buffer]
+
+`imbue(loc)` 在 locale 改变时通知派生类，基类版本什么也不做。两次调用之间，派生类可以缓存从 locale 和 facet 得到的结果。`basic_filebuf` 覆写它来切换字符编码转换用的 `codecvt`。
+
+`setbuf(s, n)` 以各派生类分别规定的方式影响缓冲，基类版本什么也不做，返回 `this`。例如 `basic_filebuf` 在 I/O 之前调用 `setbuf(0, 0)` 会使流不带缓冲，`basic_spanbuf` 的 `setbuf` 换掉底层的内存块。
+
+### 定位：默认失败
+
+[streambuf.virt.buffer] 的 `seekoff`、`seekpos` 改变流位置，基类版本返回 `pos_type(off_type(-1))`，也就是失败。所以一个只覆写了 `overflow` 的 streambuf 上，`tellp()` 总是返回 −1。
+
+## 构造、复制与指针操作
+
+### 构造与析构 [streambuf.cons]
+
+¶1 默认构造函数把所有指针置空，并把 `getloc()` 初始化为构造时全局 locale 的副本。默认构造函数是受保护的，脚注说明目的是保证只能构造派生类的对象。
+
+¶2 `getloc()` 初始化之后，从它得到的结果可以一直缓存到下一次 `imbue`。
+
+¶3 复制构造函数和复制赋值（[[streambuf.assign]]）都是受保护的，后条件是六个指针和 `getloc()` 都与 `rhs` 相同。这是浅复制：新对象的指针指向 `rhs` 的缓冲区。派生类如果有自己的缓冲区，必须在自己的复制或移动操作里重新调用 `setg`、`setp`，否则两个对象会共享同一块内存。`swap` 交换全部数据成员。
+
+¶4 析构函数没有任何效果，不会刷新缓冲区。刷新是派生类析构函数的事，例如 `~basic_filebuf` 调用 `close()`。
+
+### locale 与指针操作 [streambuf.locales] [streambuf.get.area] [streambuf.put.area]
+
+`pubimbue(loc)` 调用 `imbue(loc)` 并返回旧的 locale。在 `imbue` 内部调用 `getloc()` 得到的仍是旧值，所以派生类可以在 `imbue` 里比较新旧两个 locale。
+
+`setg(gbeg, gnext, gend)` 要求三个区间都有效，之后三个指针等于实参。`setp(pbeg, pend)` 只有两个参数，之后 `pbase()` 和 `pptr()` 都等于 `pbeg`。也就是说 `setp` 总是把写位置放回开头；要在重设后保留已写入的内容，接着调用 `pbump(n)`。
+
+!!! pitfall "`gbump`、`pbump` 的参数是 `int`"
+    缓冲区超过 `INT_MAX` 个字符时，一次 `pbump(n)` 无法前进到末尾：`streamsize` 转成 `int` 后会被截断。处理超大缓冲区的派生类要分多次调用。本机 libc++ 的 `xsgetn` 实现就是以 `INT_MAX` 为上限分块调用 `gbump` 的。
 
 ## 思考题
 
-<details markdown="1">
-<summary>1. 一个 streambuf 只覆写了 <code>underflow</code>，没有调用 <code>setg</code>，每次直接从设备读一个字符并返回。这样实现有什么问题？</summary>
+!!! question "思考题 1"
+    一个 streambuf 只覆写了 `underflow`，没有调用 `setg`，每次直接从设备读一个字符并返回。这样实现有什么问题？
 
-`underflow` 的契约要求返回结果字符**而不消费它**，并且要让 `[gptr(), egptr())` 等于待处理序列（[[streambuf.virt.get#10]]）。不设置 get 区就无法"不消费"——下一次 `sgetc()` 又会调用 `underflow()`，读走设备上的下一个字符，于是 `peek()` 两次得到不同的值。更严重的是默认的 `uflow()` 在 `underflow()` 成功后会读取 `*gptr()` 并 `gbump(1)`（¶16），而 `gptr()` 是空指针——{{ub}}。这类"无缓冲"实现必须同时覆写 `uflow`（读并消费一个字符），并在 `underflow` 里用一个单字符缓冲区保存已读未消费的字符。
+<details markdown="1">
+<summary>答案</summary>
+
+`underflow` 必须返回结果字符而不消费它，并让 `[gptr(), egptr())` 等于待处理序列（[[streambuf.virt.get#10]]）。不设置 get 区就做不到不消费：下一次 `sgetc()` 又会调用 `underflow()`，读走设备上的下一个字符，于是连续两次 `peek()` 得到不同的值。
+
+更严重的是，基类的 `uflow()` 在 `underflow()` 成功后会读取 `*gptr()` 并让它加一（第 16 段），而此时 `gptr()` 是空指针，这是 {{ub}}。这类不带缓冲的实现必须同时覆写 `uflow`，并在 `underflow` 里用一个单字符缓冲区保存已读未消费的字符。
 </details>
 
-<details markdown="1">
-<summary>2. <code>overflow(eof())</code> 返回什么才算成功？</summary>
+!!! question "思考题 2"
+    `overflow(eof())` 返回什么才算成功？直接 `return c;` 有什么问题？
 
-返回任何**不等于** `eof()` 的值（[[streambuf.virt.put#5]]）。惯用写法是 `return traits_type::not_eof(c);`——当 `c` 是 `eof()` 时，`not_eof` 返回某个非 `eof` 值；当 `c` 是普通字符时原样返回。直接 `return c;` 在 `c == eof()` 时会被误判为失败。
+<details markdown="1">
+<summary>答案</summary>
+
+返回任何不等于 `eof()` 的值都算成功（[[streambuf.virt.put#5]]）。`c` 是 `eof()` 时直接 `return c;` 会被调用者当作失败。惯用写法 `return traits_type::not_eof(c);` 在 `c` 是普通字符时原样返回，在 `c` 是 `eof()` 时返回某个非 `eof` 值。
 </details>
 
-<details markdown="1">
-<summary>3. 为什么 <code>in_avail()</code> 返回 0 并不意味着到了流尾？</summary>
+!!! question "思考题 3"
+    `in_avail()` 返回 0，是否意味着到了流尾？
 
-`in_avail()` 在读位置不可用时返回 `showmanyc()`，而 `showmanyc()` 的默认值就是 0，表示"不知道"（[[streambuf.virt.get#2]]）。只有返回 −1 才表示后续读取一定失败。所以 `readsome` 读到 0 个字符可能只是缓冲区暂时为空。
+<details markdown="1">
+<summary>答案</summary>
+
+不是。读位置不可用时 `in_avail()` 返回 `showmanyc()`，而基类的 `showmanyc()` 返回 0，意思是不知道（[[streambuf.virt.get#2]]）。只有 −1 才表示后续读取一定失败。所以 `readsome` 读到 0 个字符可能只是缓冲区暂时为空。
 </details>
 
 ## 小结
 
 | 方向 | 快速路径（非虚） | 慢速路径（虚） | 派生类最少要覆写 |
 |---|---|---|---|
-| 读 | `sgetc`/`sbumpc`：`*gptr()` | `underflow`（看）/`uflow`（读走） | `underflow` + `setg`（或无缓冲时 `underflow` + `uflow`） |
-| 回退 | `sputbackc`/`sungetc`：`--gptr()` | `pbackfail` | 可选 |
-| 写 | `sputc`：`*pptr()++` | `overflow` | `overflow`（加 `setp` 则还要 `sync`） |
-| 批量 | — | `xsgetn`/`xsputn` | 可选，用于性能 |
-| 定位 | — | `seekoff`/`seekpos`（默认失败） | 需要 `seekg`/`tellp` 时 |
-| 刷新 | — | `sync`（默认返回 0） | 有 put 区时 |
+| 读 | `sgetc`、`sbumpc` 读 `*gptr()` | `underflow`（看）、`uflow`（读走） | `underflow` 并用 `setg`；不带缓冲时再加 `uflow` |
+| 回退 | `sputbackc`、`sungetc` 让 `gptr()` 减一 | `pbackfail` | 可选 |
+| 写 | `sputc` 写 `*pptr()` | `overflow` | `overflow`；用了 `setp` 还要 `sync` |
+| 批量 | | `xsgetn`、`xsputn` | 可选，用于性能 |
+| 定位 | | `seekoff`、`seekpos`（默认失败） | 需要 `seekg`、`tellp` 时 |
