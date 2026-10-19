@@ -1,15 +1,24 @@
 ---
 title: 流迭代器
-summary: istream_iterator（构造时即读第一个值、经 operator>> 格式化读取、读失败变为流末迭代器、只比较流指针）、ostream_iterator（每写一个值后都写分隔串，包括最后一个）、istreambuf_iterator（直接从 streambuf 逐字符读、不跳空白、后置 ++ 返回 proxy、"相等"只看是否都在流末）、ostreambuf_iterator（逐字符 sputc，failed() 报告写失败）；它们可与 default_sentinel 比较；读文件进 string 的"最令人烦恼的解析"。
+summary: istream_iterator、ostream_iterator 经 >> 和 << 做格式化读写，istreambuf_iterator、ostreambuf_iterator 直接逐字符读写流缓冲；它们让算法可以直接作用于输入输出流。
 status: done
 covers: *
 since: c++98
 related: predef.iterators, default.sentinel, input.iterators, output.iterators, iterator.requirements, iostream.format, stream.buffers, dcl.ambig.res, iterators.counted
 tags: 标准库, 迭代器, 流, iostream
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-¶1 of [stream.iterators.general]：为了让算法模板能直接作用于输入/输出流，库提供了一组"类迭代器"类模板。例 1：
+!!! tldr
+    - `istream_iterator<T>` 用 `>>` 读取，构造时就读入第一个值，读失败后变成流末迭代器；`==` 只比较绑定的流指针。
+    - `ostream_iterator<T>` 用 `<<` 写出，分隔串写在每个元素之后，所以末尾总会多一个分隔符。
+    - `istreambuf_iterator<charT>` 直接从流缓冲逐字符读取，不跳过空白；`*` 不消费字符，`++` 才消费。
+    - `ostreambuf_iterator<charT>` 逐字符写入，写失败后静默丢弃后续字符，只能通过 `failed()` 得知。
+    - `std::string s(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());` 声明的是一个函数，要改用花括号。
+
+## 四个类模板 [stream.iterators.general]
+
+¶1 为了让算法模板能直接作用于输入输出流，标准库提供了几个类似迭代器的类模板。例 1 从 `cin` 读入浮点数，把部分和逐行打印到 `cout`：
 
 ```cpp
 partial_sum(istream_iterator<double, char>(cin),
@@ -17,23 +26,66 @@ partial_sum(istream_iterator<double, char>(cin),
             ostream_iterator<double, char>(cout, "\n"));
 ```
 
-从 `cin` 读入浮点数，把部分和逐行打印到 `cout`。
+四个类模板按两个维度划分：
 
-四个类模板分两层：
-
-| | 格式化（经 `>>`/`<<`，作用于 `basic_istream`/`basic_ostream`） | 非格式化（逐字符，作用于 `basic_streambuf`） |
+| | 格式化：经 `>>`、`<<`，作用于 `basic_istream`、`basic_ostream` | 非格式化：逐字符，作用于 `basic_streambuf` |
 |---|---|---|
 | 输入 | `istream_iterator<T>` | `istreambuf_iterator<charT>` |
 | 输出 | `ostream_iterator<T>` | `ostreambuf_iterator<charT>` |
 
-与本章其他设施不同，流迭代器**不是** freestanding 的（[[iterator.synopsis]]）。
+本章其他适配器多数在独立实现中也要提供，流迭代器不是（[[iterator.synopsis]]），因为它们依赖 iostream。
 
-## `istream_iterator`（[istream.iterator]）
+```cpp run title="stream_iters.cpp" ok
+#include <algorithm>
+#include <cassert>
+#include <iterator>
+#include <sstream>
+#include <string>
+#include <vector>
 
-¶1 of [istream.iterator.general]：输入迭代器（[[input.iterators]]），从构造时绑定的输入流读取连续元素。
+int main() {
+  // istreambuf_iterator：原样读入全部字符，包括空白
+  std::istringstream in1("a b  c\n");
+  std::string s{std::istreambuf_iterator<char>(in1),
+                std::istreambuf_iterator<char>()};
+  assert(s == "a b  c\n");
+
+  // istream_iterator<char>：经 operator>> 读入，跳过空白
+  std::istringstream in2("a b  c\n");
+  std::string t{std::istream_iterator<char>(in2),
+                std::istream_iterator<char>()};
+  assert(t == "abc");
+
+  // ostream_iterator：分隔串写在每个元素之后
+  std::ostringstream os;
+  std::vector<int> v{1, 2, 3};
+  std::ranges::copy(v, std::ostream_iterator<int>(os, ", "));
+  assert(os.str() == "1, 2, 3, ");
+
+  // 构造时就读取；可以与 default_sentinel 比较
+  std::istringstream in3("10 20");
+  std::istream_iterator<int> it(in3);
+  assert(*it == 10);
+  ++it;
+  ++it;                        // 读失败，变为流末迭代器
+  assert(it == std::default_sentinel);
+  assert(it == std::istream_iterator<int>());
+
+  // ostreambuf_iterator
+  std::ostringstream os2;
+  auto r = std::ranges::copy(std::string("hi"),
+                             std::ostreambuf_iterator<char>(os2));
+  assert(os2.str() == "hi" && !r.out.failed());
+}
+```
+
+## istream_iterator [istream.iterator]
+
+[istream.iterator.general] ¶1 `istream_iterator` 是一个输入迭代器（[[input.iterators]]），从构造时绑定的输入流读取连续的元素。
 
 ```cpp
-template<class T, class charT = char, class traits = char_traits<charT>,
+template<class T, class charT = char,
+         class traits = char_traits<charT>,
          class Distance = ptrdiff_t>
 class istream_iterator {
 public:
@@ -43,41 +95,45 @@ public:
   using pointer           = const T*;
   using reference         = const T&;
   // ...
-  constexpr istream_iterator();
-  constexpr istream_iterator(default_sentinel_t);
-  istream_iterator(istream_type& s);
-  // ...
 private:
   basic_istream<charT, traits>* in_stream;  // 说明专用
   T value;                                  // 说明专用
 };
 ```
 
-¶2：`T` 须满足 *Cpp17DefaultConstructible*、*Cpp17CopyConstructible*、*Cpp17CopyAssignable*。
+它内部只有两样东西：指向流的指针，和最近读到的值。¶2 要求 `T` 可默认构造、可复制构造、可复制赋值。
 
-**构造**（[istream.iterator.cons]）：
+### 构造时就读取 [istream.iterator.cons]
 
-- 默认构造与 `istream_iterator(default_sentinel_t)`：构造**流末迭代器**（[[g:end-of-stream-iterator]]），值初始化 `value`，后条件 `in_stream == nullptr`（¶1–¶2）。¶3：若 `auto x = T();` 中 `T()` 是常量初始化器，这两个构造函数是 constexpr 的——所以流末迭代器可以是编译期常量。
-- `istream_iterator(istream_type& s)`：¶4 以 `addressof(s)` 初始化 `in_stream`，值初始化 `value`，**然后调用 `operator++()`**——也就是说，**构造时就读入第一个值**。
-- 复制构造：复制 `in_stream` 与 `value`；`noexcept` 等价于 `is_nothrow_copy_constructible_v<T>`（¶5–¶6）。¶7：若 `T` 可平凡析构，析构函数是平凡的。
+¶1–¶2 默认构造函数和 `istream_iterator(default_sentinel_t)` 构造**流末迭代器**（end-of-stream iterator）：`in_stream` 为空指针。¶3 如果 `T()` 是常量初始化器，这两个构造函数是 constexpr 的，流末迭代器因此可以是编译期常量。
 
-**操作**（[istream.iterator.ops]）：
+¶4 `istream_iterator(istream_type& s)` 保存 `addressof(s)`，值初始化 `value`，然后调用 `operator++()`。所以构造的时候就已经读入了第一个值。
 
-- `operator*`、`operator->`：前条件 `in_stream != nullptr`；返回 `value` / `addressof(value)`——**对迭代器内部成员的引用**，这正是 [[iterator.requirements.general#15]] 允许非前向迭代器做的事。
-- `operator++()`：前条件 `in_stream != nullptr`；效果 `if (!(*in_stream >> value)) in_stream = nullptr;`——**读失败（包括到达文件尾、格式错误）即变为流末迭代器**。
-- 后置 `operator++(int)` 是预置的（[[over.inc.default]]）：复制、前置递增、返回副本。
-- `x == y`：`x.in_stream == y.in_stream`（¶8）——**只比较流指针**，不比较读到的值，也不比较"位置"。
-- `i == default_sentinel`：`!i.in_stream`（¶9）。
+¶5–¶7 复制构造函数复制两个成员，异常规格等价于 `is_nothrow_copy_constructible_v<T>`；`T` 可平凡析构时，析构函数也是平凡的。
 
-!!! note "“流末”与“同一流”的比较语义"
-    两个流末迭代器相等；两个绑定同一流、都未到末尾的迭代器也相等（即便它们的 `value` 不同）；绑定不同流的迭代器不相等。这对算法唯一有意义的用途——"与流末比较"——是足够的。
+### 操作 [istream.iterator.ops]
 
-## `ostream_iterator`（[ostream.iterator]）
+¶1–¶4 `*it` 返回 `value`，`it->` 返回 `addressof(value)`，前置条件都是 `in_stream` 非空。返回的是迭代器内部成员的引用，迭代器递增或销毁后这个引用就变了或失效了。[[iterator.requirements.general#15]] 允许前向以下的迭代器这样做。
 
-¶1 of [ostream.iterator.general]：用 `operator<<` 向构造时绑定的输出流写入连续元素；若构造时给了 `charT*`，这个**分隔串**（*delimiter string*）会在**每个** `T` 写出**之后**写出。
+¶5–¶7 `++it` 等价于：
 
 ```cpp
-template<class T, class charT = char, class traits = char_traits<charT>>
+if (!(*in_stream >> value)) in_stream = nullptr;
+```
+
+读失败，包括到达文件尾和格式不符，都会把迭代器变成流末迭代器。后置 `++` 声明为 `= default`，效果是复制、前置递增、返回副本（[[over.inc.default]]）。
+
+¶8 `x == y` 返回 `x.in_stream == y.in_stream`，只比较流指针，不比较读到的值。¶9 `i == default_sentinel` 返回 `!i.in_stream`。
+
+所以两个流末迭代器相等；两个绑定同一个流、都没到末尾的迭代器也相等，即使它们的 `value` 不同；绑定不同流的迭代器不相等。算法拿流迭代器唯一需要做的比较是判断有没有到末尾，这些语义已经够用。
+
+## ostream_iterator [ostream.iterator]
+
+[ostream.iterator.general] ¶1 `ostream_iterator` 用 `<<` 把连续的元素写到构造时绑定的输出流。如果构造时给了一个 `charT*`，这个**分隔串**（delimiter string）会在每个 `T` 写出之后写出。
+
+```cpp
+template<class T, class charT = char,
+         class traits = char_traits<charT>>
 class ostream_iterator {
 public:
   using iterator_category = output_iterator_tag;
@@ -97,18 +153,27 @@ private:
 };
 ```
 
-- 构造：存 `addressof(s)` 与 `delimiter`（或 `nullptr`）——**只存指针**，分隔串必须在迭代器使用期间保持存活。
-- `operator=(const T& value)`：`*out_stream << value; if (delim) *out_stream << delim; return *this;`
-- `operator*`、`operator++` 都返回 `*this`（与插入迭代器同样的设计，见 [[insert.iterators]]）。
-- `difference_type` 是 `ptrdiff_t`（C++20 起，此前为 `void`），所以它建模 `output_iterator<..., T>`，可用于 `ranges::copy`。
+[ostream.iterator.cons.des] ¶1–¶2 构造函数只保存流的地址和分隔串的指针，所以分隔串必须在迭代器使用期间一直存活。
 
-注意赋值运算符的参数是 `const T&`：`ostream_iterator<int>` 写 `double` 会先转换为 `int`。分隔串在**每个**元素之后写出，所以 `1, 2, 3, ` 末尾总有一个多余的分隔符——C++23 的 `std::format("{}", vec)`/`std::print` 或 `views::join_with` 是更好的选择。
+[ostream.iterator.ops] ¶1 赋值做的事情如同：
 
-## `istreambuf_iterator`（[istreambuf.iterator]）
+```cpp
+*out_stream << value;
+if (delim) *out_stream << delim;
+return *this;
+```
 
-¶1 of [istreambuf.iterator.general]：从构造时绑定的流缓冲中读取连续**字符**。`operator*` 访问当前字符；每次 `operator++` 前进到下一字符；到达流尾（`sgetc()` 返回 `traits::eof()`）时，迭代器变得等于**流末**值。默认构造与 `istreambuf_iterator(nullptr)` 都构造流末迭代器。所有特化都必须有**平凡**复制构造函数、constexpr 默认构造函数和**平凡**析构函数——它本质上就是一个 `streambuf*`。
+¶2–¶3 `operator*` 和 `operator++` 都返回 `*this`，于是 `*it++ = x` 最终就是调用赋值。插入迭代器也是这样设计的（[[insert.iterators]]）。
 
-¶2：对流末迭代器调用 `operator*` 是 {{ub}}；对其他值返回一个 `char_type`。不能通过输入迭代器赋值字符。
+赋值运算符的参数是 `const T&`，所以向 `ostream_iterator<int>` 写 `double` 会先转换成 `int`。`difference_type` 是 `ptrdiff_t`，它因此建模 `output_iterator`，可以交给 `ranges::copy`。
+
+分隔串在每个元素之后写出，`1, 2, 3, ` 的末尾总有一个多余的分隔符。只是想打印一个容器时，C++23 的 `std::print("{}", v)` 或 `views::join_with` 更合适。
+
+## istreambuf_iterator [istreambuf.iterator]
+
+[istreambuf.iterator.general] ¶1 `istreambuf_iterator` 从构造时绑定的流缓冲读取连续的字符。`operator*` 访问当前字符，`operator++` 前进到下一个字符。到达流尾时，也就是 `sgetc()` 返回 `traits::eof()` 时，迭代器变得等于流末迭代器。默认构造函数和 `istreambuf_iterator(nullptr)` 都构造流末迭代器。
+
+¶1 最后还要求所有特化都有平凡的复制构造函数、constexpr 默认构造函数和平凡的析构函数。它实际上就是一个包装起来的 `streambuf*`，可以像指针一样随意复制。
 
 ```cpp
 template<class charT, class traits = char_traits<charT>>
@@ -118,80 +183,45 @@ public:
   using value_type        = charT;
   using difference_type   = traits::off_type;
   using pointer           = unspecified;
-  using reference         = charT;          // 不是引用！
+  using reference         = charT;   // 不是引用
   // ...
   charT operator*() const;
   istreambuf_iterator& operator++();
   proxy operator++(int);
   bool equal(const istreambuf_iterator& b) const;
 private:
-  streambuf_type* sbuf_;                    // 说明专用
+  streambuf_type* sbuf_;             // 说明专用
 };
 ```
 
-要点：
+它不经过格式化：直接调用流缓冲的 `sgetc()`、`sbumpc()`，不跳过空白，不做与 locale 相关的数字解析，也不设置流的状态位。所以它比 `istream_iterator<char>` 快得多，而且保留空白。`reference` 是按值的 `charT`，因此它不满足前向迭代器的要求。
 
-- **不经格式化**：直接调用 `sbuf_->sgetc()`/`sbumpc()`，不跳过空白、不考虑 `locale` 的数字解析、不设置流的状态位，因而远比 `istream_iterator<char>` 快，而且**保留空白**。
-- `reference` 是 `charT`（按值）：它不满足 *Cpp17ForwardIterator*，也不建模 `forward_iterator`。
-- 构造（[istreambuf.iterator.cons]）：¶1 `sbuf_` 为空指针时即流末迭代器；可从 `istream&`（取 `s.rdbuf()`）、`streambuf*`、*`proxy`* 构造。
-- `operator*`：返回 `sbuf_->sgetc()`；`operator++()`：如同 `sbuf_->sbumpc()`（[istreambuf.iterator.ops] ¶1–¶2）。注意：`operator*` **不消费**字符，`++` 才消费。
-- 后置 `++`：返回 *`proxy`*`(sbuf_->sbumpc(), sbuf_)`（¶4）。[istreambuf.iterator.proxy] ¶1：*`proxy`* 是说明专用类，保存"上一个字符"`keep_`，其 `operator*` 返回它——这让 `*it++` 拿到的是递增前的字符。实现可以不提供名叫 `proxy` 的类，只要功能等价。
-- `equal(b)`：¶5 当且仅当**两者都在流末或都不在流末**时返回 `true`，**不论用的是哪个 streambuf**。`==` 即 `a.equal(b)`（¶6），与 `default_sentinel` 比较即 `i.equal(s)`（¶7，`default_sentinel` 隐式构造为流末迭代器）。
+¶2 对流末迭代器调用 `operator*` 是 {{ub}}。
 
-`equal` 的语义比 `istream_iterator` 的 `==` 还"粗"：两个读不同文件、都没读完的 `istreambuf_iterator` 也相等。判断"是否到末尾"会调用 `sgetc()`，因此比较本身可能触发底层读取。
+### 构造与操作
 
-## `ostreambuf_iterator`（[ostreambuf.iterator]）
+[istreambuf.iterator.cons] ¶1 `sbuf_` 是空指针，当且仅当迭代器是流末迭代器。¶2–¶5 可以从 `default_sentinel_t`、`istream&`（取 `s.rdbuf()`）、`streambuf*` 和 *`proxy`* 构造。
 
-¶1：向构造时绑定的输出流写入连续字符。
+[istreambuf.iterator.ops] ¶1 `*it` 返回 `sbuf_->sgetc()`，不消费字符。¶2–¶3 `++it` 如同 `sbuf_->sbumpc()`，这一步才消费字符。
 
-- 构造（[ostreambuf.iter.cons]）：从 `ostream&`（前条件 `s.rdbuf()` 非空）或 `streambuf*`（前条件非空）。
-- `operator=(charT c)`：若 `failed()` 为 `false`，调用 `sbuf_->sputc(c)`；否则无效果（[ostreambuf.iter.ops] ¶1）。
-- `operator*`、`operator++` 返回 `*this`。
-- `failed()`：若之前任何一次 `operator=` 中 `sputc()` 返回了 `traits::eof()`，则为 `true`（¶5）。一旦失败，后续写入都被静默丢弃——用完后检查 `failed()` 是唯一得知写入失败的途径。
+¶4 后置 `++` 返回 *`proxy`*`(sbuf_->sbumpc(), sbuf_)`。[istreambuf.iterator.proxy] ¶1 *`proxy`* 是说明专用的类，成员 `keep_` 保存递增前的字符，`operator*` 返回它，所以 `*it++` 拿到的是递增前的字符。实现不必提供叫 `proxy` 的类，功能等价即可。
 
-## 例子：读写整个流
+¶5 `a.equal(b)` 当且仅当两个迭代器都在流末，或者都不在流末时返回 `true`，不管它们用的是哪个流缓冲。¶6 `a == b` 就是 `a.equal(b)`。¶7 与 `default_sentinel` 比较就是与流末迭代器 `equal`。
 
-```cpp run title="stream_iters.cpp" ok
-#include <algorithm>
-#include <cassert>
-#include <iterator>
-#include <sstream>
-#include <string>
-#include <vector>
+这比 `istream_iterator` 的 `==` 更粗：两个读不同文件、都没读完的 `istreambuf_iterator` 也相等。判断是否到了流末要调用 `sgetc()`，所以比较本身就可能触发底层的读取。
 
-int main() {
-    // istreambuf_iterator：原样读入全部字符（含空白）
-    std::istringstream in1("a b  c\n");
-    std::string s{std::istreambuf_iterator<char>(in1), std::istreambuf_iterator<char>()};
-    assert(s == "a b  c\n");
+## ostreambuf_iterator [ostreambuf.iterator]
 
-    // istream_iterator<char>：经 operator>> 读入，跳过空白
-    std::istringstream in2("a b  c\n");
-    std::string t{std::istream_iterator<char>(in2), std::istream_iterator<char>()};
-    assert(t == "abc");
+[ostreambuf.iterator.general] ¶1 `ostreambuf_iterator` 把连续的字符写到构造时绑定的输出流。
 
-    // ostream_iterator：分隔串写在每个元素之后
-    std::ostringstream os;
-    std::vector<int> v{1, 2, 3};
-    std::ranges::copy(v, std::ostream_iterator<int>(os, ", "));
-    assert(os.str() == "1, 2, 3, ");
+- [ostreambuf.iter.cons] ¶1–¶4 从 `ostream&` 构造时，前置条件是 `s.rdbuf()` 非空；从 `streambuf*` 构造时，前置条件是指针非空。
+- [ostreambuf.iter.ops] ¶1–¶2 `it = c`：如果 `failed()` 为 `false`，调用 `sbuf_->sputc(c)`；否则什么也不做。
+- ¶3–¶4 `operator*` 和 `operator++` 返回 `*this`。
+- ¶5 之前任何一次赋值中 `sputc()` 返回了 `traits::eof()`，`failed()` 就为 `true`。
 
-    // 构造即读取；与 default_sentinel 比较
-    std::istringstream in3("10 20");
-    std::istream_iterator<int> it(in3);
-    assert(*it == 10);
-    ++it; ++it;                                  // 第二次 ++ 读失败 → 流末
-    assert(it == std::default_sentinel);
-    assert(it == std::istream_iterator<int>());
+写失败一次之后，后续的字符都被静默丢弃。写完检查 `failed()` 是得知写入失败的唯一途径。
 
-    // ostreambuf_iterator
-    std::ostringstream os2;
-    auto out = std::ranges::copy(std::string("hi"), std::ostreambuf_iterator<char>(os2)).out;
-    assert(os2.str() == "hi" && !out.failed());
-}
-```
-
-## 陷阱：最令人烦恼的解析
+## 陷阱：声明了一个函数
 
 ```cpp run title="vexing.cpp"
 #include <iterator>
@@ -199,51 +229,45 @@ int main() {
 #include <string>
 
 int main() {
-    std::istringstream in("hello");
-    std::string s(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    // 上一行声明了一个名为 s 的函数！
-    // 第一个"参数"是名为 in、类型为 istreambuf_iterator<char> 的形参，
-    // 第二个是类型为"返回 istreambuf_iterator<char> 的无参函数（的指针）"的无名形参。
-    // clang：warning: parentheses were disambiguated as a function declaration [-Wvexing-parse]
-    (void)s;   // 只是取了函数名，并没有读任何东西
+  std::istringstream in("hello");
+  std::string s(std::istreambuf_iterator<char>(in),
+                std::istreambuf_iterator<char>());
+  (void)s;   // s 是函数名，什么也没读
 }
 ```
 
-依据 [[dcl.ambig.res]]，"能被解释为声明的就是声明"。修正方法任选其一：
+这段代码良构，但 `s` 不是字符串，而是一个函数的声明。第一个形参名叫 `in`，类型是 `istreambuf_iterator<char>`，外面多了一层括号；第二个形参没有名字，类型是返回 `istreambuf_iterator<char>` 的无参函数（调整为函数指针）。本机 Clang 23 给出警告 `parentheses were disambiguated as a function declaration [-Wvexing-parse]`。
 
-- 用花括号：`std::string s{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};`（上一节的写法）；
-- 给第一个实参多加一层括号：`std::string s((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());`；
-- 先给迭代器命名：`std::istreambuf_iterator<char> b(in), e; std::string s(b, e);`。
+依据 [[dcl.ambig.res]]，一条语句既能解释成声明、又能解释成表达式时，按声明处理。修正方法任选一种：
 
-## 常见误区
+- 用花括号：`std::string s{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};`，就是前面完整例子的写法；
+- 给第一个实参再加一层括号：`std::string s((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());`；
+- 先给迭代器起名：`std::istreambuf_iterator<char> b(in), e; std::string s(b, e);`。
 
-!!! pitfall "以为构造 `istream_iterator` 不会读取"
-    构造即读第一个值。只是创建一个 `istream_iterator` 而不使用，也会消费输入；在交互程序里这会阻塞等待。配合 `counted_iterator`/`views::take` 时还会多读一个（[[iterators.counted]]）。
+## 常见误解
+
+!!! pitfall "构造 `istream_iterator` 不会读取"
+    构造时就读入第一个值。创建一个 `istream_iterator` 而不使用，也会消费输入；在交互程序里会阻塞等待输入。与 `counted_iterator`、`views::take` 组合时还会多读一个（[[iterators.counted]]）。
 
 !!! pitfall "用 `istream_iterator<char>` 读文本"
-    它经 `>>` 读取，会跳过所有空白。要原样读字符，用 `istreambuf_iterator<char>`（或对流设置 `std::noskipws`）。
-
-!!! pitfall "解引用后保存引用"
-    `istream_iterator::operator*` 返回对迭代器内部成员的引用；迭代器递增或销毁后，引用指向的值会变化或失效。
+    它经 `>>` 读取，会跳过所有空白。要原样读字符，用 `istreambuf_iterator<char>`，或者先对流设置 `std::noskipws`。
 
 ## 思考题
 
-!!! question "思考题"
-    1. `std::istream_iterator<int>` 遇到输入 `"12 abc 34"` 时，`std::vector<int> v(it, {})` 得到什么？流处于什么状态？
-    2. 为什么 `istreambuf_iterator` 必须有平凡的复制构造函数和析构函数？
+!!! question "思考题 1"
+    输入是 `"12 abc 34"`，`std::istream_iterator<int> b(in); std::vector<int> v(b, {});` 得到什么？流处于什么状态？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-1. `{12}`。读 `12` 成功；读 `abc` 时 `>>` 失败，设置 `failbit`，迭代器变为流末，循环结束。流此后处于失败状态，`34` 未被读取；要继续读需先 `clear()` 并跳过坏数据。（`v(it, {})` 中 `{}` 推导为 `istream_iterator<int>`，因为两个参数是同一个模板参数 `InputIterator`，第二个由第一个推导。）
-2. 它在语义上就是一个 `streambuf*` 包装，平凡性保证它可以像指针一样廉价地复制、按值传递（通过寄存器）、存放在需要平凡类型的地方，且复制不会产生任何副作用——这对标准库内部大量按值传递迭代器的算法很重要。
+`v` 是 `{12}`。读 `12` 成功；读 `abc` 时 `>>` 失败，设置 `failbit`，迭代器变成流末迭代器，构造到此结束。`34` 没有被读取，流处于失败状态，要继续读必须先 `clear()` 并跳过坏数据。`{}` 能用，是因为构造函数的两个参数是同一个模板参数，类型由第一个实参推导，`{}` 就值初始化出一个流末迭代器。
 </details>
 
-## 小结
+!!! question "思考题 2"
+    `std::istringstream in("abc");` 之后，`auto a = std::istreambuf_iterator<char>(in); auto b = a; ++a;`，`*b` 是什么？
 
-!!! summary
-    - `istream_iterator`：经 `>>` 读取；构造即读；读失败变流末；`==` 只比流指针；`*` 返回内部成员的引用。
-    - `ostream_iterator`：经 `<<` 写；分隔串在每个元素后（含最后一个）；只存指针。
-    - `istreambuf_iterator`：逐字符、不跳空白、`reference` 为 `charT`；`*` 不消费、`++` 消费；后置 `++` 返回 proxy；`equal` 只看是否都在流末。
-    - `ostreambuf_iterator`：逐字符 `sputc`；`failed()` 报告写失败，失败后写入被丢弃。
-    - 输入流迭代器都可与 `default_sentinel` 比较；注意 `string s(istreambuf_iterator<char>(in), ...)` 的声明歧义。
+<details markdown="1">
+<summary>答案</summary>
+
+`'b'`。`a` 和 `b` 只是同一个 `streambuf*` 的两份副本，没有各自的位置。`++a` 让流缓冲消费了 `'a'`，之后 `*b` 调用 `sgetc()`，看到的是流缓冲当前的字符 `'b'`。这就是单遍输入迭代器的含义：递增一个副本会让其他副本也跟着变。
+</details>
