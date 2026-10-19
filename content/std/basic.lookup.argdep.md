@@ -445,7 +445,7 @@ int main() {
 
 - 无限定查找找到的是一个变量，按 ¶1.3 关掉 ADL，调用方不会被劫持；
 - ADL 只收集函数，永远不会找到这个对象，所以它不会和别处的同名函数形成二义；
-- 对象的 `operator()` 内部再以受控的方式做 ADL，同时检查语义要求。例如 `std::ranges::begin` 会查找成员 `begin()` 或经 ADL 找到的非成员 `begin`，并用 `void begin(auto&) = delete;` 这样的重载挡住 `std::begin`。
+- 对象的 `operator()` 内部再以受控的方式做 ADL，同时检查语义要求。例如 `std::ranges::swap` 先用 `template<class T> void swap(T&, T&) = delete;` 这样的重载（俗称毒丸）挡住 `std::swap`，再做 ADL；`std::ranges::begin` 原本也有这样的毒丸，[[P2602R2]] 之后它对非成员 `begin` 只做实参依赖查找（[[range.access.begin#2]]），不再需要毒丸。
 
 `std::ranges` 里的算法（`find`、`sort`……）也有同样的性质，俗称 niebloid（得名于 Eric Niebler）。C++20 只要求它们不被 ADL 找到、被无限定查找找到时关掉 ADL，没有规定必须是对象。C++26 起，标准直接把它们定义为**算法函数对象**（algorithm function object，[[alg.func.obj]]）：
 
