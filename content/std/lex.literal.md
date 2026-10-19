@@ -1,146 +1,141 @@
 ---
 title: 字面量
-summary: 七种字面量的总览，以及其中最简单的两种：布尔字面量 true/false 和指针字面量 nullptr。
-status: draft
+summary: 七种字面量各是什么、作为表达式时是什么值类别，以及最简单的两种：布尔字面量 true/false 和指针字面量 nullptr。
+status: done
 covers: lex.literal.kinds, lex.bool, lex.nullptr
-related: lex.icon, lex.ccon, lex.fcon, lex.string, lex.ext, expr.prim.literal, conv.ptr, conv.bool, topics/value-categories, topics/overload-resolution-walkthrough
+related: lex.icon, lex.ccon, lex.fcon, lex.string, lex.ext, expr.prim.literal, conv.ptr, dcl.init.general, topics/value-categories
 tags: 字面量
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-[[lex.literal]] 是第 5 章最长的部分，共九个小节。本页覆盖总览（[[lex.literal.kinds]]）和两个只有一段的小节：布尔字面量（[[lex.bool]]）与指针字面量（[[lex.nullptr]]）。其余各种字面量各有专页：
+!!! tldr
+    - 字面量有七种：整数、字符、浮点、字符串、布尔、指针、用户定义。
+    - 字符串字面量是左值，用户定义字面量的值类别跟随对应的运算符调用，其余字面量都是纯右值。
+    - `-1` 不是字面量，而是一元 `-` 作用于字面量 `1`。
+    - `true` 和 `false` 的类型是 `bool`，在 `#if` 里也保持原值，不会被替换成 0。
+    - `nullptr` 的类型 `std::nullptr_t` 不是指针类型；它能转换成任何指针，却不能转换成整数，所以重载决议不会把它当成 `int`。
 
-| 小节 | 字面量 | 页面 |
+**字面量**（literal）是直接写在源码里的值，例如 `42`、`'a'`、`"abc"`。第 5 章只规定字面量的拼写和它的类型、值；作为表达式时它是左值还是右值，由 [[expr.prim.literal]] 规定。
+
+## 七种字面量（[[lex.literal.kinds]]）
+
+¶1 文法把字面量分成七种，其中五种各有专页：
+
+| 种类 | 例子 | 页面 |
 |---|---|---|
-| 5.13.2 | 整数字面量 `42`、`0x2A`、`0b101`、`1'000uz` | [[lex.icon]] |
-| 5.13.3 | 字符字面量 `'a'`、`u8'x'`、`L'w'`、`'\n'` | [[lex.ccon]] |
-| 5.13.4 | 浮点字面量 `3.14`、`1e-9f`、`0x1p-3` | [[lex.fcon]] |
-| 5.13.5–6 | 字符串字面量、原始字符串、不求值字符串 | [[lex.string]] |
-| 5.13.7 | 布尔字面量 `true`、`false` | 本页 |
-| 5.13.8 | 指针字面量 `nullptr` | 本页 |
-| 5.13.9 | 用户定义字面量 `12_km`、`"abc"s` | [[lex.ext]] |
+| 整数字面量 | `42`、`0x2A`、`0b101`、`1'000uz` | [[lex.icon]] |
+| 字符字面量 | `'a'`、`u8'x'`、`L'w'`、`'\n'` | [[lex.ccon]] |
+| 浮点字面量 | `3.14`、`1e-9f`、`0x1p-3` | [[lex.fcon]] |
+| 字符串字面量 | `"abc"`、`R"(raw)"`、`u8"x"` | [[lex.string]] |
+| 布尔字面量 | `true`、`false` | 本页 |
+| 指针字面量 | `nullptr` | 本页 |
+| 用户定义字面量 | `12_km`、`"abc"s` | [[lex.ext]] |
 
-## 字面量的种类（[[lex.literal.kinds]]）
+### 值类别
 
-¶1 字面量有若干种：
+注 1 提醒，字面量作为表达式出现时具有类型和值类别。[[expr.prim.literal]] 的规定是：
 
-```
-literal:
-    integer-literal
-    character-literal
-    floating-point-literal
-    string-literal
-    boolean-literal
-    pointer-literal
-    user-defined-literal
-```
+- 字符串字面量是**左值**，指代一个静态存储期的字符串字面量对象（[[lex.string]]）；
+- 用户定义字面量的值类别与它对应的字面量运算符调用相同（[[lex.ext]]）；
+- 其余字面量都是纯右值。
 
-注 1：字面量作为表达式出现时，具有类型和值类别（[[expr.prim.literal]]）。
-
-第 5 章只规定字面量的词法形式，以及（对大多数种类而言）它的类型和值；字面量作为表达式时的值类别由 [[expr.prim.literal]] 规定：
-
-| 字面量 | 值类别 |
-|---|---|
-| *string-literal* | **左值**，指代对应的字符串字面量对象（[[lex.string#9]]） |
-| *user-defined-literal* | 与对应的字面量运算符调用表达式相同（[[lex.ext]]） |
-| 其他所有字面量 | 纯右值（prvalue） |
+字符串字面量是左值，是因为它确实对应内存里的一个数组对象，所以可以对它取地址，也可以把它绑定到数组引用上。
 
 ```cpp run title="literal-categories.cpp" ok
 #include <type_traits>
 #include <cstddef>
-static_assert(std::is_same_v<decltype(("abc")), const char(&)[4]>);  // 左值：数组的引用
-static_assert(std::is_same_v<decltype((42)), int>);                  // 纯右值
+// decltype((e)) 对左值给出引用类型，对纯右值给出非引用类型
+static_assert(std::is_same_v<decltype(("abc")), const char(&)[4]>);
+static_assert(std::is_same_v<decltype((42)), int>);
 static_assert(std::is_same_v<decltype(true), bool>);
 static_assert(std::is_same_v<decltype(nullptr), std::nullptr_t>);
-const char (*p)[4] = &"abc";   // 可以对字符串字面量取地址：它是左值
+const char (*p)[4] = &"abc";   // OK：字符串字面量是左值，可以取地址
 int main() {}
 ```
 
 ### 负数不是字面量
 
-文法里没有负号：`-1` 是一元运算符 `-` 作用于整数字面量 `1`。这个看似无关紧要的事实，导致了 [[lex.icon]] 中 `-2147483648` 的反常类型，也是 `INT_MIN` 通常被定义为 `(-2147483647 - 1)` 的原因。
+文法里没有负号。`-1` 是一元运算符 `-` 作用于整数字面量 `1`。这一点会影响类型：`-2147483648` 的类型由 `2147483648` 决定，在 32 位 `int` 的平台上是 `long` 或 `long long`，而不是 `int`（见 [[lex.icon]]）。这也是 `INT_MIN` 通常被定义为 `(-2147483647 - 1)` 的原因。
 
-### 字面量与常量表达式
+### 字面量与常量表达式不是一回事
 
-字面量是词法概念，常量表达式是语义概念（[[expr.const]]）。`42` 是字面量，也是常量表达式；`"abc"` 是字面量，也是常量表达式（一个指代静态存储期对象的左值）；`std::numeric_limits<int>::max()` 是常量表达式，但不是字面量。字面类型（literal type，[[basic.types.general]]）则是另一个完全无关的概念，名字相似只是历史原因。
+字面量是词法概念，常量表达式是语义概念（[[expr.const]]）。`42` 两者都是；`std::numeric_limits<int>::max()` 是常量表达式，却不是字面量。**字面类型**（literal type，[[basic.types.general]]）又是另一个概念，指可以在常量求值中使用的类型，和字面量只是名字相近。
 
 ## 布尔字面量（[[lex.bool]]）
 
-```
-boolean-literal:
-    false
-    true
-```
-
 ¶1 布尔字面量是关键字 `false` 和 `true`，类型为 `bool`。
 
-值得注意的有几点：
+它们参与算术时按整数提升变成 `int` 的 0 和 1（[[conv.prom]]），所以 `true + true == 2`。
 
-- `true`、`false` 既是关键字也是字面量。它们在预处理器中也有特殊地位：在 `#if` 中，`true` 和 `false` 不会被替换为 0（[[cpp.cond]]），而其他关键字会。
-- `true` 和 `false` 是 `bool` 纯右值，在整数提升中分别变为 `1` 和 `0`（[[conv.prom]]）。所以 `true + true == 2`。
-- C 语言直到 C23 才把 `true`/`false` 变成关键字（此前它们是 `<stdbool.h>` 中的宏，值为 `int` 类型的 1 和 0）。
+预处理器也认识它们。`#if` 求值时，宏展开之后剩下的标识符和关键字一律替换为 0，只有 `true` 和 `false` 例外（[[cpp.cond]]）。所以 `#if true` 在 C++ 里成立。
 
 ```cpp run title="bool-literal.cpp" ok
-static_assert(true + true == 2);               // 提升为 int
+static_assert(true + true == 2);     // 提升为 int
+#if true && !false                   // 预处理器保留 true/false 的值
 static_assert(sizeof(true) == sizeof(bool));
-#if true && !false                              // 预处理器认识 true/false
-static_assert(true);
 #endif
 int main() {}
 ```
 
+C 语言直到 C23 才把 `true`、`false` 变成关键字，此前它们是 `<stdbool.h>` 中值为 `int` 1 和 0 的宏。
+
 ## 指针字面量（[[lex.nullptr]]）
 
-```
-pointer-literal:
-    nullptr
-```
+¶1 指针字面量是关键字 `nullptr`，类型为 `std::nullptr_t`。
 
-¶1 指针字面量是关键字 `nullptr`，类型为 `std::nullptr_t`。注 1：`std::nullptr_t` 是一个独立的类型，既不是指针类型，也不是成员指针类型；它的纯右值是**空指针常量**，可以转换为空指针值或空成员指针值（[[conv.ptr]]、[[conv.mem]]）。
+注 1 补充了这个类型的性质：`std::nullptr_t` 是一个独立的类型，既不是指针类型，也不是成员指针类型。它的纯右值是**空指针常量**，可以转换为任何指针类型的空指针值，或任何成员指针类型的空成员指针值（[[conv.ptr]]、[[conv.mem]]）。
 
 ### 为什么需要 `nullptr`
 
-在 C++11 之前，空指针常量只能是值为 0 的整数字面量（`0`、`0L`；实现常把 `NULL` 定义为 `0` 或编译器内建的 `__null`）。问题在于它的类型是整数：
+C++11 之前，空指针常量只能是值为 0 的整数字面量，例如 `0`、`0L`。它的类型是整数，重载决议也就把它当整数看：
 
 ```cpp title="null-overload.cpp" error
 #include <cstddef>
 void f(int);
 void f(char*);
 void g() {
-  f(0);         // 调用 f(int)——多半不是程序员想要的
-  f(NULL);      // 取决于 NULL 的定义：f(int)，或者有歧义（本例 Clang 报歧义）
-  f(nullptr);   // OK：f(char*)，nullptr_t → char* 是指针转换，→ int 不可能
+  f(0);         // 选 f(int)，多半不是本意
+  f(NULL);      // error: 本机 NULL 是 __null，两个重载有歧义
+  f(nullptr);   // OK：选 f(char*)
 }
 ```
 
-（标准只规定 `NULL` 是实现定义的空指针常量（[[support.types.nullptr]]）。在 Clang/libc++ 下 `NULL` 是 `__null`，此处调用有歧义，所以本例标为非良构。）
+`NULL` 的定义由实现决定（[[support.types.nullptr]]），可能是 `0`、`0L` 或编译器内建的 `__null`，所以 `f(NULL)` 在不同平台上可能选 `f(int)`，也可能有歧义。本机 Clang 23 报歧义。
 
-`nullptr` 的类型 `std::nullptr_t` 能隐式转换为任何指针类型和成员指针类型，但**不能**隐式转换为整数类型，它正是靠这一点解决了重载问题。在模板实参推导中，`nullptr` 推导出 `std::nullptr_t`，而 `0` 推导出 `int`，因此经过完美转发后，空指针的含义也能保留下来。
+`std::nullptr_t` 能隐式转换为任何指针类型，却不能隐式转换为整数类型，`f(nullptr)` 因此只有一个可行函数。在模板实参推导中，`nullptr` 推导出 `std::nullptr_t`，而 `0` 推导出 `int`，所以经过完美转发后，空指针的含义也不会丢失。
 
-### `std::nullptr_t` 的性质
+### `std::nullptr_t` 的其他性质
 
-- `sizeof(std::nullptr_t) == sizeof(void*)`（[[basic.fundamental]]）。
-- 它是标量类型；`decltype(nullptr)` 即 `std::nullptr_t`（`<cstddef>` 中就是这样定义的）。
-- 可以定义 `std::nullptr_t` 类型的变量。[[conv.ptr]] 把空指针常量定义为值为零的整数字面量，或 `std::nullptr_t` 类型的纯右值，所以这种变量经左值到右值转换后，同样可以转换为任何指针类型。
-- 转换为 `bool` 只允许在直接初始化中进行（[[conv.bool]]）：
+[[basic.fundamental#16]] 规定，`std::nullptr_t` 的大小和对齐与 `void*` 相同；它的值表示可以不含任何位，因为所有值都相同。`<cstddef>` 用 `decltype(nullptr)` 定义这个名字。
 
-```cpp title="nullptr-bool.cpp" error
-bool a{nullptr};       // OK：直接初始化，值为 false
-bool b = nullptr;      // error：拷贝初始化不允许 nullptr_t → bool
+可以定义 `std::nullptr_t` 类型的变量。读出来的值是 `std::nullptr_t` 纯右值，也是空指针常量，所以同样能转换为任何指针。
+
+转换为 `bool` 只允许在直接初始化中进行（[[dcl.init.general#15.8]]），结果为 `false`：
+
+<div class="compare" markdown="1">
+
+```cpp ok
+bool a{nullptr};   // OK：直接初始化，false
 ```
 
-这条限制可以防止把 `if (p == nullptr)` 误写成 `bool flag = nullptr;` 这类错误而不被发现。
+```cpp error
+bool b = nullptr;  // error：复制初始化
+```
+
+</div>
+
+Clang 对左边仍会给出 `-Wnull-conversion` 警告，因为这种写法几乎总是笔误。
 
 !!! history
-    `nullptr` 在 C++11 引入（[[N2431]]）。C23 也引入了 `nullptr` 和 `nullptr_t`，语义与 C++ 基本一致。
+    `nullptr` 由 C++11 引入（[[N2431]]）。C23 也引入了 `nullptr` 和 `nullptr_t`，语义与 C++ 基本一致。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "以为字符串字面量是右值"
-    `"abc"` 是左值（`const char[4]` 类型的数组），所以可以取地址，也可以绑定到 `const char(&)[4]`。它在大多数上下文中会退化为 `const char*` 纯右值，那是数组到指针转换的结果。
+!!! pitfall "字符串字面量是右值"
+    `"abc"` 是 `const char[4]` 类型的左值，可以取地址，也可以绑定到 `const char(&)[4]`。它在大多数场合变成 `const char*` 纯右值，那是数组到指针转换的结果，不是字面量本身的值类别。
 
-!!! pitfall "以为 `nullptr` 是指针"
-    `std::nullptr_t` 不是指针类型，`std::is_pointer_v<std::nullptr_t>` 为 `false`。不能对它解引用，`nullptr_t*` 和 `T*` 之间也没有转换。
+!!! pitfall "`nullptr` 是一个指针"
+    `std::is_pointer_v<std::nullptr_t>` 为 `false`。`nullptr` 不能解引用，`std::nullptr_t` 也不是任何 `T*`。它只是能转换成指针。
 
 ## 思考题
 
@@ -161,12 +156,3 @@ bool b = nullptr;      // error：拷贝初始化不允许 nullptr_t → bool
 - `true`：`bool` 纯右值。
 - `1.0f`：`float` 纯右值。
 </details>
-
-## 小结
-
-!!! summary
-    - 字面量有七种：整数、字符、浮点、字符串、布尔、指针、用户定义。
-    - 字符串字面量是左值；用户定义字面量的值类别与对应的运算符调用相同；其他字面量都是纯右值。
-    - 负数不是字面量。
-    - `true`/`false` 的类型是 `bool`，预处理器也认识它们。
-    - `nullptr` 的类型是 `std::nullptr_t`（不是指针类型）；它是空指针常量，不能转换为整数，只在直接初始化中转换为 `bool`。
