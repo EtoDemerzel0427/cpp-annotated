@@ -747,3 +747,11 @@ figure.code figcaption > * { white-space: nowrap; flex-shrink: 0; }
 figure.code figcaption > .code-title { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .compare .code-lang { display: none; }
 .compare figure.code figcaption { padding-left: 12px; gap: 8px; }
+
+/* sidebar legend: filled dot = own page, hollow = explained on the parent clause's page */
+.sb-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 6px 10px; font-size: 11.5px; color: var(--ink-3); }
+.sb-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sb-legend .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.sb-legend .dot.hollow { background: none; border: 1px solid var(--accent); }
+/* anchors placed before headings of covered subclauses */
+.sec-anchor { display: block; height: 0; scroll-margin-top: calc(var(--topbar-h) + 16px); }

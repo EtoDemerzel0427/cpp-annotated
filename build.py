@@ -182,6 +182,36 @@ class Ctx:
         for sid in list(self.covered):
             if sid in self.std_pages:
                 del self.covered[sid]
+        # covered subclauses whose page has a heading naming them -> linkable as page#sid
+        self.sections = set()
+        for p in self.std_pages.values():
+            covers = {sid for sid, q in self.covered.items() if q is p}
+            if covers:
+                self.sections |= {sid for _, sid in section_heads(FENCE_RE.sub("", p["src"]), covers)}
+        self.parent = {c: e["id"] for e in by_id.values() for c in e["children"]}
+
+    def section_of(self, sid):
+        """The covered subclause itself or its nearest ancestor that has a heading on the covering page."""
+        page = self.covered.get(sid)
+        while sid and page and self.covered.get(sid) is page:
+            if sid in self.sections:
+                return sid
+            sid = self.parent.get(sid)
+        return None
+
+
+SECTION_HEAD_RE = re.compile(r"^\s{0,3}#{2,6} .*$", re.M)
+
+
+def section_heads(src, covers):
+    """(line start offset, stable name) for each heading that names a covered subclause, first occurrence only."""
+    out, seen = [], set()
+    for m in SECTION_HEAD_RE.finditer(src):
+        named = [x for x in re.findall(r"\[\[?([A-Za-z][\w.]*)", m.group(0)) if x in covers]
+        if named and named[0] not in seen:
+            seen.add(named[0])
+            out.append((m.start(), named[0]))
+    return out
 
 
 def godbolt_url(code, lang, opts):
@@ -332,7 +362,8 @@ def xref_html(target, text, ctx, page_key):
     if sid in ctx.covered:
         p = ctx.covered[sid]
         tip = title + f" — 见本站 [{p['id']}] {p['title']}"
-        frag = f"#{sid}-p" + para.split(".")[0] if para and re.match(r"^\d+(\.\d+)*$", para) else ""
+        frag = (f"#{sid}-p" + para.split(".")[0] if para and re.match(r"^\d+(\.\d+)*$", para)
+                else f"#{ctx.section_of(sid)}" if ctx.section_of(sid) else "")
         return f'<a class="xref std local" href="{{ROOT}}{p["url"]}{frag}" data-tip="{html.escape(tip)}">{html.escape(label)}</a>'
     if not entry:
         # stable names deeper than the TOC are fine; just point at eel.is
@@ -396,10 +427,9 @@ def para_anchors(s, covers=(), start=None):
 
     lines = s.split("\n")
     for i, line in enumerate(lines):
-        if covers and re.match(r"\s*#{2,6} ", line):
-            named = [x for x in re.findall(r"\[([A-Za-z][\w.]*)\]", line) if x in covers]
-            if named:
-                cur = named[0]
+        m = re.match(r'<a class="sec-anchor" id="([^"]+)"></a>', line)
+        if m:
+            cur = m.group(1)
         lines[i] = re.sub(r"¶(\d+(?:[.\-–]\d+)*)", repl, line)
     return "\n".join(lines)
 
@@ -415,13 +445,15 @@ def render_markdown(src, ctx, page_key):
         return f"{indent}XCODEBLOCKX{len(blocks) - 1}X"
 
     src = FENCE_RE.sub(stash, src)
+    page = ctx.pages.get(page_key)
+    covers = {sid for sid, p in ctx.covered.items() if p is page} if page else set()
+    for pos, sid in reversed(section_heads(src, covers)):
+        src = src[:pos] + f'<a class="sec-anchor" id="{sid}"></a>\n\n' + src[pos:]
     # a `"` inside an admonition title cannot be escaped; render `\"` as a plain quote instead of showing the backslash
     src = re.sub(r'^([ \t]*!!! [\w-]+ ".*)$', lambda m: m.group(1).replace('\\"', '"'), src, flags=re.M)
     src = ADMON_RE.sub(
         lambda m: f'{m.group(1)}{m.group(2)} {m.group(3)} "{admonition_title(m.group(3))}"', src)
     src = expand_inline(src, ctx, page_key)
-    page = ctx.pages.get(page_key)
-    covers = {sid for sid, p in ctx.covered.items() if p is page} if page else set()
     # a page usually opens with its own [x.general] subclause without a heading naming it
     start = page["id"] + ".general" if page and page.get("id", "") + ".general" in covers else None
     src = para_anchors(src, covers, start)
@@ -778,7 +810,9 @@ def nav_node(e, by_id, ctx):
         n["p"] = ctx.std_pages[e["id"]]["status"]
     elif e["id"] in ctx.covered:
         n["p"] = "cov"
-        n["u"] = ctx.covered[e["id"]]["url"]
+        sec = ctx.section_of(e["id"])
+        n["u"] = ctx.covered[e["id"]]["url"] + (f"#{sec}" if sec else "")
+        n["h"] = ctx.covered[e["id"]]["id"]
     if e["children"]:
         n["c"] = [nav_node(by_id[c], by_id, ctx) for c in e["children"]]
     return n

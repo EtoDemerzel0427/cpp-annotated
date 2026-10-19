@@ -72,7 +72,8 @@
       var cls = "sb-link " + (h.local ? "has-page" : "no-page") + (n.p ? " st-" + n.p : "");
       if (depth === 0) cls = "sb-link" + (subtreeHasPage(n) ? " has-page" : "") ;
       if (n.i === PAGE) { cls += " current"; row.classList.add("current"); }
-      var a = el("a", { class: cls, href: h.href, title: n.t + "  [" + n.i + "]" + (h.local ? "" : " ↗ eel.is") },
+      var tip = n.t + "  [" + n.i + "]" + (n.h ? "\n在 [" + n.h + "] 页中讲解" : h.local ? "" : "  ↗ eel.is");
+      var a = el("a", { class: cls, href: h.href, title: tip },
         '<span class="n">' + esc(n.n) + '</span><span class="l">' + esc(n.z || n.t) + "</span>");
       if (!h.local) { a.target = "_blank"; a.rel = "noopener"; }
       row.appendChild(caret); row.appendChild(a); li.appendChild(row);
@@ -116,6 +117,8 @@
       });
       sidebar.classList.toggle("sb-hide-empty", hide);
       sidebar.appendChild(f);
+      sidebar.appendChild(el("div", { class: "sb-legend" },
+        '<span><i class="dot"></i>独立成页</span><span><i class="dot hollow"></i>在上级条款页中讲解</span><span class="ext">灰色：链到 eel.is 原文</span>'));
       var nodes = NAV.clauses.filter(function (c) { return NAV.groups[c.i] === tab; });
       sidebar.appendChild(renderTree(nodes, 0));
     } else {
