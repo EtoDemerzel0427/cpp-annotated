@@ -1,71 +1,99 @@
 ---
 title: 复合表达式
-summary: 7.6 导读：由运算符把子表达式组合起来的全部表达式（后缀、一元、强制转换、成员指针、算术、移位、比较、位运算、逻辑、条件、yield、throw、赋值、逗号），按语法从紧到松排列的地图
-status: draft
+summary: 用运算符把子表达式组合起来的全部表达式，按优先级从紧到松排成的一张地图，以及读每个运算符条款时要找的几项规定。
+status: done
 related: expr, expr.pre, expr.prim, basic.lval, conv, expr.arith.conv, intro.execution, topics/casts
 tags: 表达式, 导读
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-[[expr.prim]] 讲的是表达式中不可再分的部分：字面量、名字、`this`、lambda……**复合表达式**（compound expressions）是第 7.6 节的总称，涵盖所有用某个运算符把一个或多个子表达式组合起来的表达式。7.6 本身没有任何规范性文字，只是一个容器。不过它的子条款顺序就是运算符的优先级顺序，理解这一节主要靠这一点（见 [[expr]] 导读中"标准里没有优先级表"一节）。
+!!! tldr
+    - 7.6 的子条款顺序就是内置运算符的优先级顺序：越靠前结合得越紧。
+    - 后缀表达式（7.6.1）是最紧的一层，函数调用、成员访问、下标、后缀自增、四个具名转换和函数式转换都在这里。
+    - C 风格转换 `(T)e` 不在后缀层，单独排在 7.6.3，介于一元运算符和 `.*` 之间。
+    - 每个运算符条款规定同样几件事：操作数要求、结果的类型与值类别、求值顺序、哪些情形是 UB。
+    - 7.6 描述的都是内置运算符。操作数是类或枚举类型时，运算符可能变成一次函数调用，但求值顺序仍按内置运算符的规则。
 
-读每个子条款时，可以带着同样的五个问题：
+```cpp run ok
+int main() {
+  int a[] = {1, 2, 3};
+  int* p = a;
+  int x = *p++;     // *(p++)：后缀 ++ 比一元 * 紧
+  int y = -a[1];    // -(a[1])：下标比一元 - 紧
+  return x + y;     // 1 + (-2)
+}
+```
 
-1. 语法：操作数是哪一级非终结符？（这决定优先级与结合性。）
-2. 操作数要求：要求 glvalue 还是 prvalue？要不要完整类型？施行哪些标准转换（[[conv]]）？
-3. 结果：类型是什么？值类别是什么（[[basic.lval]]）？是不是位域？
-4. 求值顺序：操作数之间是先序、非决定性先序，还是无序（[[intro.execution]]）？C++17 为多个运算符补上了顺序。
-5. 未定义、未指定、实现定义的情形：什么时候是 UB？
+`*p++` 为什么是 `*(p++)`？标准里没有优先级表。优先级来自语法：后缀 `++` 的操作数只能是后缀表达式，而一元 `*` 的操作数可以是任何更紧的一层，所以 `*p++` 只有一种分析方式，即 `*` 作用于后缀表达式 `p++`（见 [[expr]] 导读）。**复合表达式**（compound expressions）是第 7.6 节的总称，指所有用运算符把子表达式组合起来的表达式；它的子条款就按这个语法层次从紧到松排列。7.6 本身没有规范性文字。
 
 ## 7.6 的地图
 
-| 小节 | 非终结符 | 形式 | 本站笔记 | 一句话 |
+| 小节 | 层（非终结符） | 形式 | 本站笔记 | 要点 |
 |---|---|---|---|---|
-| 7.6.1 | *postfix-expression* | 总览 | [[expr.post]] | 后缀表达式从左到右结合 |
-| 7.6.1.2 | | `a[b]` | [[expr.sub]] | 内置下标 ≡ `*((a)+(b))`；C++23 起逗号分隔多实参 |
-| 7.6.1.3 | | `f(args)` | [[expr.call]] | 函数调用：求值顺序、形参初始化与销毁、可变实参、契约 |
-| 7.6.1.4 | | `T(x)` `T{x}` `auto(x)` | [[expr.type.conv]] | 函数式转换：单个实参时等价于 C 风格转换 |
-| 7.6.1.5 | | `a.b` `a->b` | [[expr.ref]] | 成员访问：结果的类型与值类别、cv 传播、`mutable` |
-| 7.6.1.6 | | `a++` `a--` | [[expr.post.incr]] | 后缀自增：结果是旧值的 prvalue |
-| 7.6.1.7 | | `dynamic_cast` | [[expr.dynamic.cast]] | 运行期检查的多态转换 |
-| 7.6.1.8 | | `typeid` | [[expr.typeid]] | 类型识别：多态 glvalue 取动态类型 |
-| 7.6.1.9 | | `static_cast` | [[expr.static.cast]] | 语义上说得通的转换：隐式转换及其逆、向下转换、`void*` |
-| 7.6.1.10 | | `reinterpret_cast` | [[expr.reinterpret.cast]] | 重新解释位置/位模式：指针 ↔ 整数、无关指针 |
+| 7.6.1 | *postfix-expression* | 总览 | [[expr.post]] | 后缀运算符从左到右结合 |
+| 7.6.1.2 | | `a[b]` | [[expr.post]] | 内置下标就是 `*((a)+(b))`；C++23 起可有多个实参 |
+| 7.6.1.3 | | `f(args)` | [[expr.call]] | 求值顺序、形参的初始化与销毁、可变实参、契约 |
+| 7.6.1.4 | | `T(x)` `T{x}` `auto(x)` | [[expr.type.conv]] | 单个圆括号实参时等价于 C 风格转换 |
+| 7.6.1.5 | | `a.b` `a->b` | [[expr.ref]] | 结果的类型与值类别、cv 的合并、`mutable` |
+| 7.6.1.6 | | `a++` `a--` | [[expr.post]] | 结果是旧值的 prvalue |
+| 7.6.1.7 | | `dynamic_cast` | [[expr.dynamic.cast]] | 运行时检查的多态转换 |
+| 7.6.1.8 | | `typeid` | [[expr.typeid]] | 多态 glvalue 取动态类型 |
+| 7.6.1.9 | | `static_cast` | [[expr.static.cast]] | 隐式转换及其逆、向下转换、`void*` |
+| 7.6.1.10 | | `reinterpret_cast` | [[expr.reinterpret.cast]] | 指针与整数互转、无关类型的指针互转 |
 | 7.6.1.11 | | `const_cast` | [[expr.const.cast]] | 只改 cv 限定 |
-| 7.6.2 | *unary-expression* | `*a` `&a` `-a` `!a` `~a` `++a` `sizeof` `alignof` `noexcept` `new` `delete` `co_await` `^^` | [[expr.unary]] | 一元运算符（右结合） |
-| 7.6.3 | *cast-expression* | `(T)e` | [[expr.cast]] | C 风格转换：依次尝试五种具名转换组合 |
+| 7.6.2 | *unary-expression* | `*a` `&a` `-a` `!a` `~a` `++a` `sizeof` `alignof` `noexcept` `new` `delete` `co_await` `^^` | [[expr.unary]] | 一元运算符，右结合 |
+| 7.6.3 | *cast-expression* | `(T)e` | [[expr.cast]] | 依次尝试几种具名转换的组合 |
 | 7.6.4 | *pm-expression* | `.*` `->*` | [[expr.mptr.oper]] | 成员指针运算 |
 | 7.6.5–7.6.6 | *multiplicative / additive* | `* / %`、`+ -` | [[expr.mul]]、[[expr.add]] | 算术；指针算术 |
-| 7.6.7 | *shift-expression* | `<< >>` | [[expr.shift]] | 移位；C++17 起左操作数先序于右操作数 |
+| 7.6.7 | *shift-expression* | `<< >>` | [[expr.shift]] | C++17 起左操作数先序于右操作数 |
 | 7.6.8 | *compare-expression* | `<=>` | [[expr.spaceship]] | 三路比较（C++20） |
-| 7.6.9–7.6.10 | *relational / equality* | `< > <= >=`、`== !=` | [[expr.rel]]、[[expr.eq]] | 比较；指针比较的未指定情形 |
+| 7.6.9–7.6.10 | *relational / equality* | `< > <= >=`、`== !=` | [[expr.rel]]、[[expr.eq]] | 指针比较中的未指定情形 |
 | 7.6.11–7.6.13 | | `& ^ \|` | [[expr.bit.and]]、[[expr.xor]]、[[expr.or]] | 位运算 |
 | 7.6.14–7.6.15 | | `&& \|\|` | [[expr.log.and]]、[[expr.log.or]] | 短路求值，左先序于右 |
-| 7.6.16 | *conditional-expression* | `a ? b : c` | [[expr.cond]] | 条件运算符：复杂的公共类型 / 值类别规则 |
+| 7.6.16 | *conditional-expression* | `a ? b : c` | [[expr.cond]] | 第二、三操作数的公共类型与值类别 |
 | 7.6.17 | *yield-expression* | `co_yield` | [[expr.yield]] | 协程产出 |
 | 7.6.18 | *throw-expression* | `throw` | [[expr.throw]] | 抛出异常 |
-| 7.6.19 | *assignment-expression* | `= += -= …` | [[expr.assign]] | 赋值；C++17 起右操作数先序于左操作数 |
-| 7.6.20 | *expression* | `a, b` | [[expr.comma]] | 逗号：左先序于右，结果是右操作数 |
+| 7.6.19 | *assignment-expression* | `= += -= …` | [[expr.assign]] | C++17 起右操作数先序于左操作数 |
+| 7.6.20 | *expression* | `a, b` | [[expr.comma]] | 左先序于右，结果是右操作数 |
 
-!!! note "为什么 `expr.cast` 不挨着其他转换？"
-    四个具名转换（`static_cast` 等）在语法上是后缀表达式（它们自带括号，结合得像函数调用一样紧），所以放在 7.6.1；而 C 风格的 `(T)e` 是 *cast-expression*，它的操作数是另一个 *cast-expression*，优先级介于一元运算符和 `.*` 之间，所以单独排在 7.6.3。函数式转换 `T(x)` 也是后缀表达式（7.6.1.4）。把这些转换放在一起讲的专题见 [[topics/casts]]。
+### 为什么 C 风格转换单独排在后面
 
-## 后缀表达式的地位
+四个具名转换自带括号，`static_cast<T>(e)` 在语法上和函数调用一样是后缀表达式，所以放在 7.6.1。函数式转换 `T(x)` 也是后缀表达式。C 风格的 `(T)e` 则是 *cast-expression*，它的操作数是另一个 *cast-expression*，结合得比一元运算符松、比 `.*` 紧，所以排在 7.6.3。
 
-后缀表达式是优先级最高的一层运算符，而且是左结合的：`a.b[c](d)->e++` 从左到右依次套上去。需要特殊规则的操作几乎都集中在这一层，包括函数调用、成员访问、下标和五种转换，所以 7.6.1 是整个第 7 章里篇幅最大、引用最多的部分之一。建议按下面的顺序阅读：
+```cpp run ok
+struct S { int m; };
+int main() {
+  S s{1};
+  S* p = &s;
+  long n = (long)p->m;   // (long)(p->m)：-> 比转换紧
+  return static_cast<int>(n) - 1;
+}
+```
 
-1. 先读 [[expr.post]]（语法与下标、后缀自增），对后缀表达式这一层有个整体印象；
-2. 再读 [[expr.call]] 和 [[expr.ref]]，这两节定义了调用和成员访问的值类别规则，后面的运算符重载、`std::invoke`、移动语义都依赖它们；
-3. 然后读四个具名转换：[[expr.static.cast]] → [[expr.const.cast]] → [[expr.reinterpret.cast]] → [[expr.dynamic.cast]]，最后读把它们串起来的 [[expr.cast]]；
-4. [[expr.typeid]] 与 [[expr.dynamic.cast]] 一起读，它们共享 RTTI 机制。
+把各种转换放在一起比较的专题见 [[topics/casts]]。
+
+## 每个运算符条款规定什么
+
+7.6 下的子条款写法相似，每一条都回答下面几件事：
+
+1. 操作数要求：要 glvalue 还是 prvalue，要不要完整类型，对操作数施行哪些标准转换（[[conv]]）。
+2. 结果：类型、值类别（[[basic.lval]]），是否是位域。
+3. 求值顺序：操作数之间是先序、非决定性先序还是无序（[[intro.execution]]）。C++17 给下标、移位、赋值、成员访问等运算符补上了顺序。
+4. 未定义、未指定和实现定义的情形。
 
 ## 与运算符重载的关系
 
-7.6 下的每一条描述的都是内置运算符。如果操作数之一是类或枚举类型，`a + b` 可能被解释为 `operator+(a, b)` 的调用，此时适用的是函数调用（[[expr.call]]）的规则，而不是 [[expr.add]] 的规则（见 [[expr.pre#2]] 与 [[over.match.oper]]）。但有一个例外：C++17 起，以运算符写法调用重载运算符时，操作数的求值顺序按内置运算符的规则（[[expr.call]] 注 8），所以 `std::cout << f() << g()` 中 `f()` 一定先于 `g()`。
+如果某个操作数是类或枚举类型，`a + b` 可能被解释为 `operator+(a, b)` 的调用（[[expr.pre#2]]、[[over.match.oper]]）。这时结果的类型和值类别按函数调用的规则（[[expr.call]]）确定，而不是按 [[expr.add]]。
 
-## 小结
+求值顺序是例外。C++17 起，用运算符写法调用重载运算符时，操作数按内置运算符规定的顺序求值（[[expr.call#8]] 注 8）。所以 `std::cout << f() << g()` 中 `f()` 一定先于 `g()`。重载的 `&&`、`||` 也是左操作数先求值，但两个操作数都会求值，不再短路。
 
-!!! summary
-    - 7.6 是一个容器条款，子条款按优先级从高到低排列；优先级是语法的推论。
-    - 每读一个运算符，问五件事：语法、操作数要求、结果类型与值类别、求值顺序、UB。
-    - 后缀表达式（7.6.1）是最复杂的一层：调用、成员访问、下标、五种转换中的四种都在这里；C 风格转换单独在 7.6.3。
+```cpp run ok
+#include <cstdio>
+#include <sstream>
+int f() { std::puts("f"); return 1; }
+int g() { std::puts("g"); return 2; }
+int main() {
+  std::ostringstream os;
+  os << f() << g();   // 先输出 f，再输出 g（C++17 起保证）
+}
+```
