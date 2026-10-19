@@ -1,413 +1,341 @@
 ---
 title: co_await
-summary: co_await 表达式如何由操作数一步步得到 awaiter（await_transform → operator co_await → 临时量实质化），await_ready / await_suspend / await_resume 的求值顺序与 await_suspend 三种返回类型（void、bool、coroutine_handle 对称转移）的语义，以及 co_await 可以出现的位置
+summary: co_await 表达式怎样从操作数得到 awaiter，再按 await_ready、await_suspend、await_resume 的结果决定是否挂起、把控制交给谁、得到什么值，以及它可以写在哪里。
 status: draft
 since: c++20
 papers: P0912R5, P0913R1
 related: dcl.fct.def.coroutine, expr.yield, stmt.return.coroutine, coroutine.handle, support.coroutine, over.match.oper, class.temporary
 tags: 协程, co_await, awaiter, 对称转移
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-{{c++20}} `co_await e` 在协程中制造一个暂停点：它把当前协程挂起，把控制权交还给调用者或恢复者（resumer）；之后某个时刻有人通过 `std::coroutine_handle` 恢复它，协程就从这里继续执行，并把 `e` 所代表的计算的结果作为整个表达式的值。
+!!! tldr
+    - `co_await e` 先把 `e` 变成一个 awaiter 对象：promise 有 `await_transform` 就先调用它，再看有没有 `operator co_await`。
+    - 之后依次调用 awaiter 的三个成员：`await_ready()` 为真就不挂起；否则调用 `await_suspend(h)`，它的返回类型（`void`、`bool`、`coroutine_handle`）决定控制交给谁；恢复后 `await_resume()` 的结果就是整个表达式的值。
+    - 协程在调用 `await_suspend` 之前就已算作挂起，所以 `await_suspend` 可以把句柄交给别的线程去恢复。
+    - `await_suspend` 返回另一个协程的句柄时，那个协程被直接恢复（对称转移），实现可以做成尾调用，长链等待不会耗尽栈。
+    - `co_await` 不能出现在 `catch` 块、默认实参、静态局部变量的初始化器和契约谓词里。
 
-与 `throw` 或函数调用不同，`co_await` 的语义几乎**完全由库来定制**。标准只规定了一个固定的展开模板：先从操作数得到一个 **awaiter** 对象，再依次调用它的三个成员 `await_ready`、`await_suspend`、`await_resume`。这三个函数的返回类型和行为决定了要不要挂起、挂起之后把控制交给谁，以及恢复之后得到什么。理解本节，就是理解这个模板的每一个分支。
+{{c++20}} 函数体里只要出现 `co_await`、`co_yield` 或 `co_return`，这个函数就是**协程**（[[g:coroutine]]），见 [[dcl.fct.def.coroutine]]。协程可以在执行中途暂停，把控制交还给调用者，之后再从暂停的地方继续。是否是协程是函数定义的属性，调用者从声明上看不出来。
 
-预备知识：协程的定义、promise 对象、协程状态与替换后的函数体见 [[dcl.fct.def.coroutine]]；`co_yield` 是 `co_await promise.yield_value(e)` 的语法糖，见 [[expr.yield]]；`co_return` 见 [[stmt.return.coroutine]]；`std::coroutine_handle` 见 [[coroutine.handle]]。
+每个协程都关联一个 **promise 对象**（[[g:promise-object]]），它的类型由协程的返回类型决定，用来定制协程的行为。暂停的协程用 `std::coroutine_handle` 指代，对句柄调用 `resume()` 就能让它继续执行（[[coroutine.handle]]）。
 
-## 作用与文法（¶1）
+`co_await` 是让协程暂停的那个表达式。它的行为几乎完全由库代码决定：标准只规定一个固定的流程，在流程中的几个位置调用用户提供的函数。
 
-¶1 *await-expression* 的形式是 `co_await cast-expression`，所以 `co_await` 与其他一元运算符优先级相同：`co_await a + b` 是 `(co_await a) + b`，`co_await f().g()` 是 `co_await (f().g())`。
+## 一个最小的例子
 
-**只要函数体里出现了 `co_await`（或 `co_yield`、`co_return`），这个函数就是协程**（[[dcl.fct.def.coroutine#1]]）。语言中没有把函数声明为协程的语法；是否是协程是函数定义的属性，调用者看不出来。
-
-## 可以出现在哪里：挂起语境（¶2）
-
-¶2 `co_await` 只能作为潜在求值的表达式，出现在函数体或 lambda 的 *compound-statement* 中，并且：
-
-- 不能出现在异常处理器（*handler*，即 `catch` 块）里；
-- 在声明语句中只能出现在初始化器里，不能出现在数组边界等声明符位置；
-- 不能出现在默认实参里；
-- 不能出现在具有静态或线程存储期的块作用域变量的初始化器里；
-- 不能是契约断言谓词中的潜在求值子表达式 {{c++26}}（[[basic.contract]]）。
-
-满足这些条件的位置称为函数的**挂起语境**（[[g:suspension-context]]）。
-
-为什么有这些限制？
-
-- 潜在求值：`sizeof(co_await x)`、`decltype(co_await x)` 中的表达式不会被求值，而挂起是一个运行期动作，放在那里没有意义。
-- 不在 `catch` 块里：在 handler 中，当前异常对象处于正在处理的状态（[[except.handle]]），其生命周期与异常处理的动态上下文绑定，`std::current_exception` 和用 `throw;` 重新抛出都依赖于它。如果在 handler 中挂起，协程可能在另一个线程、另一个异常处理上下文中被恢复，这些状态难以定义，实现代价也很高（例如 Itanium ABI 中当前已捕获异常的栈是线程局部的）。解决办法是在 `catch` 中记录信息，离开 handler 之后再 `co_await`。
-- 静态局部变量的初始化器：这种初始化保证只执行一次且线程安全（[[stmt.dcl]]），通常由一个锁或守卫变量实现。如果持有守卫时挂起，其他线程会一直阻塞，甚至死锁。
-- 默认实参：默认实参在调用者中求值，而调用者不一定是协程。
-- 契约谓词：契约断言的求值可能被忽略、观察或重复（[[basic.contract]]），在其中挂起会使协程的控制流取决于契约的求值语义。
-
-```cpp title="await-contexts.cpp" error
+```cpp run ok
 #include <coroutine>
-struct task { struct promise_type {
+#include <cstdio>
+
+struct task {
+  struct promise_type {
     task get_return_object() { return {}; }
     std::suspend_never initial_suspend() noexcept { return {}; }
     std::suspend_never final_suspend() noexcept { return {}; }
     void return_void() {}
     void unhandled_exception() {}
-}; };
-
-task ok() {
-    try { co_await std::suspend_never{}; }               // OK：在 try 块里可以
-    catch (...) { }
-    int x = (co_await std::suspend_never{}, 1);          // OK：声明的初始化器
-    (void)x;
-}
-task a() { try { } catch (...) { co_await std::suspend_never{}; } }   // error: 在 handler 中
-void c(int = (co_await std::suspend_never{}, 1));                     // error: 默认实参
-task d() { decltype(co_await std::suspend_never{})* p = nullptr; co_return; }  // error: 未求值语境
-task b() { static int s = (co_await std::suspend_never{}, 1); }       // error: 静态局部变量的初始化器
-```
-
-!!! warning "编译器现状"
-    上例中的前三处错误 Clang 23 都能诊断。最后一处（静态局部变量初始化器里的 `co_await`）按 ¶2 是非良构的，但截至写作时，Clang 23 接受了它，没有给出诊断。
-
-标准例 1 里还有两个位于挂起语境之外的典型例子：命名空间作用域变量的初始化器 `int a[] = { co_await h() };`，以及默认实参。
-
-## 辅助实体：从操作数到 awaiter（¶3）
-
-¶3 定义了求值 *await-expression* 时用到的一组辅助类型、表达式和对象，按顺序如下。
-
-### p 与 P：promise 对象（¶3.1）
-
-*p* 是命名外围协程 promise 对象的左值，`P` 是其类型。
-
-### a：await_transform（¶3.2）
-
-如果这个 *await-expression* 是用户写的（而不是由 `co_yield`、初始 await 或最终 await 隐式产生的），就在 `P` 的作用域中查找名字 `await_transform`（[[class.member.lookup]]）。只要找到至少一个声明：
-
-- *a* 就是 `p.await_transform(cast-expression)`；
-
-否则 *a* 就是操作数本身。
-
-几个要点：
-
-- **这里做的是名字查找，而不是检查能否调用**。只要 `P` 声明了任何一个 `await_transform`，用户写的所有 `co_await e` 都会改写成 `p.await_transform(e)`。如果没有能接受 `e` 的重载，结果是编译错误，而不是退回到不变换。这样一来，promise 类型就能以白名单的方式控制协程体内可以 `co_await` 什么（例如只允许 `co_await` 某些 Future 类型）。
-- 初始 await、最终 await 与 `co_yield` 不经过 `await_transform`：`initial_suspend()`、`final_suspend()`、`yield_value()` 本来就是 promise 自己的成员，没有必要再变换一次。
-
-### o：operator co_await（¶3.3）
-
-以 *a* 为实参，枚举可用的 `operator co_await` 函数（成员与非成员，与其他可重载的一元运算符一样按 [[over.match.oper]] 的规则），通过重载决议选出最佳函数：
-
-- 有歧义 → 非良构；
-- 没有可行函数 → *o* 就是 *a*；
-- 否则 *o* 是以 *a* 为实参对所选函数的调用。
-
-如果 *o* 是 prvalue，就应用临时量实质化，也就是说，**awaiter 是一个真实存在的临时对象**。
-
-### e：awaiter（¶3.4）
-
-*e* 是指代 *o* 求值结果的左值。因此之后所有的 `e.await_xxx()` 调用都作用于同一个对象。
-
-!!! note "awaiter 临时量的生命周期"
-    *o* 实质化得到的临时量与其他临时量一样，在包含 `co_await` 的完整表达式结束时销毁（[[class.temporary]]）。但这个完整表达式跨越了一次挂起：协程挂起时，临时量仍然存活，它和局部变量一样保存在**协程状态**（coroutine frame）中，而不是在栈上。因此 awaiter 可以安全地在 `await_suspend` 中保存 `this`，供恢复者之后读写。典型的做法是恢复者把 I/O 结果写入 awaiter 的成员，再由 `await_resume` 读出来。
-
-### h、await-ready、await-suspend、await-resume（¶3.5–¶3.8）
-
-- *h* 是指代外围协程的 `std::coroutine_handle<P>` 对象（¶3.5）；
-- *await-ready* 是 `e.await_ready()`，按语境转换为 `bool`（¶3.6）；
-- *await-suspend* 是 `e.await_suspend(h)`，它必须是 `void`、`bool` 或某个 `std::coroutine_handle<Z>` 类型的 prvalue（¶3.7）；
-- *await-resume* 是 `e.await_resume()`（¶3.8）。
-
-注意这三个函数都写成成员函数调用的形式，标准没有为它们提供非成员版本，也不做 ADL。`await_suspend` 的形参通常写成类型擦除的 `std::coroutine_handle<>`，由 `coroutine_handle<P>` 隐式转换而来；也可以写成 `coroutine_handle<P>`，以便访问 promise。
-
-完整的展开流程可以总结为下面的伪代码（标准中没有这样一段代码，但语义等价）：
-
-```text
-a = has_member_await_transform<P> ? p.await_transform(expr) : expr;      // ¶3.2
-o = 有可用的 operator co_await ? operator co_await(a) : a;                // ¶3.3
-auto&& e = o;                                                             // ¶3.4（prvalue 时实质化）
-if (!e.await_ready()) {                                                   // ¶5
-    <协程被视为已挂起>
-    根据 e.await_suspend(h) 的类型：
-      void              → 调用之；返回调用者/恢复者           [挂起点]
-      bool              → 调用之；若为 false 立即恢复，否则返回 [挂起点]
-      coroutine_handle  → 调用之，并 .resume() 其结果（对称转移）
-    <恢复点>
-}
-result = e.await_resume();                                                 // ¶5.2
-```
-
-## 类型与值类别（¶4）
-
-¶4 *await-expression* 的类型和值类别与 *await-resume* 表达式相同。`await_resume()` 返回 `int`，`co_await x` 就是 `int` prvalue；返回 `T&` 则是左值；返回 `void` 则 `co_await x` 是 `void` 表达式。
-
-## 求值（¶5）
-
-¶5 先求值（可能经过转换的）*o*，再求值 *await-ready*。之后分两种情况。
-
-### await_ready 为 false：挂起（¶5.1）
-
-此时**协程被视为已挂起**。注意，在调用 `await_suspend` 之前它就已经算作挂起了。这一点很关键：它意味着在 `await_suspend` 内部，其他线程就可以通过 `h` 恢复这个协程（`h.resume()`），而不会违反 [[dcl.fct.def.coroutine#8]] 中恢复未挂起的协程是 UB 的规则。
-
-然后根据 *await-suspend* 的类型分三种情况：
-
-**¶5.1.1 返回 `std::coroutine_handle<Z>`：对称转移。** 求值 *await-suspend*，然后对其结果调用 `.resume()`。注 1：这会恢复返回的那个协程；如此可以连续恢复任意多个协程，最终控制流回到当前协程的调用者或恢复者。
-
-**¶5.1.2 返回 `bool`。** 求值 *await-suspend*。如果结果为 `false`，当前协程立即恢复，就像没有挂起过一样，接着执行 `await_resume`；如果返回 `true`，协程保持挂起，控制返回调用者。这种形式的用途是：`await_suspend` 尝试注册回调时，如果发现操作已经完成、来不及注册，就返回 `false`，省去一次无意义的挂起和恢复。
-
-**¶5.1.3 返回 `void`。** 求值 *await-suspend*，然后控制流返回当前协程的调用者或恢复者，但**不退出任何作用域**（[[stmt.jump]]）：局部变量不会被析构，它们留在协程状态里。控制返回之前的那一点称为协程的**挂起点**（[[g:suspend-point]]）。
-
-**异常。** 如果 *await-suspend* 的求值以异常退出，异常会被捕获，协程随即恢复，然后异常立即重新抛出。效果是，异常就像是从 `co_await` 表达式本身抛出的一样，可以被协程体里包住 `co_await` 的 `try` 捕获。按字面，这句话只写在 ¶5.1.3（`void` 情形）之下；对于返回 `bool` 或 `coroutine_handle` 的 `await_suspend` 抛出异常的情形，本地验证 Clang 23 的行为与此相同（异常在协程体内的 `co_await` 处被捕获）。
-
-### 恢复后：await_resume（¶5.2）
-
-¶5.2 当 *await-ready* 为 `true`，或者协程被恢复（不是因为 `await_suspend` 抛出异常而恢复）时，求值 *await-resume*，其结果就是整个 *await-expression* 的结果。
-
-注 2：就顺序而言，*await-expression* 是**不可分割的**（indivisible，[[intro.execution]]），外面的表达式不能插入到 `co_await` 的中间步骤里。例如在 `f(co_await a, g())` 中，`g()` 要么在整个 `co_await a`（包括挂起和恢复）之前求值，要么在其之后求值，不会在挂起期间求值。
-
-## 例子
-
-### 不挂起：await_ready 返回 true；bool 版 await_suspend
-
-```cpp title="await-basic.cpp" run ok
-#include <coroutine>
-#include <cstdio>
-
-struct task {
-    struct promise_type {
-        task get_return_object() { return {}; }
-        std::suspend_never initial_suspend() noexcept { return {}; }
-        std::suspend_never final_suspend() noexcept { return {}; }
-        void return_void() {}
-        void unhandled_exception() {}
-    };
+  };
 };
 
-struct ready_awaiter {
-    int v;
-    bool await_ready() const noexcept { return true; }       // 不挂起
-    void await_suspend(std::coroutine_handle<>) noexcept {}  // 不会被调用
-    int await_resume() const noexcept { return v; }          // co_await 的结果：int prvalue
+struct ready {
+  int v;
+  bool await_ready() const noexcept { return true; }       // 已就绪：不挂起
+  void await_suspend(std::coroutine_handle<>) noexcept {}  // 不会被调用
+  int await_resume() const noexcept { return v; }          // co_await 的结果
 };
 
 struct maybe {
-    bool await_ready() const noexcept { return false; }      // 先算"挂起"
-    bool await_suspend(std::coroutine_handle<>) noexcept {
-        return false;                                         // ¶5.1.2：立即恢复
-    }
-    const char* await_resume() const noexcept { return "resumed immediately"; }
-};
-
-int main() {
-    auto co = []() -> task {
-        int x = co_await ready_awaiter{42};
-        std::printf("%d\n", x);
-        std::printf("%s\n", co_await maybe{});
-    };
-    co();
-}
-```
-
-程序输出 `42` 和 `resumed immediately`。标准库的 `std::suspend_always` / `std::suspend_never` 就是两个平凡的 awaiter：`await_ready` 分别返回 `false` / `true`，`await_suspend` 与 `await_resume` 都为空。
-
-### await_transform 与 operator co_await 的叠加
-
-```cpp title="await-transform.cpp" run ok
-#include <coroutine>
-#include <cstdio>
-
-struct awaiter_int {
-    int v;
-    bool await_ready() const noexcept { return true; }
-    void await_suspend(std::coroutine_handle<>) noexcept {}
-    int await_resume() const noexcept { return v; }
-};
-
-struct Seconds { int n; };
-awaiter_int operator co_await(Seconds s) { return {s.n * 1000}; }   // ¶3.3
-
-struct task {
-    struct promise_type {
-        task get_return_object() { return {}; }
-        std::suspend_never initial_suspend() noexcept { return {}; }
-        std::suspend_never final_suspend() noexcept { return {}; }
-        void return_void() {}
-        void unhandled_exception() {}
-        Seconds await_transform(int n) { return {n}; }              // ¶3.2
-    };
+  bool await_ready() const noexcept { return false; }
+  bool await_suspend(std::coroutine_handle<>) noexcept {
+    return false;                                           // 改主意：立即恢复
+  }
+  const char* await_resume() const noexcept { return "resumed immediately"; }
 };
 
 task co() {
-    int ms = co_await 3;   // a = p.await_transform(3) → Seconds{3}
-                           // o = operator co_await(a) → awaiter_int{3000}
-    std::printf("%d\n", ms);
+  int x = co_await ready{42};
+  std::printf("%d\n", x);
+  std::printf("%s\n", co_await maybe{});
 }
 
 int main() { co(); }
 ```
 
-在这里，即使 `Seconds` 有 `operator co_await`，写 `co_await Seconds{1}` 也会编译失败：promise 声明了 `await_transform`，于是要先调用 `p.await_transform(Seconds{1})`，而唯一的重载只接受 `int`。
+程序输出 `42` 和 `resumed immediately`。`task::promise_type` 是协程 `co` 的 promise 类型；`ready` 和 `maybe` 是 **awaiter**，也就是提供了 `await_ready`、`await_suspend`、`await_resume` 三个成员的对象。标准库的 `std::suspend_always` 和 `std::suspend_never` 是两个最简单的 awaiter：`await_ready` 分别返回 `false` 和 `true`，另外两个函数什么都不做。
 
-### 对称转移（symmetric transfer）
+¶1 *await-expression* 的文法是 `co_await cast-expression`，所以 `co_await` 与其他一元运算符优先级相同：`co_await a + b` 是 `(co_await a) + b`。
 
-```cpp title="symmetric-transfer.cpp" run ok
+## 从操作数得到 awaiter（¶3.1–¶3.4）
+
+`co_await x` 里的 `x` 不一定本身就是 awaiter。¶3 规定了一串辅助实体，按顺序如下：
+
+1. ¶3.1 *p* 是外围协程的 promise 对象，`P` 是它的类型。
+2. ¶3.2 在 `P` 的作用域里查找名字 `await_transform`。只要找到任何声明，*a* 就是 `p.await_transform(x)`；否则 *a* 就是 `x`。
+3. ¶3.3 以 *a* 为实参，像其他可重载的一元运算符一样对 `operator co_await` 做重载决议（[[over.match.oper]]）。有歧义则非良构；没有可行函数，*o* 就是 *a*；否则 *o* 是对所选函数的调用。
+4. ¶3.4 如果 *o* 是 prvalue，就做临时量实质化。*e* 是指代这个结果的左值，也就是 awaiter。之后的三次调用都作用在同一个对象 *e* 上。
+
+```cpp run ok
+#include <coroutine>
+#include <cstdio>
+
+struct awaiter_int {
+  int v;
+  bool await_ready() const noexcept { return true; }
+  void await_suspend(std::coroutine_handle<>) noexcept {}
+  int await_resume() const noexcept { return v; }
+};
+
+struct Seconds { int n; };
+awaiter_int operator co_await(Seconds s) { return {s.n * 1000}; }   // 第 3 步
+
+struct task {
+  struct promise_type {
+    task get_return_object() { return {}; }
+    std::suspend_never initial_suspend() noexcept { return {}; }
+    std::suspend_never final_suspend() noexcept { return {}; }
+    void return_void() {}
+    void unhandled_exception() {}
+    Seconds await_transform(int n) { return {n}; }                  // 第 2 步
+  };
+};
+
+task co() {
+  int ms = co_await 3;   // a = p.await_transform(3)   → Seconds{3}
+                         // o = operator co_await(a)    → awaiter_int{3000}
+  std::printf("%d\n", ms);
+}
+
+int main() { co(); }
+```
+
+第 2 步做的是名字查找，不是检查能否调用。promise 声明了 `await_transform`，所有用户写的 `co_await x` 都会改写成 `p.await_transform(x)`；没有能接受 `x` 的重载时直接编译失败，不会退回到不变换。在上例中写 `co_await Seconds{1}` 就会失败，因为唯一的 `await_transform` 只接受 `int`。promise 类型可以借此用白名单控制协程体里能等待什么。C++23 的 `std::generator` 把 `await_transform` 声明为 deleted（[[coro.generator.promise]]），于是生成器里不能写 `co_await`。
+
+`co_yield`、初始挂起和最终挂起隐式产生的 `co_await` 不经过第 2 步。它们的操作数是 `p.yield_value(v)`、`p.initial_suspend()`、`p.final_suspend()`，本来就由 promise 自己控制。
+
+第 4 步说明 awaiter 是一个真实存在的临时对象。它在包含 `co_await` 的完整表达式结束时销毁，而这个完整表达式跨越了挂起，所以协程挂起期间 awaiter 一直存活，和跨越挂起的局部变量一样保存在协程状态（[[g:coroutine-state]]）里。awaiter 因此可以在 `await_suspend` 里把 `this` 交给别人，比如让 I/O 完成时把结果写进自己的成员，再由 `await_resume` 读出来。
+
+## 三个成员函数与求值顺序（¶3.5–¶5）
+
+¶3.5–¶3.8 定义了要调用的表达式：*h* 是指代外围协程的 `std::coroutine_handle<P>`；*await-ready* 是 `e.await_ready()`，按语境转换为 `bool`；*await-suspend* 是 `e.await_suspend(h)`，类型必须是 `void`、`bool` 或某个 `std::coroutine_handle<Z>`；*await-resume* 是 `e.await_resume()`。
+
+三者都写成成员函数调用，没有非成员形式。`await_suspend` 的形参通常写成 `std::coroutine_handle<>`，由 `coroutine_handle<P>` 隐式转换而来；也可以写成 `coroutine_handle<P>`，以便访问 promise。
+
+¶4 整个 `co_await` 表达式的类型和值类别与 `await_resume()` 相同：返回 `int` 就是 `int` prvalue，返回 `T&` 就是左值，返回 `void` 就是 `void` 表达式。
+
+¶5 求值时先求 *o*，再求 `await_ready()`。整个流程可以写成下面的伪代码（标准里没有这段代码）：
+
+```text
+if (!e.await_ready()) {
+    <协程算作已挂起>
+    按 await_suspend(h) 的返回类型：
+      coroutine_handle  → 调用它，然后对返回的句柄调用 .resume()
+      bool              → 调用它；返回 false 则立即恢复当前协程
+      void              → 调用它，然后返回调用者或恢复者
+    <恢复后从这里继续>
+}
+result = e.await_resume();
+```
+
+### 挂起（¶5.1）
+
+¶5.1 `await_ready()` 为 `false` 时，协程算作已挂起，而且这发生在调用 `await_suspend` 之前。所以在 `await_suspend` 内部，另一个线程就可以通过 `h` 恢复这个协程，不会违反恢复未挂起协程是 UB 的规则（[[dcl.fct.def.coroutine#8]]）。
+
+接下来按 `await_suspend` 的返回类型分三种情况：
+
+- ¶5.1.1 返回 `std::coroutine_handle<Z>`：调用它，再对返回的句柄调用 `.resume()`。这叫**对称转移**（symmetric transfer），见下一节。注 1 指出，这样可以接连恢复任意多个协程，最终控制回到当前协程的调用者或恢复者。
+- ¶5.1.2 返回 `bool`：调用它，结果为 `false` 时当前协程立即恢复，接着执行 `await_resume`；为 `true` 时保持挂起。用途是 `await_suspend` 发现操作已经完成、来不及注册回调时返回 `false`，省掉一次挂起和恢复。
+- ¶5.1.3 返回 `void`：调用它，然后控制返回当前协程的调用者或恢复者，不退出任何作用域，局部变量也不析构。返回之前的那一点叫做**挂起点**（[[g:suspend-point]]）。
+
+¶5.1.3 还规定，如果 `await_suspend` 以异常退出，异常被捕获，协程恢复，然后异常立即重新抛出。效果是异常好像从 `co_await` 表达式本身抛出，可以被协程体里包住它的 `try` 捕获：
+
+```cpp run ok
+#include <coroutine>
+#include <cstdio>
+#include <stdexcept>
+
+struct task { struct promise_type {
+  task get_return_object() { return {}; }
+  std::suspend_never initial_suspend() noexcept { return {}; }
+  std::suspend_never final_suspend() noexcept { return {}; }
+  void return_void() {}
+  void unhandled_exception() { std::puts("unhandled"); }
+}; };
+
+struct throwing {
+  bool await_ready() { return false; }
+  void await_suspend(std::coroutine_handle<>) { throw std::runtime_error("boom"); }
+  void await_resume() { std::puts("never printed"); }
+};
+
+task t() {
+  try { co_await throwing{}; }
+  catch (const std::exception& e) { std::printf("caught in coroutine: %s\n", e.what()); }
+}
+
+int main() { t(); }
+```
+
+程序输出 `caught in coroutine: boom`，`await_resume` 不会被调用。按字面，这条规则只写在 `void` 的情形下；本机 Clang 23 对返回 `bool` 和 `coroutine_handle` 的 `await_suspend` 抛异常也是同样处理。
+
+### 恢复之后（¶5.2）
+
+¶5.2 `await_ready()` 为 `true`，或者协程被恢复（不是因为 `await_suspend` 抛异常而恢复）时，求值 `await_resume()`，结果就是整个 `co_await` 表达式的结果。
+
+注 2：就求值顺序而言，`co_await` 是不可分割的（[[intro.execution]]）。在 `f(co_await a, g())` 中，`g()` 要么在整个 `co_await a`（包括挂起和恢复）之前求值，要么在它之后，不会在挂起期间求值。
+
+`await_ready()` 返回 `true` 时 `await_suspend` 不会被调用，但它仍然必须能通过编译：¶3.7 的类型要求是编译期检查，与运行时走不走这一分支无关。
+
+## 对称转移
+
+一个协程等待另一个协程时，常见的写法是父协程挂起并恢复子协程，子协程结束时再恢复父协程。如果用返回 `void` 的 `await_suspend`，在函数里直接调用 `h.resume()`，每一次等待都会在栈上多出几层调用，循环一百万次就可能栈溢出。
+
+`await_suspend` 返回句柄时，当前协程先挂起，再由 `co_await` 的展开去恢复返回的协程。实现可以把这次恢复编译成尾调用：当前协程的 resume 函数先返回，再跳到目标协程，栈深度保持不变。没有要转移的目标时，返回 `std::noop_coroutine()`，恢复它什么也不做，控制直接回到调用者。
+
+```cpp run ok
 #include <coroutine>
 #include <cstdio>
 #include <exception>
 #include <utility>
 
 struct task {
-    struct promise_type {
-        std::coroutine_handle<> cont = std::noop_coroutine();
-        int value = 0;
-        task get_return_object() {
-            return task{std::coroutine_handle<promise_type>::from_promise(*this)};
-        }
-        std::suspend_always initial_suspend() noexcept { return {}; }   // 惰性启动
-        struct final_awaiter {
-            bool await_ready() noexcept { return false; }
-            std::coroutine_handle<>
-            await_suspend(std::coroutine_handle<promise_type> h) noexcept {
-                return h.promise().cont;     // 结束时"跳"回等待者
-            }
-            void await_resume() noexcept {}
-        };
-        final_awaiter final_suspend() noexcept { return {}; }
-        void return_value(int v) { value = v; }
-        void unhandled_exception() { std::terminate(); }
-    };
-
-    std::coroutine_handle<promise_type> h;
-    explicit task(std::coroutine_handle<promise_type> h) : h(h) {}
-    task(task&& o) noexcept : h(std::exchange(o.h, {})) {}
-    ~task() { if (h) h.destroy(); }
-
-    // task 本身就是 awaiter
-    bool await_ready() const noexcept { return false; }
-    std::coroutine_handle<> await_suspend(std::coroutine_handle<> caller) noexcept {
-        h.promise().cont = caller;
-        return h;                            // ¶5.1.1：直接恢复子协程
+  struct promise_type {
+    std::coroutine_handle<> cont = std::noop_coroutine();
+    int value = 0;
+    task get_return_object() {
+      return task{std::coroutine_handle<promise_type>::from_promise(*this)};
     }
-    int await_resume() const noexcept { return h.promise().value; }
+    std::suspend_always initial_suspend() noexcept { return {}; }   // 惰性启动
+    struct final_awaiter {
+      bool await_ready() noexcept { return false; }
+      std::coroutine_handle<>
+      await_suspend(std::coroutine_handle<promise_type> h) noexcept {
+        return h.promise().cont;     // 结束时转回等待者
+      }
+      void await_resume() noexcept {}
+    };
+    final_awaiter final_suspend() noexcept { return {}; }
+    void return_value(int v) { value = v; }
+    void unhandled_exception() { std::terminate(); }
+  };
+
+  std::coroutine_handle<promise_type> h;
+  explicit task(std::coroutine_handle<promise_type> h) : h(h) {}
+  task(task&& o) noexcept : h(std::exchange(o.h, {})) {}
+  ~task() { if (h) h.destroy(); }
+
+  // task 本身就是 awaiter
+  bool await_ready() const noexcept { return false; }
+  std::coroutine_handle<> await_suspend(std::coroutine_handle<> caller) noexcept {
+    h.promise().cont = caller;
+    return h;                        // ¶5.1.1：直接恢复子协程
+  }
+  int await_resume() const noexcept { return h.promise().value; }
 };
 
 task leaf(int i) { co_return i; }
 
 task sum(int n) {
-    int s = 0;
-    for (int i = 0; i < n; ++i)
-        s += co_await leaf(1);
-    co_return s;
+  int s = 0;
+  for (int i = 0; i < n; ++i)
+    s += co_await leaf(1);
+  co_return s;
 }
 
 int main() {
-    task t = sum(1'000'000);
-    t.h.resume();
-    std::printf("%d\n", t.h.promise().value);   // 1000000
+  task t = sum(1'000'000);
+  t.h.resume();
+  std::printf("%d\n", t.h.promise().value);   // 1000000
 }
 ```
 
-为什么需要对称转移？如果 `await_suspend` 返回 `void` 并在内部调用 `h.resume()`，那么父协程恢复子协程、子协程结束时再恢复父协程，就会形成嵌套的函数调用：每一轮循环都在栈上多压几帧，循环一百万次就可能栈溢出。返回 `coroutine_handle` 时，标准只要求求值 `await_suspend`，然后对结果调用 `.resume()`；实现可以把这个 `.resume()` 编译成**尾调用**（主流实现也确实如此）：当前协程的 resume 函数先返回，再跳转到目标协程，栈深度保持不变。没有可转移的目标时，用 `std::noop_coroutine()` 占位：恢复它什么也不做，直接返回调用者。
+标准只要求求值 `await_suspend` 再调用 `.resume()`，没有要求尾调用，这属于实现质量。但对称转移的设计目的就是让尾调用成为可能（[[P0913R1]]），主流实现也都这样做。本机 Clang 23 在 `-O0 -fsanitize=address` 下也能跑完这一百万次。
 
-标准本身并不要求尾调用，这属于实现质量问题，但对称转移的设计目的正是让尾调用成为可能（[[P0913R1]]）。
+## 可以写在哪里（¶2）
 
-### await_suspend 抛出异常
+¶2 `co_await` 只能作为潜在求值的表达式，出现在函数体或 lambda 体的复合语句里，并且：
 
-```cpp title="await-suspend-throws.cpp" run ok
+- 不在异常处理器（`catch` 块）里；
+- 在声明语句里，以及 `if`、`for` 等语句的初始化语句里，只能出现在初始化器中；
+- 不在默认实参里；
+- 不在静态或线程存储期的块作用域变量的初始化器里；
+- {{c++26}} 不是契约断言谓词中的潜在求值子表达式（[[basic.contract]]）。
+
+满足这些条件的位置叫做函数的**挂起语境**（[[g:suspension-context]]）。
+
+```cpp error
 #include <coroutine>
-#include <cstdio>
-#include <stdexcept>
-
 struct task { struct promise_type {
-    task get_return_object() { return {}; }
-    std::suspend_never initial_suspend() noexcept { return {}; }
-    std::suspend_never final_suspend() noexcept { return {}; }
-    void return_void() {}
-    void unhandled_exception() { std::puts("unhandled"); }
+  task get_return_object() { return {}; }
+  std::suspend_never initial_suspend() noexcept { return {}; }
+  std::suspend_never final_suspend() noexcept { return {}; }
+  void return_void() {}
+  void unhandled_exception() {}
 }; };
 
-struct throwing {
-    bool await_ready() { return false; }
-    void await_suspend(std::coroutine_handle<>) { throw std::runtime_error("boom"); }
-    void await_resume() { std::puts("never printed"); }
-};
-
-task t() {
-    try { co_await throwing{}; }       // 异常像是从 co_await 本身抛出
-    catch (const std::exception& e) { std::printf("caught in coroutine: %s\n", e.what()); }
+task ok() {
+  try { co_await std::suspend_never{}; }            // OK：try 块里可以
+  catch (...) {}
+  int x = (co_await std::suspend_never{}, 1);       // OK：初始化器
+  (void)x;
 }
-
-int main() { t(); }
+task a() { try {} catch (...) { co_await std::suspend_never{}; } }   // error: 在 handler 里
+void c(int = (co_await std::suspend_never{}, 1));                    // error: 默认实参
+task d() { decltype(co_await std::suspend_never{})* p = nullptr; co_return; }  // error: 未求值
+task b() { static int s = (co_await std::suspend_never{}, 1); }      // error: 静态局部变量
 ```
 
-程序输出 `caught in coroutine: boom`：协程先被恢复，异常再在 `co_await` 处重新抛出，`await_resume` 不会被调用。
+本机 Clang 23 诊断了前三处错误，但接受了最后一处（静态局部变量的初始化器），这是 Clang 的缺陷。
+
+每条限制都有原因：
+
+- 挂起是运行时动作，放在 `sizeof`、`decltype` 这类不求值的位置没有意义。
+- `catch` 块里有一个正在处理的异常，`throw;` 和 `std::current_exception` 都依赖它，而这份状态与线程绑定。协程可能在另一个线程上恢复，挂起会让这些状态难以定义。通常的做法是在 `catch` 里记下信息，离开后再 `co_await`。
+- 静态局部变量的初始化保证只执行一次而且线程安全（[[stmt.dcl]]），通常靠一把锁实现。持锁挂起会让其他线程一直阻塞。
+- 默认实参在调用方求值，而调用方不一定是协程。
+- 契约断言可能不求值，也可能多次求值（[[basic.contract]]），在里面挂起会让控制流取决于契约的求值语义。
 
 ## 实现视角
 
 !!! impl "协程帧与 co_await 的编译"
-    - 协程帧：Clang（LLVM 的 coroutine passes）、GCC、MSVC 都把协程拆成 ramp 函数（首次调用）、resume 函数和 destroy 函数。跨越挂起点存活的局部变量和 awaiter 临时量都放在堆上的协程帧里；帧中还保存当前挂起点的编号，resume 函数据此用 `switch` 跳转。`std::coroutine_handle` 本质上就是指向协程帧的指针，帧开头是 resume、destroy 两个函数指针，`h.resume()` 就是一次间接调用。
-    - `await_ready` 的价值：`await_ready()` 返回 `true` 时完全不需要保存状态；内联之后，`co_await` 一个已就绪的 awaiter 可以和普通函数调用一样廉价。
-    - 对称转移与尾调用：`await_suspend` 返回句柄时，LLVM 的协程拆分会把对目标协程的恢复生成为有保证的尾调用（在支持的目标平台上），因此上面的例子在本地 `-O0 -fsanitize=address` 下也能运行完一百万次而不栈溢出。在不支持保证尾调用的目标平台上，这一性质可能无法保证。
-    - HALO：如果协程帧的生命周期严格嵌套在调用者之内，LLVM 可以省略帧的堆分配，改为放在调用者的栈帧中（heap allocation elision optimization）。这与 [[expr.new]] 的分配省略是不同的机制，其依据是 [[dcl.fct.def.coroutine]] 允许省略协程状态的分配。
+    - Clang、GCC、MSVC 都把协程拆成首次调用的 ramp 函数、resume 函数和 destroy 函数。跨越挂起点存活的局部变量和 awaiter 都放在协程帧里，帧中记录当前挂起点的编号，resume 函数据此跳转。`std::coroutine_handle` 就是指向协程帧的指针，`h.resume()` 是一次间接调用。
+    - `await_ready()` 返回 `true` 时不需要保存任何状态。内联之后，等待一个已就绪的 awaiter 和普通函数调用一样便宜。
+    - 协程帧通常在堆上分配。如果协程的生命周期严格嵌套在调用者之内，LLVM 可以把帧放在调用者的栈上，省掉堆分配（HALO）。依据是 [[dcl.fct.def.coroutine]] 允许省略协程状态的分配。
 
 ## 历史与演进
 
-!!! history "从 TS 到 C++20 及之后"
-    - 协程最初以 Coroutines TS 的形式发布，C++20 通过 [[P0912R5]] 将其合并进标准。
-    - 对称转移（`await_suspend` 返回 `coroutine_handle`）由 [[P0913R1]] 在合并之前加入；`std::noop_coroutine` 也来自这一提案。
-    - C++20 的 `co_await` 规则基本沿用至今。C++26 引入契约后，¶2 增加了不能出现在契约断言谓词中的限制 {{c++26}}。
-    - C++23 的 `std::generator`（[[coro.generator]]）是标准库提供的第一个协程返回类型。它把 `await_transform` 声明为 deleted，以此禁止在生成器中使用 `co_await`，这正是 ¶3.2 只要找到声明就改写这一规则的典型应用。
+!!! history
+    - 协程先以 Coroutines TS 发布，C++20 通过 [[P0912R5]] 并入标准。
+    - 对称转移和 `std::noop_coroutine` 来自 [[P0913R1]]，在并入标准之前加入了 TS。
+    - C++26 引入契约后，¶2 增加了不能出现在契约谓词中的限制。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "在 await_suspend 里交出句柄后再访问 awaiter"
-    协程在调用 `await_suspend` 之前就已被视为挂起。如果 `await_suspend` 把 `h` 交给另一个线程，那个线程可能立刻调用 `h.resume()`，协程可能一路运行到结束并销毁协程帧，awaiter 临时量本身也随之销毁。此后 `await_suspend` 再访问 `this` 的任何成员，都是在访问已销毁的对象（UB）。安全的写法是让交出句柄成为 `await_suspend` 中最后一个触及 awaiter 或协程帧的动作。
+!!! pitfall "交出句柄之后继续访问 awaiter"
+    协程在调用 `await_suspend` 之前已经算作挂起。`await_suspend` 把 `h` 交给另一个线程后，那个线程可能立刻恢复协程，协程可能一直运行到结束并销毁协程帧，awaiter 也随之销毁。此后 `await_suspend` 再访问 `this` 的成员就是 UB。交出句柄应当是 `await_suspend` 里最后一个碰到 awaiter 或协程帧的动作。
 
-!!! pitfall "以为写了 operator co_await 就一定会被用到"
-    只要 promise 类型声明了任何 `await_transform`，用户写的每个 `co_await e` 都会先变成 `p.await_transform(e)`。`operator co_await` 作用在 `await_transform` 的结果上，而不是 `e` 上。
+!!! pitfall "以为写了 `operator co_await` 就一定会用到"
+    promise 只要声明了 `await_transform`，`operator co_await` 就作用在 `await_transform` 的结果上，而不是原来的操作数上。
 
-!!! pitfall "await_ready 的返回值方向"
-    `await_ready()` 返回 `true` 表示已经就绪、不要挂起；`await_suspend` 返回 `true` 表示保持挂起。两个 `bool` 的含义方向正好相反，很容易写反。
-
-!!! pitfall "await_suspend 返回 bool 时的 false"
-    返回 `false` 会立即恢复当前协程。如果此前已经把 `h` 交给了别的线程，那个线程也可能同时恢复它。同一协程被恢复两次，后一次面对的是未挂起的协程，这是 UB（[[dcl.fct.def.coroutine#8]]）。
+!!! pitfall "两个 bool 的方向相反"
+    `await_ready()` 返回 `true` 表示已就绪、不挂起；`await_suspend` 返回 `true` 表示保持挂起。如果已经把 `h` 交给了别的线程，`await_suspend` 又返回 `false`，两边可能同时恢复同一个协程，这是 UB。
 
 ## 思考题
 
 !!! question "思考题 1"
-    设 promise 类型没有 `await_transform`，`struct X { std::suspend_never operator co_await(); };`，另有非成员 `std::suspend_never operator co_await(X);`。`co_await X{}` 会怎样？
+    promise 没有 `await_transform`。`struct X { std::suspend_never operator co_await(); };`，另有非成员 `std::suspend_never operator co_await(X);`。`co_await X{}` 会怎样？
 
 <details markdown="1">
 <summary>答案</summary>
 
-非良构，因为重载决议有歧义。¶3.3 按 [[over.match.oper]] 同时收集成员候选与非成员候选。实参是 `X` 类型的 prvalue。对成员候选，隐式对象形参是 `X&`，但没有引用限定符的成员函数允许绑定右值（[[over.match.funcs]]），是恒等转换；对非成员候选，按值传递也是恒等转换。两者不分优劣，按 ¶3.3 的“If overload resolution is ambiguous, the program is ill-formed”，程序非良构。Clang 23 报告 “use of overloaded operator 'co_await' is ambiguous”。这与其他可重载一元运算符（如 `operator-`）的规则完全一致。
+非良构，重载决议有歧义。¶3.3 按 [[over.match.oper]] 同时收集成员和非成员候选。实参是 `X` 类型的 prvalue：成员候选的隐式对象形参是 `X&`，没有引用限定符的成员函数允许绑定右值（[[over.match.funcs]]），是恒等转换；非成员候选按值传递，也是恒等转换。两者不分优劣。本机 Clang 23 报告 `use of overloaded operator 'co_await' is ambiguous`。
 </details>
 
 !!! question "思考题 2"
-    `co_await` 一个 `await_ready()` 返回 `true` 的 awaiter，协程是否经过挂起点？`await_suspend` 是否需要能通过编译？
+    为什么 `co_yield` 和初始、最终挂起产生的 `co_await` 不经过 `await_transform`？如果经过会怎样？
 
 <details markdown="1">
 <summary>答案</summary>
 
-不经过挂起点，¶5.2 直接求值 *await-resume*。但 `await_suspend` 仍然必须良构：¶3.7 把 *await-suspend* 定义为 `e.await_suspend(h)`，并要求它是 `void`/`bool`/`coroutine_handle<Z>` 类型的 prvalue。这是编译期检查，与运行期是否走到这一分支无关。所以即便 `await_ready` 以 `constexpr` 的方式返回 `true`，也必须提供合法的 `await_suspend`。
+它们的操作数本来就是 promise 自己的成员调用，promise 已经完全控制了返回值，再变换一次是多余的。如果经过，`std::generator` 这样用 deleted `await_transform` 禁止 `co_await` 的设计，就会连自己的 `co_yield` 和初始、最终挂起也一起禁掉。
 </details>
-
-!!! question "思考题 3"
-    为什么 `co_yield` 和 `initial_suspend`/`final_suspend` 产生的 await 不经过 `await_transform`？如果经过会出什么问题？
-
-<details markdown="1">
-<summary>答案</summary>
-
-这些 await 的操作数本身就是 promise 自己的成员调用（`p.yield_value(e)`、`p.initial_suspend()`、`p.final_suspend()`），promise 已经完全掌控它们的返回值，再经过一次 `await_transform` 是多余的。而且如果经过，像 `std::generator` 这样用 deleted `await_transform` 禁止用户 `co_await` 的设计，就会连自己的 `co_yield` 和初始、最终挂起也一起禁止掉，promise 将不得不再为自己的 awaiter 类型开白名单。
-</details>
-
-## 小结
-
-| 步骤 | 条款 | 内容 |
-|---|---|---|
-| 位置限制 | ¶2 | 潜在求值；函数体内；不在 handler、默认实参、静态局部初始化器、契约谓词中 |
-| 变换 1 | ¶3.2 | promise 有名为 `await_transform` 的成员 → `p.await_transform(e)`（不含 `co_yield`/初始/最终 await） |
-| 变换 2 | ¶3.3 | 重载决议 `operator co_await`；无可行函数则不变换；歧义非良构 |
-| awaiter | ¶3.4 | prvalue 实质化为临时量，生命周期跨越挂起，保存在协程帧 |
-| 类型 | ¶4 | 与 `await_resume()` 相同的类型与值类别 |
-| `await_ready()` 为 true | ¶5.2 | 不挂起，直接 `await_resume()` |
-| `await_suspend` → `void` | ¶5.1.3 | 挂起，返回调用者/恢复者 |
-| `await_suspend` → `bool` | ¶5.1.2 | `false` 立即恢复，`true` 保持挂起 |
-| `await_suspend` → `coroutine_handle` | ¶5.1.1 | 对称转移：恢复返回的协程（实现通常为尾调用） |
-| `await_suspend` 抛异常 | ¶5.1.3 | 恢复协程并在 `co_await` 处重新抛出 |
-| 顺序 | ¶5 注 2 | `co_await` 相对于外部求值不可分割 |
