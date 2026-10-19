@@ -1,37 +1,37 @@
 ---
 title: 函数模板特化
-summary: 函数模板特化的模板实参从三处来：显式指定、推导、默认模板实参。本页讲第 13.10 节的总述与显式指定模板实参：哪些地方可以写 f<...>、尾随实参可省略、空的 f<>() 强制选模板、显式指定的形参不参与推导因而允许隐式转换、推导可以延长已部分指定的包，以及构造函数模板为什么无法显式指定实参。
+summary: 调用或引用函数模板时，模板实参有三个来源：显式写出、从实参推导、取默认值；显式模板实参能写在哪里、哪些可以省略、空的 f<>() 有什么用，以及显式指定为什么能让实参做隐式转换。
 status: done
 covers: temp.fct.spec.general, temp.arg.explicit
-related: temp.deduct, temp.over, temp.names, temp.arg, temp.variadic, over.match.best, temp.expl.spec
+related: temp.deduct, temp.deduct.call, temp.over, temp.names, temp.arg, temp.variadic, over.match.best, temp.expl.spec
 tags: 模板, 函数模板, 显式模板实参
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-第 13.10 节 [[temp.fct.spec]] 讲的是如何使用函数模板：给定一个函数模板 `f` 和一次对它的引用（调用、取地址、显式实例化等），如何确定所有模板实参，从而确定是哪个特化。它包含四个子条款：
+!!! tldr
+    - 函数模板的每个模板实参都要有值，来源有三个：显式写出（`f<int>(x)`）、从调用实参推导、取默认模板实参。三者可以混用。
+    - 显式实参按模板形参的声明顺序填入，只有末尾那些能推导或有默认值的才能省略。所以需要显式指定的形参应该排在前面。
+    - 显式指定的模板形参不再参与推导，对应的函数实参可以做普通的隐式转换：`max_(1, 2.5)` 推导冲突，`max_<double>(1, 2.5)` 可以编译。
+    - 空的 `f<>(x)` 表示只考虑模板，把同名的非模板函数排除在外。
+    - 构造函数模板没法写显式模板实参，它的模板实参只能推导或取默认值。
 
-| 子条款 | 内容 | 本站页面 |
-|---|---|---|
-| [[temp.fct.spec.general]] | 总述 | 本页 |
-| [[temp.arg.explicit]] | 显式指定模板实参 | 本页 |
-| [[temp.deduct]] | 模板实参推导（SFINAE、从调用/类型/声明推导……） | [[temp.deduct]]、[[temp.deduct.call]]、[[temp.deduct.type]] |
-| [[temp.over]] | 函数模板与重载决议 | [[temp.over]] |
+## 模板实参从哪里来（[temp.fct.spec.general]）
 
-## 总述（[temp.fct.spec.general]）
+```cpp
+template<class U, class V> U convert(V v);
 
-### 函数模板特化与它的三种实参来源（¶1）
+int i = convert<int>(3.14);   // U 显式写出，V 从实参推导为 double
+```
 
-¶1 从函数模板实例化出来的函数叫[[g:function-template-specialization|**函数模板特化**]]（function template specialization）；函数模板的显式特化也叫函数模板特化。模板实参可以：
+¶1 从函数模板实例化出来的函数叫[[g:function-template-specialization|**函数模板特化**]]（function template specialization），函数模板的显式特化（[[temp.expl.spec]]）也叫函数模板特化。确定一个特化需要知道它的全部模板实参，它们可以：
 
-1. 在指名特化时显式指定（`f<int>(x)`）；
-2. 从语境中推导（例如从函数调用的实参推导，[[temp.deduct]]）；
-3. 从默认模板实参取得（`template<class T, class A = std::allocator<T>>`）。
+1. 在指名特化时显式写出，如上面的 `<int>`；
+2. 从语境中推导，最常见的是从调用实参推导（[[temp.deduct]]）；
+3. 取默认模板实参，如 `template<class T, class A = std::allocator<T>>` 里的 `A`。
 
-三者可以混合：前面几个显式指定，中间一些推导，剩下的用默认值。具体的组合规则见下文 ¶4 和 [[temp.deduct.general#5]]。
+`convert<int>(3.14)` 同时用了前两种。三者如何组合，见下文 ¶4 和 [[temp.deduct.general#5]]。
 
-### 每个特化一份静态变量（¶2）
-
-¶2 每个从模板实例化出来的函数模板特化都有自己的一份静态变量：
+¶2 每个实例化出来的特化都有自己的一份静态变量：
 
 ```cpp run ok
 template<class T> int counter(T*) {
@@ -42,18 +42,18 @@ template<class T> int counter(T*) {
 int main() {
     int a; char* b;
     counter(&a); counter(&a);   // counter<int>：n == 2
-    counter(&b);                // counter<char*>：n == 1（各自独立）
-    return counter(&a) == 3 && counter(&b) == 2 ? 0 : 1;
+    counter(&b);                // counter<char*>：n == 1
+    return counter(&a) == 3 && counter(&b) == 2 ? 0 : 1;   // 返回 0
 }
 ```
 
-这和 [[temp.spec#7]]（类模板的静态成员每特化一份）是同一原理：`counter<int>` 和 `counter<char*>` 是两个不同的函数。要注意，`f<int>` 与 `f<const int>` 尽管函数类型相同（顶层 const 被调整掉），也是不同的特化，各有一份静态变量（[[temp.deduct.general#4]]）。
+`counter<int>` 和 `counter<char*>` 是两个不同的函数，类模板的静态成员也是每个特化一份（[[temp.spec#7]]）。`f<int>` 和 `f<const int>` 的函数类型相同（形参的顶层 `const` 会被去掉），但它们仍是两个特化，各有一份静态变量（[[temp.deduct.general#4]]）。
 
-## 显式指定模板实参（[temp.arg.explicit]）
+## 显式写出模板实参（[temp.arg.explicit]）
 
-### 语法（¶1–¶2）
+### 什么时候必须写（¶1）
 
-¶1 指名一个（不是构造函数模板特化的）函数模板特化时，可以像指名类模板特化那样，在函数模板名后加模板实参列表：
+¶1 指名函数模板特化时，可以像类模板那样在名字后面写模板实参列表：
 
 ```cpp ok
 template<class T> struct Array { };
@@ -69,80 +69,26 @@ void f(Array<double>& cv, Array<int>& ci, double d) {
 }
 ```
 
-`convert` 的返回类型 `U` 不出现在形参中，无法推导（[[temp.deduct.call]] ¶5 注 1），必须显式指定。这是显式模板实参最典型的用途，也是 `std::make_unique<T>(args...)`、`std::get<I>(t)`、`static_cast` 风格的工厂函数的写法。
+`sort` 的实参其实都能推导，写不写都行。`convert` 的 `U` 只出现在返回类型里，调用实参推不出来（[[temp.deduct.call#5]] 注 1），必须写。`std::make_unique<T>(args...)`、`std::get<I>(t)` 都属于这种情况。
 
-¶2 指名构造函数模板的特化时，**不能指定模板实参**。¶8（注 4）解释了原因：显式模板实参列表跟在函数模板的名字后面，而构造函数没有名字（`X::X` 指名的是类，[[class.qual]]），没有地方可以写 `<...>`。
+### 能写在哪里（¶3）
 
-```cpp
-struct S { template<class T> S(T); };
-S s = S<int>(1);    // error: S 不是模板；这不是在给构造函数模板指定实参
-```
-
-构造函数模板的所有模板实参都必须能推导出来（或有默认值）。需要显式指定时，惯用法是加一个标签形参，如 `std::in_place_type_t<T>`：
-
-```cpp ok
-#include <utility>
-struct Any {
-    template<class T, class... Args>
-    explicit Any(std::in_place_type_t<T>, Args&&...) { }
-};
-Any a(std::in_place_type<int>, 42);   // T 通过标签"显式"给出
-```
-
-### 哪些地方可以写模板实参列表（¶3）
-
-¶3 函数模板特化的模板实参列表可以在以下场合给出：
+¶3 函数模板特化的模板实参列表可以出现在这些地方：
 
 - ¶3.1 调用函数时：`f<int>(x)`；
 - ¶3.2 取函数地址、用函数初始化函数引用、形成成员函数指针时：`&f<int>`、`void (&r)(int) = f<int>;`、`&X::mf<int>`；
 - ¶3.3 显式特化中：`template<> void f<int>(int);`；
 - ¶3.4 显式实例化中：`template void f<int>(int);`；
-- ¶3.5 友元声明中：`friend void f<>(T);`、`friend void f<int>(int);`。
+- ¶3.5 友元声明中：`friend void f<int>(int);`。
 
-!!! note "依赖语境中别忘了 `template`"
-    在模板中，如果对象表达式或限定符是依赖的，要用 `template` 关键字告诉解析器 `<` 是模板实参列表的开头：`t.template get<0>()`、`T::template make<int>()`（[[temp.names]]）。
+!!! note "依赖语境中的 `template`"
+    在模板里，如果 `.`、`->` 左边的对象或 `::` 左边的限定符依赖于模板形参，要加 `template` 关键字说明后面的 `<` 开始一个模板实参列表：`t.template get<0>()`、`T::template make<int>()`（[[temp.names]]）。
 
-### 尾随实参可省略；空列表 `<>`（¶4–¶5）
+### 按顺序填，末尾的可以省（¶4、¶6）
 
-¶4 可以从推导或默认模板实参得到的尾随模板实参，可以从显式列表中省略。注 1 指出，一个尾随的模板形参包若没有以别的方式推导，会被推导为空序列。如果所有模板实参都能推导或有默认值，它们可以全部省略；此时空的模板实参列表 `<>` 本身也可以省略。
+¶6 写出的模板实参按对应模板形参的声明顺序排列。个数不能超过模板形参的个数，除非其中有模板形参包（[[temp.variadic]]）。
 
-```cpp
-template<class X, class Y> X f(Y);
-template<class X, class Y, class... Z> X g(Y);
-
-void h() {
-    int i = f<int>(5.6);       // Y 推导为 double
-    int j = f(5.6);            // error: X 无法推导
-    f<void>(f<int, bool>);     // 外层 f 的 Y 推导为 int(*)(bool)
-    f<void>(f<int>);           // error: f<int> 不指称单一的函数模板特化
-    int k = g<int>(5.6);       // Y 推导为 double；Z 推导为空序列
-    f<void>(g<int, bool>);     // 外层 f 的 Y 推导为 int(*)(bool)，内层 g 的 Z 为空
-}
-```
-
-下面逐个分析两个错误，并与一个良构的调用对比。
-
-- `f(5.6)`：`X` 只出现在返回类型里，调用实参无法推导它；它也没有默认值。
-- `f<void>(f<int>)`：实参 `f<int>` 只固定了 `X = int`，`Y` 仍然未知，所以它是一个重载集（理论上有无穷多个 `f<int, Y>`）。外层 `f<void>` 的形参类型是外层的 `Y`，而从一个含函数模板的重载集推导属于非推导语境（[[temp.deduct.call#6]]），于是外层 `Y` 也推不出来。
-- 对比 `f<void>(g<int, bool>)`：`g<int, bool>` 中 `Z` 是尾随包，按注 1 推导为空，于是 `g<int, bool>` 指称唯一的特化 `int g<int, bool>(bool)`，外层能推导。
-
-¶5（注 2）空模板实参列表可以用来表明这里指的是函数模板的特化，即使有一个本会被选中的非模板函数可见：
-
-```cpp run ok title="empty_angle.cpp"
-#include <cstdio>
-template <class T> int f(T) { return 1; }   // #1
-int f(int) { return 2; }                    // #2
-
-int main() {
-    std::printf("%d %d\n", f(1), f<>(1));   // 2 1
-}
-```
-
-`f(1)` 两个候选同等好，[[over.match.best]] ¶2.4 让非模板函数胜出；`f<>(1)` 写了模板实参列表，只有模板能匹配一个 *template-id*，非模板函数直接被排除在候选之外。
-
-### 顺序与个数（¶6）
-
-¶6 给出的模板实参必须按其对应模板形参的声明顺序排列；模板实参的个数不能超过模板形参的个数，除非其中有模板形参包。
+¶4 末尾那些能推导或有默认值的模板实参可以省略。注 1 补充，末尾的模板形参包如果没有从别处推导出来，就推导为空。全部模板实参都能这样得到时，可以一个都不写，此时连空的 `<>` 也可以省略。
 
 ```cpp ok
 template<class X, class Y, class Z> X f(Y, Z);
@@ -151,8 +97,8 @@ template<class... Args> void f2();
 void g() {
     f<int, const char*, double>("aa", 3.0);
     f<int, const char*>("aa", 3.0);    // Z 推导为 double
-    f<int>("aa", 3.0);                 // Y 推导为 const char*，Z 推导为 double
-    f2<char, short, int, long>();      // OK：全部归入包
+    f<int>("aa", 3.0);                 // Y、Z 都推导出来
+    f2<char, short, int, long>();      // 四个都归入包 Args
 }
 ```
 
@@ -161,38 +107,76 @@ template<class X, class Y, class Z> X f(Y, Z);
 void g() { f("aa", 3.0); }             // error: X 无法推导
 ```
 
-所以设计函数模板时，**需要显式指定的形参应放在前面**，可以推导的放后面。`std::make_unique<T, Args...>`、`std::get<I, Types...>` 都遵循这个顺序。反过来写（`template<class Y, class X> X f(Y)`）就迫使用户写 `f<double, int>(5.6)`，连可推导的也得写出来。
+因此设计函数模板时，需要显式指定的形参放前面，能推导的放后面。`std::make_unique<T, Args...>` 就是这个顺序。反过来写成 `template<class Y, class X> X f(Y)`，用户就得写 `f<double, int>(5.6)`，连能推导的 `Y` 也要写出来。
 
-### 显式指定的形参不参与推导，因而允许隐式转换（¶7）
+标准例 2 里有一个更细的情形，实参本身是另一个函数模板的名字：
 
-¶7 如果函数形参的类型不含参与推导的模板形参，那么函数实参会做隐式转换（[[conv]]）以转为形参类型。
+```cpp
+template<class X, class Y> X f(Y);
+template<class X, class Y, class... Z> X g(Y);
 
-注 3 点明了关键：**显式指定的模板形参不参与模板实参推导**。例如：
+void h() {
+    f<void>(f<int, bool>);     // OK：外层 f 的 Y 推导为 int(*)(bool)
+    f<void>(f<int>);           // error: f<int> 不是唯一的特化
+    f<void>(g<int, bool>);     // OK：g 的包 Z 推导为空
+}
+```
+
+- `f<int>` 只确定了 `X`，`Y` 仍然未知，它代表无数个可能的特化，是一个重载集。从包含函数模板的重载集推导属于非推导语境（[[temp.deduct.call#6]]），外层的 `Y` 推不出来。
+- `g<int, bool>` 中，末尾的包 `Z` 按注 1 推导为空，所以它指称唯一的特化 `int g<int, bool>(bool)`，外层能够推导。
+
+### `f<>(x)`：只考虑模板（¶5）
+
+```cpp run ok
+#include <cstdio>
+template <class T> int f(T) { return 1; }   // #1
+int f(int) { return 2; }                    // #2
+
+int main() {
+    std::printf("%d %d\n", f(1), f<>(1));   // 输出 2 1
+}
+```
+
+¶5 注 2 指出，空的模板实参列表可以用来表示这里要的是函数模板的特化，即使有一个本来会被选中的非模板函数可见。`f(1)` 的两个候选同样好，[[over.match.best]] ¶2.4 让非模板函数胜出；`f<>(1)` 写了模板实参列表，非模板函数根本不是候选。
+
+### 显式指定的形参允许隐式转换（¶7）
+
+<div class="compare" markdown="1">
+
+```cpp error
+template<class T>
+T max_(T a, T b) { return a < b ? b : a; }
+
+// T 推导为 int 和 double，冲突
+double m = max_(1, 2.5);    // error
+```
+
+```cpp ok
+template<class T>
+T max_(T a, T b) { return a < b ? b : a; }
+
+// T 不再推导，1 转换为 double
+double m = max_<double>(1, 2.5);
+```
+
+</div>
+
+推导时，实参类型和形参类型之间只允许极少几种差异（[[temp.deduct.call#4]]），`int` 到 `double` 这样的转换不在其中。
+
+¶7 规定，如果一个函数形参的类型里没有参与推导的模板形参，那么对应的实参会做普通的隐式转换（[[conv]]）。注 3 说明，显式指定的模板形参不参与推导。所以写了 `max_<double>` 之后，它就是一个普通的 `double max_(double, double)`，实参照常转换。转换也可以是用户定义的：
 
 ```cpp ok
 template<class T> void f(T);
 class Complex { public: Complex(double); };
 
 void g() {
-    f<Complex>(1);    // OK：意为 f<Complex>(Complex(1))
+    f<Complex>(1);    // OK：相当于 f<Complex>(Complex(1))
 }
 ```
 
-如果让 `T` 被推导，`f(1)` 会推导出 `T = int`；显式指定后，形参就是固定的类型 `Complex`，实参可以做完整的隐式转换（这里是用户定义转换）。
+C++20 起也可以用 `std::type_identity_t<T>` 把某个形参放进非推导语境，只从其余形参推导 `T`，让这个形参允许转换（见 [[temp.deduct.type]]）。
 
-这条规则的一个经典应用如下：
-
-```cpp
-template<class T> T max_(T a, T b) { return a < b ? b : a; }
-int    m1 = max_(1, 2.5);           // error: T 被推导为 int 和 double，冲突
-double m2 = max_<double>(1, 2.5);   // OK：T 不参与推导，1 转换为 double
-```
-
-推导时，实参与形参之间只允许极少数的调整（[[temp.deduct.call#4]]），不允许 `int` → `double` 这样的转换。显式指定之后，`T` 不再经过推导，`max_<double>` 成了一个普通的 `double max_(double, double)`，重载决议照常进行。C++20 起也可以用 `std::type_identity_t<T>` 让某个形参成为非推导语境，达到只从一个实参推导、另一个允许转换的效果（见 [[temp.deduct.type]]）。
-
-### 推导可以延长包（¶9）
-
-¶9 模板实参推导可以延长模板形参包对应的实参序列，即使该序列已含显式指定的实参：
+### 推导可以接着填充包（¶9）
 
 ```cpp ok
 #include <type_traits>
@@ -202,13 +186,13 @@ template<class... Types> void f(Types... values) {
 }
 
 void g() {
-    f<int*, float*>(0, 0, 0);   // Types 推导为 int*, float*, int
+    f<int*, float*>(0, 0, 0);   // Types 为 int*, float*, int
 }
 ```
 
-前两个 `0` 对应显式指定的 `int*`、`float*`（空指针常量转换），第三个 `0` 超出了显式部分，推导补上 `int`。换句话说，显式指定一个包的若干元素，只是固定了前缀，包并没有因此封闭。
+¶9 即使模板形参包已经有了显式指定的实参，推导仍然可以在后面继续添加。上例中前两个 `0` 对应显式写出的 `int*`、`float*`，作为空指针常量转换过去；第三个 `0` 超出了显式部分，由推导补上 `int`。显式写出包的几个元素，只是固定了它的前缀。
 
-如果包不是尾随的，显式实参会按顺序填满它，后面的形参只能靠推导：
+如果包不在末尾，显式实参会依次全部归入这个包，后面的形参只能靠推导：
 
 ```cpp ok
 #include <type_traits>
@@ -216,18 +200,36 @@ template<class... Ts, class U> void f(U) {
     static_assert(sizeof...(Ts) == 2);
     static_assert(std::is_same_v<U, double>);
 }
-void g() { f<int, char>(1.0); }   // Ts = {int, char}（显式），U 从实参推导
+void g() { f<int, char>(1.0); }   // Ts = {int, char}，U 从实参推导
 ```
 
-这里显式实参全部归入 `Ts`，`U` 只能推导。这种形参顺序在实践中很少见，但能编译。
+### 构造函数模板不能显式指定（¶2、¶8）
 
-## 陷阱
+¶2 指名构造函数模板的特化时不能写模板实参。¶8 注 4 解释了原因：显式模板实参列表要跟在函数模板的名字后面，而构造函数没有可以这样写的名字（`X::X` 指名的是类，[[class.qual]]）。
 
-!!! pitfall "`f<T>(x)` 关掉了推导，也关掉了转发引用的自动推导"
-    `std::forward<T>(x)` 必须显式写 `T`，因为 `forward` 的形参是 `std::remove_reference_t<T>&`，这是非推导语境，有意不让推导。反过来，对一个 `template<class T> void g(T&&)` 写 `g<int>(i)`（`i` 是左值）会失败：`T` 被固定为 `int`，形参是 `int&&`，不能绑定左值。转发引用的特殊推导规则只在推导时生效。
+```cpp
+struct S { template<class T> S(T); };
+S s = S<int>(1);    // error: S 不是模板，这里不是在给构造函数指定 T
+```
 
-!!! pitfall "显式实参也会被替换，失败照样是 SFINAE"
-    显式指定的实参首先被代入函数类型（[[temp.deduct.general#2]]），若得到无效类型，推导失败，模板被静默剔除。`f<int>(0)` 对 `template<class T> void f(typename T::type)` 不是硬错误，而是没有匹配的函数。如果没有别的候选，报错信息会是 "no matching function"，而不是 int 没有成员 type。
+所以构造函数模板的模板实参只能推导或取默认值。需要由调用者指定类型时，惯用做法是加一个标签形参，例如 `std::in_place_type_t<T>`：
+
+```cpp ok
+#include <utility>
+struct Any {
+    template<class T, class... Args>
+    explicit Any(std::in_place_type_t<T>, Args&&...) { }
+};
+Any a(std::in_place_type<int>, 42);   // T 由标签的类型推导为 int
+```
+
+## 常见误解
+
+!!! pitfall "对转发引用写 `g<int>(i)`"
+    转发引用的特殊规则（左值实参让 `T` 推导为左值引用）只在推导时生效。对 `template<class T> void g(T&&)` 写 `g<int>(i)`，`T` 被固定为 `int`，形参是 `int&&`，不能绑定左值 `i`，调用失败。`std::forward<T>(x)` 反过来利用了这一点：它的形参是非推导语境，强制调用者写出 `T`。
+
+!!! pitfall "显式实参不合法时会报硬错误"
+    不会。显式实参先代入函数类型（[[temp.deduct.general#2]]），得到无效类型时只是推导失败，这个模板被安静地剔除。对 `template<class T> void f(typename T::type)` 写 `f<int>(0)`，如果没有别的候选，报的是没有匹配的函数，而不是 `int` 没有成员 `type`。
 
 ## 思考题
 
@@ -245,30 +247,16 @@ void g() { f<int, char>(1.0); }   // Ts = {int, char}（显式），U 从实参�
 <details markdown="1">
 <summary>答案</summary>
 
-(a) 非良构：`T` 从第一个实参推导为 `int`，从第二个推导为 `long`，冲突。(b) 良构：`T` 显式指定为 `long`，不参与推导，`1` 隐式转换为 `long`。(c) 非良构：`<>` 不指定任何实参，`T` 仍需推导，与 (a) 相同。
+只有 (b) 良构。(a)：`T` 从第一个实参推导为 `int`，从第二个推导为 `long`，冲突。(b)：`T` 显式指定为 `long`，不参与推导，`1` 隐式转换为 `long`（¶7）。(c)：`<>` 没有指定任何实参，`T` 仍需推导，与 (a) 相同。本机 Clang 23 的结果与此一致。
 </details>
 
 !!! question "思考题 2"
-    为什么 `std::make_shared<int>(42)` 能工作，而 `std::make_shared(42)` 不行？如果把 `make_shared` 声明为 `template<class... Args, class T> shared_ptr<T> make_shared(Args&&...)`，会怎样？
+    为什么 `std::make_shared<int>(42)` 能编译，`std::make_shared(42)` 不能？如果把它声明成 `template<class... Args, class T> shared_ptr<T> make_shared(Args&&...)` 会怎样？
 
 <details markdown="1">
 <summary>答案</summary>
 
-`make_shared` 的声明是 `template<class T, class... Args> shared_ptr<T> make_shared(Args&&... args);`。`T` 只出现在返回类型中，无法推导，必须显式指定，所以 `make_shared(42)` 失败；`make_shared<int>(42)` 中 `T = int`，`Args` 推导为 `int`。
+`make_shared` 声明为 `template<class T, class... Args> shared_ptr<T> make_shared(Args&&... args);`。`T` 只出现在返回类型里，推导不出来，所以 `make_shared(42)` 失败；`make_shared<int>(42)` 中 `T = int`，`Args` 推导为 `int`。
 
-如果把包放在前面，`make_shared<int>(42)` 的显式实参 `int` 会进入 `Args`（显式实参按顺序填形参，包会吞掉所有显式实参，¶6/¶9），`T` 既无法推导也无法指定，这个函数模板就无法调用（除非 `T` 有默认值）。这正是违反需显式指定的形参放前面这一原则的反例。
+如果把包放在前面，显式写出的 `int` 会归入 `Args`（¶6、¶9），`T` 既推不出来也没有办法写出来，这个函数模板就无法调用，除非 `T` 有默认值。这就是需要显式指定的形参应该放前面的原因。
 </details>
-
-## 小结
-
-| 规则 | 出处 | 要点 |
-|---|---|---|
-| 模板实参三来源：显式、推导、默认 | general ¶1 | 可混合 |
-| 每个特化一份静态变量 | general ¶2 | `f<int>` 与 `f<const int>` 也不同 |
-| 构造函数模板不能显式指定实参 | ¶2, ¶8 | 用 `in_place_type_t` 之类的标签 |
-| 可写 `f<...>` 的场合：调用、取址、特化、实例化、友元 | ¶3 | — |
-| 尾随的可推导/有默认值的实参可省；尾随包默认为空 | ¶4 | `<>` 也可省 |
-| `f<>(x)` 排除非模板函数 | ¶5 | — |
-| 显式实参按形参声明顺序；不超过形参个数（除非有包） | ¶6 | 需指定的形参放前面 |
-| 不参与推导的形参允许完整的隐式转换 | ¶7 | `max_<double>(1, 2.5)` |
-| 推导可以延长已部分显式指定的包 | ¶9 | — |
