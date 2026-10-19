@@ -1,23 +1,29 @@
 ---
 title: 核心 UB 目录 · 第 [dcl] 章
-summary: Annex F.5 的 9 条：修改 const 对象、以非 volatile glvalue 访问 volatile 对象、引用绑定到不兼容的函数或对象、在初始化前使用引用、对未挂起的协程 resume/destroy、假设为假、noreturn 函数返回——正文出处、例子与 Clang 23 实测。
-status: draft
+summary: 第 9 章明文写出的九条未定义行为：修改 const 对象、绕过 volatile 访问、引用绑定到类型不符的函数或对象、在初始化前使用引用、对未挂起的协程 resume 或 destroy、不成立的 assume 假设、返回了的 noreturn 函数。
+status: done
 related: ub, dcl.type.cv, dcl.ref, dcl.fct.def.coroutine, dcl.attr.assume, dcl.attr.noreturn
 tags: UB, 附录, 声明, 协程, 属性
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-这一页是 [[ub]] 的一部分，对应 Annex F.5：第 9 章 [dcl] 中的显式 UB。其中最后两条（`[[assume]]` 与 `[[noreturn]]`）在正文中写的是 **runtime-undefined behavior**（[[g:runtime-undefined-behavior]]）：在运行时与普通 UB 无异，但在常量求值中，是否因此判定表达式非常量由实现定义（[[expr.const.core#3]]）。实测环境同 [[ub.basic]]。
+!!! tldr
+    - 修改 const 对象是未定义行为，这里的 const 对象指定义时就是 const 的对象；通过 `const_cast` 去掉指向非 const 对象的指针上的 const 再写入，是合法的。
+    - 引用绑定时就要求类型正确：把 `int&` 绑定到一个 `float` 对象，哪怕之后从不通过它读写，也已经是未定义行为。
+    - 只有挂起的协程才能被 `resume` 或 `destroy`；在协程运行时销毁它，会让它在已释放的协程帧上继续执行。
+    - `[[assume]]` 的条件不成立、`[[noreturn]]` 函数返回，都是运行时未定义行为：运行时与普通 UB 相同，常量求值中是否据此判定为非常量由实现决定。
+
+Annex F 汇总了核心语言中明文写出的未定义行为，总览见 [[ub]]。它的 F.5 节对应第 9 章 [dcl]，共九条。
+
+下文的运行结果都来自本机 Clang 23（arm64 macOS），默认用 `-O0 -g -fsanitize=address,undefined` 编译，也就是同时开启 ASan（检查内存访问）和 UBSan（检查一部分未定义行为）。常量求值指把同样的操作放进 `constexpr` 变量的初始化里，按 [[expr.const.core]]，编译器必须拒绝其中的核心语言未定义行为。
 
 ## cv 限定
 
-### F.5.1 [ub:dcl.type.cv.modify.const.obj] {#dcl.type.cv.modify.const.obj}
+### F.5.1 在 const 对象的生命周期内修改它 {#dcl.type.cv.modify.const.obj}
 
-**在 const 对象的生命周期内修改它** · 正文 [[dcl.type.cv#4]]
+`[ub:dcl.type.cv.modify.const.obj]` · 正文 [[dcl.type.cv#4]]
 
-UB 的对象是"const **对象**"，不是"通过 const 路径访问的对象"。`const_cast` 掉一个指向非 const 对象的 `const int*` 再写入完全合法；只有对象本身被定义为 const（或用 `new const T` 创建）时，写入才是 UB。`mutable` 成员不受此限。
-
-```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
+```cpp run ub flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <cstdio>
 
 const int g = 3;
@@ -36,13 +42,13 @@ int main() {
 }
 ```
 
-**实测**：堆上那一处无任何报告（写入成功）；全局 `g` 那一处 ASan 报 `BUS on unknown address`——`g` 被放进了只读段，写入触发总线错误。**常量求值**被拒：`modification of object of const-qualified type 'const int' is not allowed in a constant expression`。
+这条规则针对的是 const 对象本身，而不是通过 const 路径访问的对象。`i` 定义时不是 const，所以去掉 `cip` 上的 const 再写入完全合法。只有对象定义为 const，或者用 `new const T` 创建时，写入才是未定义行为。类的 `mutable` 成员不受这条限制。
 
-### F.5.2 [ub:dcl.type.cv.access.volatile] {#dcl.type.cv.access.volatile}
+本机运行时，堆上那一处没有任何报告，写入成功了。全局 `g` 那一处，ASan 报告 `BUS on unknown address`：`g` 被放进了只读段，写入引发总线错误。常量求值中修改 const 对象会被拒绝，诊断是 `modification of object of const-qualified type 'const int' is not allowed in a constant expression`。
 
-**通过非 volatile glvalue 访问定义为 volatile 的对象** · 正文 [[dcl.type.cv#5]]
+### F.5.2 通过非 volatile glvalue 访问定义为 volatile 的对象 {#dcl.type.cv.access.volatile}
 
-volatile 访问的语义由实现定义（通常意味着"每次都真的读写内存，不合并、不删除"）。若绕过 volatile 限定去访问一个**定义为** volatile 的对象，编译器就会按普通对象优化这些访问，破坏 volatile 的本意。
+`[ub:dcl.type.cv.access.volatile]` · 正文 [[dcl.type.cv#5]]
 
 ```cpp ub
 #include <cstdio>
@@ -55,15 +61,15 @@ void f() {
 }
 ```
 
+对 volatile 对象的每次读写，编译器都必须照原样执行，不能合并或删除（见 [[intro.abstract]] 的可观察行为）。如果用一个没有 volatile 限定的引用或指针去访问定义为 volatile 的对象，编译器就会把这些访问当作普通访问来优化，volatile 的保证随之失效。所以标准把这种访问定为未定义行为。
+
 ## 引用
 
-### F.5.3 [ub:dcl.ref.incompatible.function] {#dcl.ref.incompatible.function}
+### F.5.3 函数引用绑定到类型不兼容的函数 {#dcl.ref.incompatible.function}
 
-**把函数引用绑定到类型不调用兼容的函数** · 正文 [[dcl.ref#6]]
+`[ub:dcl.ref.incompatible.function]` · 正文 [[dcl.ref#6]]
 
-这是 F.3.11 的引用版，但 UB 发生得更早：**绑定**本身就是 UB，不必等到调用。
-
-```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
+```cpp run ub flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <cstdio>
 
 void f(float x) { std::printf("%f\n", x); }
@@ -72,59 +78,63 @@ void (&g)(int) = reinterpret_cast<void (&)(int)>(f);   // UB：绑定时即 UB
 int main() { g(1); }
 ```
 
-**实测**：UBSan 的 `function` 检查在**调用**处报告：`call to function f(float) through pointer to incorrect function type 'void (*)(int)'`。工具只能在调用时发现，标准的判定点更早。
+函数引用的类型必须与被绑定函数的定义调用兼容（[[g:call-compatible]]），大致是类型相同，或者只差一个 `noexcept`。这是 [[ub.expr#expr.call.different.type|F.3.11]] 的引用版本，但未定义行为发生得更早：绑定本身就是未定义行为，不必等到调用。
 
-### F.5.4 [ub:dcl.ref.incompatible.type] {#dcl.ref.incompatible.type}
+本机编译时，Clang 给出 `-Wcast-function-type-mismatch` 警告。运行时，UBSan 的 `function` 检查在调用处报告 `call to function f(float) through pointer to incorrect function type 'void (*)(int)'`，随后程序打印了一个与 1 无关的浮点数。工具只能在调用时发现问题，标准的判定点在绑定处。
 
-**把对象引用绑定到不能通过该类型访问的对象** · 正文 [[dcl.ref#6]]
+### F.5.4 对象引用绑定到不能通过该类型访问的对象 {#dcl.ref.incompatible.type}
 
-同样，判定点是**绑定**：被引用的对象必须能通过引用的类型访问（[[g:type-accessible]]，即严格别名规则）。所以 `int& i = reinterpret_cast<int&>(some_float);` 哪怕从未通过 `i` 读写，也已经是 UB。正文的注补充：被指代的对象可以在生命周期之外（那由 [[basic.life]] 管）。
+`[ub:dcl.ref.incompatible.type]` · 正文 [[dcl.ref#6]]
 
 ```cpp ub
 float g;
 int& i = reinterpret_cast<int&>(g);   // UB：float 对象不能通过 int glvalue 访问
 ```
 
-**实测**：无报告。
+被引用的对象必须能通过引用的类型访问（[[g:type-accessible]]），这就是通常所说的严格别名规则（见 [[ub.expr#expr.basic.lvalue.strict.aliasing.violation|F.3.2]]）。判定点同样是绑定：即使之后从不通过 `i` 读写，上面的代码也已经是未定义行为。正文的注补充，被引用的对象可以处在生命周期之外，那种情况由 [[basic.life]] 管。
 
-### F.5.5 [ub:dcl.ref.uninitialized.reference] {#dcl.ref.uninitialized.reference}
+本机运行没有任何报告。
 
-**在引用初始化之前对它求值** · 正文 [[dcl.ref#6]]
+### F.5.5 在引用初始化之前对它求值 {#dcl.ref.uninitialized.reference}
 
-对引用的求值必须 *happens after* 它的初始化。典型场景是跨变量的动态初始化顺序。
+`[ub:dcl.ref.uninitialized.reference]` · 正文 [[dcl.ref#6]]
 
-```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
+```cpp run ub flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <cstdio>
 
 int& g();
 extern int& ir3;
-int i2 = ir3;      // UB：ir3 尚未初始化（它的初始化是动态的，排在后面）
+int i2 = ir3;      // UB：ir3 尚未初始化（它的初始化在后面）
 int& ir3 = g();
 int& g() { static int v = 17; return v; }
 
 int main() { std::printf("%d\n", i2); }
 ```
 
-**实测**：ASan 报 `SEGV on unknown address 0x000000000000`——引用在实现中是一个指针，静态存储先被零初始化，于是读出了空指针。
+对引用的求值必须发生在它的初始化之后（happens after，见 [[intro.races]]）。最常见的违反方式是全局变量的动态初始化顺序：同一个翻译单元里，动态初始化按定义顺序进行，`i2` 初始化时 `ir3` 还没有绑定。
+
+本机运行时，ASan 报告 `SEGV on unknown address 0x000000000000`。引用在实现中就是一个指针，静态存储在动态初始化之前先被零初始化，所以读出的是空指针。
 
 !!! lawyer "附录原例其实没有 UB"
-    附录写的是 `int& ir1 = i3;`（`i3` 是全局 `int`）。这个初始化器是常量表达式（静态存储期对象的地址），所以 `ir1` 是**常量初始化**的，属于静态初始化，按 [[basic.start.static]] 先于一切动态初始化完成——`int i2 = ir1;` 执行时 `ir1` 早已绑定好了。本机运行附录原例打印 `17`，没有任何问题。正文 [[dcl.ref#6]] 的例子用的是 `int& ir3 = g();`（动态初始化），那才真正演示了这条规则；上面的例子按正文改写。
+    附录写的是 `int& ir1 = i3;`，`i3` 是全局 `int`。这个初始化器是常量表达式（静态存储期对象的地址），所以 `ir1` 是常量初始化的，属于静态初始化。按 [[basic.start.static]]，静态初始化先于一切动态初始化完成，`int i2 = ir1;` 执行时 `ir1` 早已绑定好了。本机运行附录原例，打印 `17`。正文 [[dcl.ref#6]] 的例子用的是 `int& ir3 = g();`，这是动态初始化，才真正演示了这条规则；上面的例子就是按正文改写的。
 
 ## 协程
 
-### F.5.6 [ub:dcl.fct.def.coroutine.resume.not.suspended] {#dcl.fct.def.coroutine.resume.not.suspended}
+下面两条都要求协程处于挂起状态。协程在 `co_await`、`co_yield` 处，或者在初始、最终挂起点停下时是挂起的；正在执行函数体时不是。
 
-**对未挂起的协程调用 resume** · 正文 [[dcl.fct.def.coroutine#8]]
+### F.5.6 对未挂起的协程调用 resume {#dcl.fct.def.coroutine.resume.not.suspended}
 
-只有**挂起**的协程才能被恢复。停在**最终挂起点**（`final_suspend` 返回 `suspend_always`）的协程虽然没被销毁，但也不算"可恢复的挂起"——[[coroutine.handle.resumption]] 要求 `resume()` 的前提是 `!done()`。
+`[ub:dcl.fct.def.coroutine.resume.not.suspended]` · 正文 [[dcl.fct.def.coroutine#8]]
 
-```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
+```cpp run ub flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <coroutine>
 
 struct gen {
   struct promise_type {
     int val = 0;
-    gen get_return_object() { return {std::coroutine_handle<promise_type>::from_promise(*this)}; }
+    gen get_return_object() {
+      return {std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
     std::suspend_always initial_suspend() noexcept { return {}; }
     std::suspend_always final_suspend() noexcept { return {}; }
     void return_void() noexcept {}
@@ -142,25 +152,31 @@ int main() {
   gen g = f(3);
   int sum = 0;
   while (g.next()) sum += g.h.promise().val;
-  g.next();   // UB：协程已在最终挂起点，done() 为真
+  g.next();   // UB：协程已停在最终挂起点，done() 为真
   return sum;
 }
 ```
 
-**实测**：ASan 报 `SEGV on unknown address 0x000000000000 (pc 0x000000000000 …)`。Clang 的协程帧在到达最终挂起点时把 resume 函数指针置空，再 resume 就跳到了地址 0。（附录原例写 `suspend_always`、`coroutine_handle` 时漏了 `std::`，这里补上了。）
+这是附录例子的改写（附录原例中 `suspend_always`、`coroutine_handle` 漏写了 `std::`）。循环结束时，协程已经执行完函数体，停在最终挂起点上，再调用 `resume()` 就是未定义行为。
 
-### F.5.7 [ub:dcl.fct.def.coroutine.destroy.not.suspended] {#dcl.fct.def.coroutine.destroy.not.suspended}
+严格地说，停在最终挂起点的协程也是挂起的，所以这个例子落在库的规则上：[[coroutine.handle.resumption]] 规定 `resume()` 的前置条件是协程处于挂起状态，并且不在最终挂起点。核心语言这一条针对的是另一种情况：协程正在运行时被恢复。两种情况都是未定义行为。
 
-**对未挂起的协程调用 destroy** · 正文 [[dcl.fct.def.coroutine#11]]
+本机运行时，ASan 报告 `SEGV on unknown address 0x000000000000 (pc 0x000000000000 …)`。Clang 的协程帧到达最终挂起点时会把 resume 函数指针置空，再次 resume 就跳到了地址 0。
 
-`destroy()` 会释放协程帧。若协程此刻正在执行（例如在自己的函数体里拿到自己的句柄并销毁），之后的执行就是在已释放的帧上进行。附录原例在 `current_value()` 里调用 `destroy()`——那时协程其实已经挂起了，严格说那个例子演示的是另一个问题（销毁后再次访问 promise 与 double destroy）。下面的例子让协程在**运行中**销毁自己：
+### F.5.7 对未挂起的协程调用 destroy {#dcl.fct.def.coroutine.destroy.not.suspended}
 
-```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
+`[ub:dcl.fct.def.coroutine.destroy.not.suspended]` · 正文 [[dcl.fct.def.coroutine#11]]
+
+`destroy()` 销毁协程状态并释放协程帧。如果协程此刻正在执行，比如在自己的函数体里拿到自己的句柄并销毁自己，之后的执行就发生在已经释放的帧上。
+
+```cpp run ub flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <coroutine>
 
 struct task {
   struct promise_type {
-    task get_return_object() { return {std::coroutine_handle<promise_type>::from_promise(*this)}; }
+    task get_return_object() {
+      return {std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
     std::suspend_never initial_suspend() noexcept { return {}; }
     std::suspend_always final_suspend() noexcept { return {}; }
     void return_void() noexcept {}
@@ -173,50 +189,53 @@ std::coroutine_handle<> self;
 
 struct grab {
   bool await_ready() { return false; }
-  bool await_suspend(std::coroutine_handle<> h) { self = h; return false; }   // 返回 false：不挂起
+  // 返回 false：拿到句柄，但不挂起
+  bool await_suspend(std::coroutine_handle<> h) { self = h; return false; }
   void await_resume() {}
 };
 
 task f() {
-  co_await grab{};   // 拿到自己的句柄，但并未挂起
+  co_await grab{};   // 拿到自己的句柄，协程继续运行
   self.destroy();    // UB：协程正在执行，没有挂起
 }
 
 int main() { f(); }
 ```
 
-**实测**：ASan 报 `heap-use-after-free`——`destroy()` 释放了帧，协程随后继续在帧上执行。
+本机运行时，ASan 报告 `heap-use-after-free`：`destroy()` 释放了协程帧，协程随后继续在帧上执行。
+
+附录的例子在 `current_value()` 里调用 `destroy()`，可那时协程停在 `co_yield` 处，其实是挂起的。那个例子真正的问题是销毁之后又访问 promise，以及析构函数里第二次调用 `destroy()`，所以这里换了一个例子。
 
 ## 属性
 
-### F.5.8 [ub:dcl.attr.assume.false] {#dcl.attr.assume.false}
+最后两条在正文中写的是**运行时未定义行为**（runtime-undefined behavior，[[defns.undefined.runtime]]）：在运行时它和普通的未定义行为一样；在常量求值中，是否因此把表达式判定为非常量由实现定义（[[expr.const.core#3]]），除此之外没有别的影响。
 
-**假设在其出现处不为真** · 正文 [[dcl.attr.assume#1]]
+### F.5.8 假设在其出现处不成立 {#dcl.attr.assume.false}
 
-`[[assume(expr)]]`（C++23）的表达式**不求值**；它只是告诉编译器"这里 expr 必为真"。若实际上不为真，求值这条假设就是 **runtime-undefined behavior**。它是一把双刃剑：写错的假设会让优化器生成错误的代码。
+`[ub:dcl.attr.assume.false]` · 正文 [[dcl.attr.assume#1]]
 
-```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
+```cpp run ub flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <cstdio>
 
 int g(int x) {
-  [[assume(x >= 0)]];   // 允许编译器把 x / 32 编译成简单的右移
+  [[assume(x >= 0)]];   // 允许编译器把 x / 32 编译成一次右移
   return x / 32;
 }
 
 int main(int argc, char**) {
-  std::printf("%d\n", g(-10 * argc));   // UB：假设为假
+  std::printf("%d\n", g(-10 * argc));   // UB：假设不成立
 }
 ```
 
-**实测**：UBSan 报 `assumption is violated during execution`。**常量求值**：`constexpr int v = g(-10);` 被 Clang 拒绝（`assumption evaluated to false`）。因为这是 runtime-undefined，拒绝与否由实现定义——Clang 选择了拒绝，这是一个有用的选择。
+`[[assume(expr)]]`（C++23）中的表达式不会被求值，它只是告诉编译器在这一点上 `expr` 一定为真。如果实际上不为真，这条假设的求值就是运行时未定义行为。写错的假设会让优化器生成错误的代码，所以只应在确有把握时使用。
 
-### F.5.9 [ub:dcl.attr.noreturn.eventually.returns] {#dcl.attr.noreturn.eventually.returns}
+本机运行时，UBSan 报告 `assumption is violated during execution`。常量求值中的 `g(-10)` 被 Clang 拒绝，诊断是 `assumption evaluated to false`。这是运行时未定义行为，拒绝与否由实现定义，Clang 选择了拒绝。
 
-**声明为 [[noreturn]] 的函数返回了** · 正文 [[dcl.attr.noreturn#2]]
+### F.5.9 声明为 `[[noreturn]]` 的函数返回了 {#dcl.attr.noreturn.eventually.returns}
 
-`[[noreturn]]` 函数可以通过抛异常离开，但不能正常返回。这同样是 **runtime-undefined behavior**。
+`[ub:dcl.attr.noreturn.eventually.returns]` · 正文 [[dcl.attr.noreturn#2]]
 
-```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
+```cpp run ub flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <cstdio>
 
 [[noreturn]] void f(int i) {
@@ -230,9 +249,8 @@ int main(int argc, char**) {
 }
 ```
 
-**实测**：
+`[[noreturn]]` 函数可以通过抛出异常离开，但不能正常返回。这同样是运行时未定义行为。
 
-- 编译期：`warning: function declared 'noreturn' should not return [-Winvalid-noreturn]`（[[dcl.attr.noreturn#3]] 的推荐实践）。
-- `-O0 -fsanitize=undefined`：`execution reached an unreachable program point`。
-- `-O2`：`puts` 被整个删掉，进程异常终止（本次退出码 137）。
-- **常量求值**：与 `[[assume]]` 不同，Clang **接受**在常量求值中调用一个返回了的 `[[noreturn]] constexpr` 函数——同样是 runtime-undefined，Clang 在这里选择了"不作为非常量的理由"。两种选择都符合标准，这正是"由实现定义"的含义。
+本机编译时，Clang 给出警告 `function declared 'noreturn' should not return [-Winvalid-noreturn]`，这是 [[dcl.attr.noreturn#3]] 推荐实现给出的警告。运行时 UBSan 报告 `execution reached an unreachable program point`。用 `-O2` 编译时，`puts` 被整个删掉，进程异常终止。
+
+常量求值中，Clang 接受对一个返回了的 `[[noreturn]] constexpr` 函数的调用，并不因此把表达式判定为非常量。这与它对 `[[assume]]` 的处理不同，但两种选择都符合标准，这正是由实现定义的含义。
