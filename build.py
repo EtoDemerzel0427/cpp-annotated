@@ -679,9 +679,13 @@ def rel_root(url):
 
 def build():
     global OUT
+    final = None
     if "--check" in sys.argv:
         import tempfile
         OUT = Path(tempfile.mkdtemp(prefix="cppstd-check-"))
+    else:
+        # build next to _site and swap it in at the end, so the dev server never serves a half-built site
+        final, OUT = OUT, OUT.with_name(OUT.name + ".building")
     if OUT.exists():
         for child in OUT.iterdir():
             shutil.rmtree(child) if child.is_dir() else child.unlink()
@@ -853,6 +857,14 @@ def build():
         print("  warning:", w)
     if "--check" in sys.argv:
         shutil.rmtree(OUT, ignore_errors=True)
+    elif final is not None:
+        old_site = final.with_name(final.name + ".old")
+        shutil.rmtree(old_site, ignore_errors=True)
+        if final.exists():
+            final.rename(old_site)
+        OUT.rename(final)
+        OUT = final
+        shutil.rmtree(old_site, ignore_errors=True)
     return 1 if "--strict" in sys.argv and WARNINGS else 0
 
 
