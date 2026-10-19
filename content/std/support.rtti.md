@@ -1,27 +1,39 @@
 ---
 title: 类型识别
-summary: typeid 产生的 std::type_info——operator==、before、hash_code、name 各自保证了什么、没保证什么；bad_cast 与 bad_typeid 由哪些核心语言表达式抛出；type_index 如何把 type_info 变成容器的键
+summary: typeid 的结果类型 std::type_info：== 比较的是类型而不是对象地址，before、hash_code、name 的结果都未指定或由实现定义；以及 dynamic_cast 和 typeid 失败时抛出的 bad_cast、bad_typeid。
 status: done
 covers: support.rtti.general, typeinfo.syn, type.info, bad.cast, bad.typeid
 related: type.index, expr.typeid, expr.dynamic.cast, class.virtual, exception, support.exception, cmp.categories, unord.hash
 tags: 标准库, RTTI, typeid, type_info, type_index
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-C++ 的**运行时类型识别**（RTTI）有两个核心语言入口：`typeid`（[[expr.typeid]]）和 `dynamic_cast`（[[expr.dynamic.cast]]）。它们的结果和错误报告用到的类型，由本节定义：
+!!! tldr
+    - `std::type_info` 只能由 `typeid` 产生，不可复制，只能通过引用或指针使用；用之前必须包含 `<typeinfo>`。
+    - 判断两个类型是否相同要用 `==`，不要比较 `&typeid(T)` 的地址。C++23 起 `==` 是 `constexpr` 的。
+    - `before` 的顺序、`hash_code` 的值、`name` 的内容都未指定或由实现定义，可能因程序而异，不能持久化或跨进程比较。`hash_code` 允许冲突。
+    - 到引用类型的 `dynamic_cast` 失败时抛 `std::bad_cast`；`typeid(*p)` 中 `p` 为空且类型是多态的，抛 `std::bad_typeid`。
+    - 想把类型当作容器的键，用 [[type.index|std::type_index]]。
 
-| 头文件 | 内容 | 与核心语言的关系 |
-|---|---|---|
-| `<typeinfo>` | `type_info` | `typeid` 表达式的结果类型 |
-| | `bad_cast` | 到引用类型的 `dynamic_cast` 失败时抛出 |
-| | `bad_typeid` | `typeid` 作用于空指针解引用时抛出 |
-| `<typeindex>` | `type_index` | 可复制、可比较、可哈希的 `type_info` 包装 |
+## `typeid` 的结果
 
-¶1（[support.rtti.general]）说明 `<typeinfo>` 定义了与实现生成的类型信息相关的类型，以及两个报告动态类型识别错误的类型；`<typeindex>` 定义了一个用作（无序）关联容器索引类型的包装类型。`<typeinfo>` 全部是 freestanding 的（[typeinfo.syn]）。
+```cpp run title="type-info-eq.cpp" ok
+#include <typeinfo>
 
-[[expr.typeid#8]] 有一条规定和本节直接相关：`std::type_info` **不是预定义的**——如果 `typeid` 表达式之前没有标准库对 `std::type_info` 的声明（包含 `<typeinfo>`，或者 `import std;`），程序非良构。
+static_assert(typeid(int) == typeid(const int));  // 顶层 cv 被忽略
+static_assert(typeid(int&) == typeid(int));       // 引用也被忽略
+static_assert(typeid(int) != typeid(long));
 
-## `type_info`（[type.info]）
+int main() {}
+```
+
+**运行时类型识别**（RTTI）在语言里有两个入口：`typeid`（[[expr.typeid]]）和 `dynamic_cast`（[[expr.dynamic.cast]]）。`typeid` 得到一个 `const std::type_info` 左值，描述一个类型；作用于多态类型的对象时，描述的是对象的动态类型。本节定义 `type_info` 和两个报告失败的异常类。
+
+¶1 [support.rtti.general] 说明，`<typeinfo>` 定义与实现生成的类型信息相关的类型，以及两个报告类型识别错误的类型；`<typeindex>` 定义一个可以用作关联容器键的包装类型。`<typeinfo>` 整个是 freestanding 的。
+
+`std::type_info` 不是预定义的。如果 `typeid` 表达式之前没有标准库对 `std::type_info` 的声明（包含 `<typeinfo>` 或 `import std;`），程序非良构（[[expr.typeid#8]]）。本机 Clang 的诊断是 `you need to include <typeinfo> or import std before using the 'typeid' operator`。
+
+## `type_info` [type.info]
 
 ```cpp
 class type_info {
@@ -36,78 +48,52 @@ public:
 };
 ```
 
-几个结构性特点：
+这个类没有公开的构造函数，也不可复制。`typeid` 返回的对象一直存在到程序结束（[[expr.typeid#1]]），所以保存 `const type_info&` 或 `const type_info*` 是安全的。
 
-- **不可复制、不可赋值，没有公开构造函数**。用户无法自己创建 `type_info` 对象；唯一的来源是 `typeid` 表达式，它返回一个**静态存储期**的 `const std::type_info` 左值（[[expr.typeid]]）。所以只能保存 `const type_info&` 或 `const type_info*`。
-- **虚析构函数**。实现会从 `type_info` 派生出内部类，存放继承关系等 `dynamic_cast` 需要的信息——Itanium ABI 中是 `__fundamental_type_info`、`__class_type_info`、`__si_class_type_info`（单继承）、`__vmi_class_type_info`（多重/虚继承）等。`typeid` 返回的对象的动态类型可能是这些派生类之一（[[expr.typeid]] 允许"`std::type_info` 或其派生类"）。
-- 没有 `operator!=`：C++20 起由 `==` 重写得到（[[over.match.oper]]）。
-
-¶1 是对整个类的定性描述：
+析构函数是虚的，因为实现会从 `type_info` 派生出内部类，存放 `dynamic_cast` 需要的继承关系。Itanium ABI 里有 `__class_type_info`、`__si_class_type_info`（单继承）、`__vmi_class_type_info`（多重或虚继承）等，`typeid` 返回的对象的动态类型可以是其中之一。`!=` 由 `==` 重写得到（[[over.match.oper]]）。
 
 !!! std
-    Objects of this class effectively store a pointer to a name for the type, and an encoded value suitable for comparing two types for equality or collating order. The names, encoding rule, and collating sequence for types are all unspecified and may differ between programs.
+    The names, encoding rule, and collating sequence for types are all unspecified and may differ between programs.
 
-    该类的对象实际上存储了指向类型名字的指针，以及一个适合用于比较两个类型是否相等或排序的编码值。类型的名字、编码规则和排序顺序**都是未指明的**，并且**在不同程序之间可以不同**。
-
-"在不同程序之间可以不同"意味着：**不要把 `name()`、`hash_code()` 或 `before()` 的结果持久化或跨进程传递**。
+¶1 `type_info` 的对象实际上保存着指向类型名字的指针，以及一个用来比较相等和排序的编码值。名字、编码规则、排序顺序都是未指定的，不同程序之间可以不同。所以 `name()`、`hash_code()`、`before()` 的结果都不该写进文件或发给另一个进程。
 
 ### `operator==`（¶2–¶3）
 
-返回两个 `type_info` 是否描述**同一类型**。注意是"同一类型"而不是"同一对象"：标准只保证描述同一类型的 `type_info` 比较相等，**并没有**保证同一类型的所有 `typeid` 表达式都指代同一个对象（实践中，同一类型的 RTTI 可能在多个共享库中各有一份），因此**比较 `&typeid(T)` 的地址是不可靠的**，必须用 `==`。
+¶3 两个 `type_info` 描述同一类型时返回 `true`。标准只保证描述同一类型的 `type_info` 比较相等，没有保证同一类型的所有 `typeid` 都得到同一个对象。实际上，同一类型的类型信息可能在多个共享库里各有一份，所以比较 `&typeid(T)` 是不可靠的。
 
-C++23 起 `operator==` 是 `constexpr` 的，可以在编译期比较类型：
+!!! impl "libc++ 怎样比较两个 `type_info`"
+    libc++ 的 `<typeinfo>` 按平台选择三种策略之一（宏 `_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION`）：
 
-```cpp run title="type-info-eq.cpp" ok
+    1. Unique（多数 ELF 平台）：假设链接器把每个类型的类型信息合并成唯一一份，只比较类型名字符串的地址；
+    2. NonUnique（Windows、AIX）：地址相等或字符串内容相等即为相等；
+    3. NonUniqueARMRTTIBit（Apple arm64，本机）：编译器在名字指针的最高位标记这份类型信息是否可能不唯一，两边都唯一时比较地址，否则比较字符串。
+
+    在 Unique 策略下，如果两个共享库都用 `-fvisibility=hidden` 编译、各自带有某个类型的类型信息，跨库比较会得到两个不同的类型，跨库的 `dynamic_cast` 和 `catch` 随之失败。这是部署时的常见问题。标准本身不涉及共享库，所以这算不上违反标准，而是实现在 ABI 层面的取舍。
+
+### `before`、`hash_code`、`name`（¶4–¶9）
+
+¶5 `before` 在 `*this` 按实现的排序顺序位于 `rhs` 之前时返回 `true`。这个顺序与继承关系、声明顺序、名字的字典序都无关，存在的意义只是让类型能放进有序容器，`type_index::operator<` 就用它实现。
+
+¶6 `hash_code` 返回未指定的值，只保证在程序的一次执行中，比较相等的两个 `type_info` 返回相同的值。
+
+¶7 实现应当为不相等的 `type_info` 返回不同的值，但这只是建议，哈希冲突是允许的。所以 `hash_code()` 不能当作类型的唯一标识。
+
+¶8 `name` 返回一个由实现定义的空终止字节串，第 9 段补充它可以是适合转换为 `wstring` 显示的多字节字符串。标准对内容没有任何其他要求，连不同类型的名字不同都不要求。
+
+```cpp run title="type-name.cpp" impl
+#include <cstdio>
 #include <typeinfo>
 
-static_assert(typeid(int) == typeid(const int));     // typeid 忽略顶层 cv（[expr.typeid]）
-static_assert(typeid(int) != typeid(long));
-static_assert(typeid(int&) == typeid(int));          // 也忽略引用
+struct Derived {};
 
-int main() {}
+int main() {
+  std::printf("%s %s\n", typeid(int).name(), typeid(Derived).name());
+}
 ```
 
-!!! impl "libc++ 的三种比较策略"
-    `type_info` 的相等比较看似简单，实际上是一个 ABI 难题：同一个类型的 RTTI 可能在多个共享库中各有一份。libc++ 的 `<typeinfo>` 根据平台选择三种实现之一：
+GCC 和 Clang 遵循 Itanium ABI，返回修饰名（mangled name）中表示类型的部分，本机打印 `i 7Derived`；可以用 `<cxxabi.h>` 里的 `abi::__cxa_demangle` 还原成可读形式。MSVC 返回可读的名字，比如 `class Derived`。需要稳定、可移植的类型名时，C++26 的静态反射提供了 `std::meta::identifier_of`、`std::meta::display_string_of`（[[expr.reflect]]）。
 
-    1. **Unique**（大多数 Itanium ABI 平台）：假设链接器/动态链接器把每个类型的 RTTI 合并为唯一一份，于是只需比较类型名字符串的**地址**；
-    2. **NonUnique**（Windows COFF、AIX XCOFF）：先比地址，不等再做 `strcmp` 深比较；
-    3. **NonUniqueARMRTTIBit**（Apple arm64，即本机）：编译器在名字指针的最高位打一个"非唯一"标记；两边都唯一则比地址，都非唯一则比字符串，一个唯一一个非唯一则必然不等。
-
-    在常量求值中，libc++ 直接比较两个 `type_info` 对象的地址——编译期不存在"来自不同共享库"的问题。
-
-    在 Unique 策略下，用 `-fvisibility=hidden` 编译的库中的类型各自有一份 RTTI，跨库比较会得到"不同类型"，导致跨库 `dynamic_cast` 和 `catch` 失败——这是一个经典的部署事故。
-
-### `before`（¶4–¶5）
-
-若 `*this` 在实现的排序顺序中位于 `rhs` 之前，返回 `true`。它提供一个**全序**，但这个顺序是未指明的，与继承关系、声明顺序都无关；`before` 的存在只是为了能把类型放进有序容器（这正是 `type_index::operator<` 的实现）。
-
-### `hash_code`（¶6–¶7）
-
-¶6：返回未指明的值，但**在程序的单次执行中**，比较相等的两个 `type_info` 必须返回相同的值。¶7 *Remarks*：实现**应当**（should）为不相等的两个 `type_info` 返回不同的值——这是建议，**不是保证**，哈希冲突是允许的。所以 `hash_code()` 不能用作类型的唯一标识；需要唯一标识时用 `type_index` 本身（它的 `==` 是精确的）。
-
-### `name`（¶8–¶9）
-
-¶8：返回一个**由实现定义的** NTBS。¶9：可以是适合转换为 `wstring` 显示的空终止多字节字符串。
-
-标准对 `name()` 的内容**没有任何要求**——甚至不要求不同类型的名字不同。实践中：
-
-- GCC/Clang（Itanium ABI）返回**修饰名**（mangled name）中的类型部分：`int` 是 `"i"`，`Derived` 是 `"7Derived"`，`std::string` 在 libc++ 上是 `"NSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEE"`。可以用 `abi::__cxa_demangle`（`<cxxabi.h>`）还原成可读形式。
-- MSVC 返回可读名，例如 `"class Derived"`。
-
-!!! tip "需要可移植的类型名？"
-    `name()` 的输出不可移植，也不适合做序列化的键。C++26 的静态反射提供了 `std::meta::identifier_of`、`std::meta::display_string_of` 等工具（[[expr.reflect]]），可以在编译期得到类型的名字。
-
-## `bad_cast` 与 `bad_typeid`（[bad.cast]、[bad.typeid]）
-
-两者都派生自 `std::exception`，只有一个 `constexpr` 的 `what()`（返回由实现定义的 NTBS），特殊成员函数的规格见 [[exception]]。
-
-| 异常 | 由谁抛出 | 核心语言出处 |
-|---|---|---|
-| `bad_cast` | 到**引用**类型的 `dynamic_cast` 失败（到指针类型的失败返回空指针） | [[expr.dynamic.cast]] |
-| `bad_typeid` | `typeid` 的操作数是对**空指针**解引用得到的多态类型左值，如 `typeid(*p)` 且 `p` 为空 | [[expr.typeid]] |
-
-`bad_cast` 还会被标准库在别处使用，例如 `std::use_facet` 找不到 facet 时，以及 `std::any_cast` 抛出的 `bad_any_cast` 就派生自 `bad_cast`。
+## `bad_cast` 与 `bad_typeid` [bad.cast]、[bad.typeid]
 
 ```cpp run title="rtti-errors.cpp" ok
 #include <cstdio>
@@ -118,57 +104,38 @@ struct Derived : Base {};
 struct Other : Base {};
 
 int main() {
-    Base* b = new Derived;
-    Base* np = nullptr;
-    try {
-        (void)typeid(*np);                   // 多态类型 glvalue，由解引用空指针得到 → 抛 bad_typeid
-    } catch (const std::bad_typeid& e) {
-        std::printf("bad_typeid: %s\n", e.what());
-    }
-    try {
-        (void)dynamic_cast<Other&>(*b);      // 到引用的 dynamic_cast 失败 → 抛 bad_cast
-    } catch (const std::bad_cast& e) {
-        std::printf("bad_cast: %s\n", e.what());
-    }
-    delete b;
+  Base* b = new Derived;
+  Base* np = nullptr;
+  try {
+    (void)typeid(*np);              // 空指针：抛 bad_typeid
+  } catch (const std::bad_typeid&) {
+    std::puts("bad_typeid");
+  }
+  try {
+    (void)dynamic_cast<Other&>(*b); // 到引用的转换失败：抛 bad_cast
+  } catch (const std::bad_cast&) {
+    std::puts("bad_cast");
+  }
+  delete b;
 }
 ```
 
-!!! lawyer "`typeid(*np)` 为什么不是 UB"
-    解引用空指针通常是 UB，但 [[expr.typeid]] 为这一种情形做了专门规定：当 `typeid` 的操作数是对一个指针应用一元 `*` 得到的多态类类型 glvalue、且该指针为空指针值时，`typeid` 抛出 `bad_typeid`。这个"空指针检查"是 `typeid` 求值的一部分，发生在任何实际的内存访问之前。条件很窄（[[expr.typeid#3]]）：操作数必须**直接**是 `*p` 的形式（可以带括号）；写成 `typeid(f(*p))` 就不受此保护。另一方面，若 `*p` 的类型不是多态类，操作数是不求值操作数（[[expr.typeid#5]]），根本不会发生解引用，也就不抛异常，结果只是静态类型的 `type_info`。
+两者都派生自 `std::exception`，`what()` 返回由实现定义的字符串，特殊成员函数的约定见 [[exception]]。
 
-## `type_index`（[type.index.synopsis]、[type.index]）
+`bad_cast` 报告一次无效的 `dynamic_cast`（[bad.cast]）。到指针类型的 `dynamic_cast` 失败时得到空指针，只有到引用类型的失败才抛异常。标准库在别处也用它，比如 `std::use_facet` 找不到 facet 时抛 `bad_cast`，`std::any_cast` 抛的 `bad_any_cast` 派生自它。
 
-`type_info` 不可复制，不能直接作为 `std::map`/`std::unordered_map` 的键。`<typeindex>` 中的 `std::type_index` 是它的薄包装：内部只存一个 `const type_info*`，可复制、可赋值，`==` 转发给 `type_info::operator==`，`<` 等用 `before` 实现，`<=>` 返回 `strong_ordering`，`hash<type_index>` 与 `hash_code()` 一致。详见 [[type.index]]。
+`bad_typeid` 报告 `typeid` 表达式中的空指针（[bad.typeid]）。
 
-```cpp run title="type-index.cpp" ok
-#include <cstdio>
-#include <string>
-#include <typeindex>
-#include <unordered_map>
+!!! lawyer "`typeid(*np)` 为什么不是未定义行为"
+    对空指针解引用一般是未定义行为，但 [[expr.typeid#3]] 专门规定：`typeid` 的操作数如果是（可以带括号的）`*p` 形式，且 `p` 是空指针，`typeid` 抛出 `bad_typeid`。条件很窄。写成 `typeid(f(*p))` 就不受保护；而 `*p` 的类型不是多态类时，操作数根本不求值（[[expr.typeid#5]]），不会解引用，也不会抛异常，结果是静态类型的 `type_info`。
 
-struct Base { virtual ~Base() = default; };
-struct Circle : Base {};
-struct Square : Base {};
+## 思考题
 
-int main() {
-    std::unordered_map<std::type_index, std::string> names{
-        {typeid(Circle), "circle"},          // type_info → type_index：隐式转换
-        {typeid(Square), "square"},
-    };
-    Base* shapes[] = {new Circle, new Square};
-    for (Base* s : shapes) {
-        std::printf("%s\n", names.at(typeid(*s)).c_str());   // 按动态类型查找
-        delete s;
-    }
-}
-```
+!!! question "思考题"
+    `std::map<std::type_index, int>` 按什么顺序遍历？这个顺序在两次运行之间一定相同吗？
 
-## 小结
+<details markdown="1">
+<summary>答案</summary>
 
-!!! summary
-    - `type_info` 只能由 `typeid` 产生，不可复制；比较类型用 `==`，不要比较地址。
-    - `before` 给出未指明的全序；`hash_code` 在单次执行中对相等类型一致，但可能冲突；`name` 的内容由实现定义（GCC/Clang 返回修饰名）。
-    - 所有编码、名字、顺序都可能随程序乃至执行而变，不要持久化。
-    - `bad_cast`：到引用的 `dynamic_cast` 失败；`bad_typeid`：`typeid(*p)` 中 `p` 为空且类型多态。
-    - `type_index`：可复制的 `type_info*` 包装，用作容器的键（详见 [[type.index]]）。
+按 `type_info::before` 的顺序（[[type.index#4]]）。这个顺序是未指定的（[type.info] 第 1 段），可能依赖类型信息的地址，所以可能随链接顺序甚至地址空间随机化而变。需要稳定的顺序时，应当自己维护类型到编号的映射。
+</details>

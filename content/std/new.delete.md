@@ -1,56 +1,81 @@
 ---
 title: 存储的分配与释放
-summary: 全局 operator new/delete 的 22 个签名逐一拆解：Required behavior 与 Default behavior 的区别、new_handler 循环、nothrow 版本如何转发、尺寸与对齐释放的前置条件、替换规则、constexpr 的 placement 形式与数据竞争保证
+summary: 标准库的 22 个全局 operator new / operator delete：替换版本必须遵守什么、默认版本做什么，nothrow 版本如何转发，释放时大小和对齐要与分配时一致，placement 形式不可替换，以及分配与释放之间的同步保证。
 status: done
 covers: *
 papers: N3778, P0035R4, P2747R2
 related: support.dynamic, basic.stc, dcl.fct.def.replace, expr.new, expr.delete, alloc.errors, basic.align, intro.races, replacement.functions
 tags: 标准库, operator new, operator delete, 可替换函数, 尺寸释放, 对齐分配
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[[basic.stc.dynamic]] 从核心语言的角度规定了分配函数和释放函数必须满足的条件：签名形式、返回非空且对齐的指针、失败时抛 `bad_alloc`、零大小请求也要返回唯一指针，等等。本节则是库的视角：标准库提供了哪 22 个全局函数，每个函数的默认行为是什么，程序替换它们时必须遵守什么。
+!!! tldr
+    - 程序可以替换全局 `operator new` / `operator delete`。替换版本必须满足 Required behavior：`operator new` 要么返回非空且对齐的指针，要么抛 `bad_alloc`。
+    - 默认的 `operator new` 在一个循环里尝试分配，失败时调用 new_handler；它是否用 `malloc` 实现是未指定的，所以 `new` 出来的内存不能交给 `free`。
+    - nothrow 版本默认转调普通版本并吞掉异常。只替换 `operator new(size_t)`，`new (std::nothrow)` 也会用到你的版本。
+    - 释放时传入的指针、大小和对齐都必须与分配时一致；单对象形式和数组形式不能混用。替换带大小参数的 `operator delete` 时，必须同时替换不带大小参数的版本。
+    - placement 形式 `operator new(size_t, void*)` 不可替换，C++26 起是 `constexpr`。同一块存储上的释放 happens before 下一次分配，替换版本也要保证这一点。
 
-读本节要先理解库条款的两个专用词（[[structure.specifications]]）：
+## 替换全局 `operator new`
 
-- ***Required behavior***（要求的行为，[[g:required-behavior]]）：对替换版本也有约束力的契约。条文中反复出现 "This requirement is binding on any replacement versions of these functions"。违反它的替换函数会让程序的行为未定义（[[res.on.functions]]）。
-- ***Default behavior***（默认行为，[[g:default-behavior]]）：库自带版本做的事。替换后，这部分就不再适用。
+```cpp run title="replace-new.cpp" ok
+#include <cstdio>
+#include <cstdlib>
+#include <new>
 
-理解本节的关键就在这一区分。例如 `operator new` 的 *Required behavior* 是返回非空的适当对齐的指针，否则抛 `bad_alloc`；而 *Default behavior* 是循环尝试分配、调用 new_handler 等等。你的替换版本不必调用 new_handler，但不能返回空指针。
+void* operator new(std::size_t n) {
+  std::printf("my operator new(%zu)\n", n);
+  if (void* p = std::malloc(n ? n : 1)) return p;
+  throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
-## 总则（[new.delete.general]）
+int main() {
+  int* p = new (std::nothrow) int(1);  // 打印：my operator new(4)
+  delete p;
+}
+```
 
-¶1 有两条规则：
+在程序里定义一个签名相同的全局函数，就替换掉了库的版本，整个程序的 `new` 都会用它（[[dcl.fct.def.replace]]）。这个例子同时演示了下文的两条规则：nothrow 版本默认会转调你替换的 `operator new(size_t)`；`malloc(0)` 可能返回空指针，所以零字节的请求要改成至少 1 字节。
 
-- 除非另有规定，[[basic.stc.dynamic]] 的条款适用于库版本的 `operator new` 和 `operator delete`。
-- 如果传给这些函数的对齐实参不是有效的对齐值（[[basic.align]]：必须是 2 的非负整数次幂），行为未定义。所以手动调用 `::operator new(n, std::align_val_t(3))` 是 UB。
+库条款用两种措辞描述这些函数（[[structure.specifications]]）：
 
-¶2：在独立实现上，可替换全局分配函数的默认版本是否满足 [new.delete.single] 和 [new.delete.array] 中的要求，是由实现定义的。注 1：独立实现的默认版本被调用时可以导致未定义行为（例如没有堆的嵌入式平台）；在常量求值中，这些默认版本的行为无关紧要，因为对它们的调用会被省略（[[expr.new]]）。*推荐实践*：如果默认版本中有任何一个满足宿主实现的要求，那么它们都应当满足。配套的特性测试宏是 `__cpp_lib_freestanding_operator_new`（[[version.syn]]）。
+- **Required behavior**（[[g:required-behavior]]）是对替换版本也有约束力的契约，条文里写作 "This requirement is binding on any replacement versions of these functions"。替换版本违反它，程序的行为未定义（[[res.on.functions]]）。
+- **Default behavior**（[[g:default-behavior]]）只描述库自带的版本。替换之后，这部分就不适用了。
 
-## 单对象形式（[new.delete.single]）
+所以替换版本可以不调用 new_handler、可以不用 `malloc`，但不能在失败时返回空指针。
 
-### 抛出版本的 `operator new`（¶1–¶4）
+## 总则 [new.delete.general]
+
+¶1 除非另有规定，[[basic.stc.dynamic]] 对分配函数和释放函数的要求也适用于库版本。传给这些函数的对齐实参如果不是有效的对齐值（2 的整数次幂，见 [[basic.align]]），行为未定义，例如 `::operator new(16, std::align_val_t(3))`。
+
+¶2 在独立实现上，默认版本是否满足下文的要求由实现定义。注 1 说明，没有堆的平台上调用它们可以导致未定义行为；而在常量求值中这无关紧要，因为对可替换分配函数的调用总是被省略（[[expr.new]]）。*Recommended practice*：只要有一个默认版本满足宿主实现的要求，就应当全部满足。对应的特性测试宏是 `__cpp_lib_freestanding_operator_new`。
+
+## 单对象形式 [new.delete.single]
+
+### 抛异常的 `operator new`（¶1–¶4）
 
 ```cpp
 void* operator new(std::size_t size);
 void* operator new(std::size_t size, std::align_val_t alignment);
 ```
 
-¶1 *Effects*：*new-expression* 调用的分配函数，用以分配 `size` 字节。第二种形式用于具有 new 扩展对齐的类型，第一种用于其他情况。
+¶1 它们由 *new-expression* 调用，分配 `size` 字节。类型具有 new 扩展对齐（对齐要求超过 `__STDCPP_DEFAULT_NEW_ALIGNMENT__`）时用第二种，否则用第一种。
 
-¶2 *Required behavior*：返回指向适当对齐存储的非空指针，否则抛出 `bad_alloc` 异常。
+¶2 Required behavior：返回指向适当对齐存储的非空指针，否则抛出 `bad_alloc`。
 
-¶3 *Default behavior* 是一个循环：
+¶3 Default behavior 是一个循环：
 
-- ¶3.1 尝试分配所请求的存储。这次尝试是否调用 C 库的 `malloc` 或 `aligned_alloc`，是未指明的。
-- ¶3.2 成功则返回指针。否则，如果当前的 `new_handler`（[[get.new.handler]]）是空指针，抛出 `bad_alloc`。
-- ¶3.3 否则调用当前的 `new_handler`；如果它返回，循环重来。
-- ¶3.4 分配成功，或者所调用的 `new_handler` 不返回，循环就结束。
+1. 尝试分配。这次尝试是否调用 C 库的 `malloc` 或 `aligned_alloc` 是未指定的。
+2. 成功就返回指针。失败时，如果当前的 new_handler（[[get.new.handler]]）是空指针，抛出 `bad_alloc`。
+3. 否则调用 new_handler。它返回了就回到第 1 步。
+4. 分配成功，或者 new_handler 不再返回（抛异常或终止程序），循环结束。
 
-¶4 *Remarks*：此函数是可替换的（[[dcl.fct.def.replace]]）。
+new_handler 的约定见 [[alloc.errors]]。第 4 段说明这两个函数是可替换的。
 
-!!! note "“是否调用 malloc 是未指明的”"
-    这句话的意思是：即使在你的平台上默认实现恰好就是 `malloc`，你也不能假设 `operator new` 分配的内存可以用 `free` 释放，或者 `malloc` 分配的内存可以用 `operator delete` 释放。混用属于违反 ¶10 的前置条件，是 UB。
+!!! note "不能用 `free` 释放 `new` 来的内存"
+    即使你的平台上默认实现恰好是 `malloc`，标准也没有这样保证。用 `free` 释放 `operator new` 的结果，或者用 `operator delete` 释放 `malloc` 的结果，都违反了下文第 10 段的前置条件，是未定义行为。
 
 ### nothrow 版本（¶5–¶9）
 
@@ -59,21 +84,14 @@ void* operator new(std::size_t size, const std::nothrow_t&) noexcept;
 void* operator new(std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept;
 ```
 
-¶5：与上面相同，只是它们由 placement 形式的 *new-expression* `new (std::nothrow) T` 调用，供更希望用空指针表示错误的程序使用。
+¶5 它们由 `new (std::nothrow) T` 调用，供希望用空指针表示失败的程序使用。第 8 段的例子对比了两种写法：`new T` 失败时抛 `bad_alloc`，`new(nothrow) T` 失败时返回空指针。
 
-¶6 *Required behavior*：返回非空的适当对齐指针，或者返回空指针。并且，每个 nothrow 版本返回的指针，都如同是从（可能被替换的）对应非 placement 版本获得的。
+¶6 Required behavior：返回非空的对齐指针，或者返回空指针。而且返回的指针如同是从对应的普通版本（可能已被替换）得到的。所以 `new (std::nothrow) T` 的结果可以用普通的 `delete` 释放。
 
-¶7 *Default behavior*：调用 `operator new(size)` 或 `operator new(size, alignment)`；正常返回则返回其结果，否则（抛出异常）返回空指针。
+¶7 Default behavior：调用 `operator new(size)` 或 `operator new(size, alignment)`，正常返回就返回其结果，抛了异常就返回空指针。这就是开头的例子里 nothrow 版本会调用替换函数的原因。
 
-¶6 的后半句保证了 `new (std::nothrow) T` 得到的指针可以用普通的 `delete` 释放，因为它如同来自 `operator new(size_t)`。¶7 则意味着，**只替换 `operator new(size_t)`，nothrow 版本的默认实现也会调用你的替换版本**。
-
-```cpp
-T* p1 = new T;                  // 失败时抛 bad_alloc
-T* p2 = new(std::nothrow) T;    // 失败时返回 nullptr（¶8 例 1）
-```
-
-!!! pitfall "`new (std::nothrow)` 不是 `noexcept` 的 *new-expression*"
-    nothrow 只管分配：如果 `T` 的构造函数抛出异常，异常照样传播出去（存储会先通过 `operator delete(void*, const nothrow_t&)` 释放，见 ¶19）。
+!!! pitfall "`new (std::nothrow) T` 照样可能抛异常"
+    nothrow 只管分配这一步。`T` 的构造函数抛出的异常照样传播出去，在此之前刚分配的存储由 nothrow 版本的 `operator delete` 释放（下文第 19 段）。
 
 ### 释放函数（¶10–¶16）
 
@@ -84,36 +102,34 @@ void operator delete(void* ptr, std::align_val_t alignment) noexcept;
 void operator delete(void* ptr, std::size_t size, std::align_val_t alignment) noexcept;
 ```
 
-¶10–¶11 *Preconditions* 如下，违反即 UB：
+¶10–¶11 是前置条件，违反任何一条都是未定义行为：
 
-- `ptr` 是空指针，或者其值表示一块由先前对（可能被替换的）`operator new(std::size_t)` 或 `operator new(std::size_t, std::align_val_t)` 的调用所分配、且尚未被中间的 `operator delete` 调用失效的内存块的地址。
-- 若没有对齐参数，`ptr` 必须由没有对齐参数的分配函数返回；若有对齐参数，其值必须等于传给分配函数的对齐实参。
-- 若有大小参数，其值必须等于传给分配函数的大小实参。
+- `ptr` 是空指针，或者是先前某次 `operator new(size_t)` 或 `operator new(size_t, align_val_t)` 返回、尚未被释放的地址；
+- 没有对齐参数时，`ptr` 必须来自没有对齐参数的分配函数；有对齐参数时，它必须等于分配时的对齐实参；
+- 有大小参数时，它必须等于分配时的大小实参。
 
-也就是说，**分配与释放必须配对**：对齐分配的指针必须用对齐释放；`new[]` 得来的必须用 `delete[]`（数组形式的前置条件要求来自 `operator new[]`）。
+换句话说，分配和释放必须配对：对齐分配的内存要用对齐版本释放，传入的大小要和申请时一样。
 
-¶12 *Effects*：*delete-expression* 调用的释放函数（[[basic.stc.dynamic.deallocation]]），使 `ptr` 的值无效（[[g:invalid-pointer-value]]）。
+¶12 它们由 *delete-expression* 调用，使 `ptr` 的值成为无效指针值（[[g:invalid-pointer-value]]）。
 
-¶13 *Required behavior*：对带大小参数的 `operator delete` 的调用，可以改为对相应不带大小参数版本的调用，而不影响内存分配。注 1：一个符合要求的实现可以让 `operator delete(void* ptr, std::size_t size)` 简单地调用 `operator delete(ptr)`。
+¶15 Default behavior：`ptr` 为空时什么也不做，否则回收存储。第 16 段补充，回收的存储什么时候被后续的 `operator new`、`malloc` 等再次分配出去，是未指定的。
 
-¶14 *Default behavior*：带大小参数的函数把其他参数转发给对应的不带大小参数的函数。
+¶13 Required behavior：对带大小参数版本的调用可以改为对不带大小参数版本的调用，不影响内存分配。注 1 说明，实现可以让 `operator delete(ptr, size)` 直接调用 `operator delete(ptr)`。第 14 段规定的默认行为正是这样，`size` 被丢弃，只有替换版本才可能用上它。
 
-¶15 *Default behavior*：`ptr` 为空则什么也不做；否则回收先前 `operator new` 分配的存储。
-
-¶16 *Remarks*：回收的存储在什么条件下被后续的 `operator new` 或 `aligned_alloc`、`calloc`、`malloc`、`realloc` 再次分配，是未指明的。此函数是可替换的。接下来是替换的配对规则：
+### 替换时要成对（¶16）
 
 !!! std
-    If a replacement function without a size parameter is defined by the program, the program should also define the corresponding function with a size parameter. If a replacement function with a size parameter is defined by the program, the program shall also define the corresponding version without the size parameter.
+    If a replacement function with a size parameter is defined by the program, the program shall also define the corresponding version without the size parameter.
 
-    如果程序定义了不带大小参数的替换函数，它应当（should）也定义对应的带大小参数的版本；如果定义了带大小参数的替换函数，它必须（shall）也定义对应的不带大小参数的版本。
+¶16 的规则是不对称的：
 
-注意 *should* 与 *shall* 的不对称：
+| 你替换了 | 标准的要求 | 原因 |
+|---|---|---|
+| 不带大小的 `operator delete(void*)` | 应当（should）同时替换带大小的版本 | 默认的带大小版本目前转发给你的版本，但注 3 提醒默认行为将来可能改变 |
+| 带大小的 `operator delete(void*, size_t)` | 必须（shall）同时替换不带大小的版本 | ¶13 允许实现把带大小的调用改成不带大小的调用，你的函数会被绕过 |
 
-- 只替换 `operator delete(void*)` 而不替换尺寸版本：合法，但不推荐。按 ¶14 的默认行为，尺寸版本会转发给你的 `operator delete(void*)`，暂时没问题；但注 3 提醒，默认行为将来可能改变。如果某天库的尺寸版本不再转发，你的 `operator new` 分配的内存就会交给库的默认 `operator delete` 释放，后果无法预料。
-- 只替换尺寸版本而不替换无尺寸版本：违反 shall。原因是 ¶13 允许实现把尺寸调用改写为无尺寸调用，届时你替换的函数会被绕过。
-
-!!! history "尺寸释放（C++14）与对齐分配（C++17）"
-    带 `size_t` 参数的全局 `operator delete` 由 [[N3778]] 在 C++14 引入：现代分配器（tcmalloc、jemalloc）按大小类组织内存，释放时若知道大小就不必查元数据。带 `align_val_t` 的全部形式由 [[P0035R4]] 在 C++17 引入，此前 `new` 一个 `alignas(64)` 的类型只能得到基本对齐的内存，是一个长期的缺陷。编译器侧的开关见 [[basic.stc]] 的实现视角部分；对应预定义宏是 `__cpp_sized_deallocation` 和 `__cpp_aligned_new`（[[cpp.predefined]]）。
+!!! history "尺寸释放与对齐分配"
+    带 `size_t` 参数的全局 `operator delete` 由 [[N3778]] 在 C++14 引入。tcmalloc、jemalloc 这类分配器按大小分类管理内存，释放时知道大小就不必查元数据。带 `align_val_t` 的各个形式由 [[P0035R4]] 在 C++17 引入；在那之前，`new` 一个 `alignas(64)` 的类型只能得到基本对齐的内存。对应的特性测试宏是 `__cpp_sized_deallocation` 和 `__cpp_aligned_new`。
 
 ### nothrow 释放函数（¶17–¶21）
 
@@ -122,22 +138,22 @@ void operator delete(void* ptr, const std::nothrow_t&) noexcept;
 void operator delete(void* ptr, std::align_val_t alignment, const std::nothrow_t&) noexcept;
 ```
 
-*delete-expression* 不会调用它们（`delete` 语法无法传入 placement 实参）。¶19：实现只在一种情况下调用它们：nothrow placement *new-expression* 中调用的构造函数抛出异常时，用它们释放刚分配的存储（即 [[expr.new]] 中 placement 的匹配释放函数）。¶20 默认行为：调用 `operator delete(ptr)` 或 `operator delete(ptr, alignment)`。
+`delete` 表达式无法传 placement 实参，所以它不会调用这两个函数。
 
-## 数组形式（[new.delete.array]）
+¶19 实现只在一种情况下调用它们：`new (std::nothrow) T` 里的构造函数抛出异常，需要释放刚分配的存储（[[expr.new]] 中的匹配释放函数）。第 20 段规定默认行为是调用 `operator delete(ptr)` 或 `operator delete(ptr, alignment)`。
 
-八个数组签名与单对象形式一一对应，规则几乎相同，差别在于默认行为都转发给单对象形式：
+## 数组形式 [new.delete.array]
+
+八个数组签名与单对象形式一一对应，Required behavior 相同，默认行为都转发到单对象形式：
 
 | 函数 | 默认行为 |
 |---|---|
-| `operator new[](size)` / `(size, al)` | ¶3：返回 `operator new(size)` / `operator new(size, al)` |
-| nothrow `operator new[]` | ¶7：调用 `operator new[](size)` / `(size, al)`，抛异常则返回空 |
-| `operator delete[](ptr)` 等四个 | ¶13：带大小的转发给不带大小的；不带大小的转发给对应的单对象 `operator delete` |
-| nothrow `operator delete[]` | ¶18：调用 `operator delete[](ptr)` / `(ptr, al)` |
+| `operator new[](size)` / `(size, al)` | ¶3 返回 `operator new(size)` / `operator new(size, al)` |
+| nothrow `operator new[]` | ¶7 调用 `operator new[](size)` / `(size, al)`，抛异常则返回空指针 |
+| `operator delete[]` 的四个形式 | ¶13 带大小的转发给不带大小的，不带大小的转发给单对象 `operator delete` |
+| nothrow `operator delete[]` | ¶18 调用 `operator delete[](ptr)` / `(ptr, al)` |
 
-¶9 的前置条件要求 `ptr` 来自 `operator new[]`，并由 `operator delete[]` 失效。因此**单对象与数组形式不能混用**，哪怕默认实现之间是互相转发的。
-
-脚注 168 澄清了一个常见误解：记录数组元素个数不是 `operator new[]`/`operator delete[]` 的职责，而是 *new-expression* 和 *delete-expression* 做的事。数组 *new-expression* 可以把传给 `operator new[]` 的 `size` 增大，多要一点空间存放数组 cookie（Itanium ABI 中，仅当元素类型有非平凡析构函数时才需要）。所以 `new T[n]` 传给 `operator new[]` 的 `size` 可能大于 `n * sizeof(T)`（[[expr.new]]）。
+¶9 的前置条件要求 `ptr` 来自 `operator new[]`。所以即使默认实现之间互相转发，单对象形式和数组形式也不能混用：`delete` 一个 `new[]` 得到的指针是未定义行为。
 
 ```cpp run title="array-cookie.cpp" impl
 #include <cstdio>
@@ -145,24 +161,29 @@ void operator delete(void* ptr, std::align_val_t alignment, const std::nothrow_t
 #include <new>
 
 void* operator new[](std::size_t n) {
-    std::printf("operator new[](%zu)\n", n);
-    if (void* p = std::malloc(n)) return p;
-    throw std::bad_alloc();
+  std::printf("operator new[](%zu)\n", n);
+  if (void* p = std::malloc(n)) return p;
+  throw std::bad_alloc();
 }
 void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept {
+  std::free(p);
+}
 
 struct Trivial    { int x; };
 struct NonTrivial { int x; ~NonTrivial() {} };
 
 int main() {
-    delete[] new Trivial[4];      // 打印 16：无需 cookie
-    delete[] new NonTrivial[4];   // AArch64 macOS 上打印 32：16 字节 cookie（ARM 风格 ABI 记录元素大小和个数）；
-                                  // x86-64 Itanium ABI 上通常是 24（8 字节 cookie 只记录个数）
+  delete[] new Trivial[4];     // 16
+  delete[] new NonTrivial[4];  // 本机 32：多了 16 字节 cookie
 }
 ```
 
-## 非分配形式（[new.delete.placement]）
+脚注 168 说明，记住数组有几个元素不是 `operator new[]` 的职责，而是 *new-expression* 和 *delete-expression* 的事。数组 *new-expression* 可以多申请一些空间，在数组前面存放元素个数，这块空间叫 **数组 cookie**。`delete[]` 要据此调用正确次数的析构函数，所以只有元素类型有非平凡析构函数时才需要它。
+
+本机（AArch64 macOS）上 cookie 是 16 字节，记录元素大小和个数；x86-64 的 Itanium ABI 通常只用 8 字节记录个数，那里第二行会打印 24。总之，传给 `operator new[]` 的 `size` 可以大于 `n * sizeof(T)`（[[expr.new]]）。
+
+## placement 形式 [new.delete.placement]
 
 ```cpp
 constexpr void* operator new  (std::size_t size, void* ptr) noexcept;
@@ -171,74 +192,71 @@ constexpr void  operator delete  (void* ptr, void*) noexcept;
 constexpr void  operator delete[](void* ptr, void*) noexcept;
 ```
 
-¶1：这些函数是保留的，程序不得定义取代标准库版本的函数（[[constraints]]）。[[basic.stc.dynamic]] 的条款对它们不适用，因为它们不分配任何东西，也不需要返回唯一指针。
+¶2–¶6 两个 `operator new` 直接返回 `ptr`，有意不做任何其他事情。`new (place) T(...)` 就是借它在已知地址上构造对象。
 
-- ¶2–¶3：`operator new(size, ptr)` 返回 `ptr`，并有意不执行其他任何动作。¶4 例 1 展示了在已知地址构造对象的用法：`new (place) Something()`。
-- ¶5–¶6：数组版本同理。
-- ¶7–¶10：两个 placement `operator delete` 什么也不做；placement *new-expression* 中的初始化抛出异常时，默认调用的就是它们（[[expr.new]]）。
+¶7–¶10 两个 `operator delete` 什么也不做；placement *new-expression* 的初始化抛出异常时，调用的就是它们。
 
-!!! note "constexpr placement new {{c++26}}"
-    这四个函数在 C++26 中成为 `constexpr`（[[P2747R2]]），于是在常量求值中可以使用 placement new 构造对象，这是 `std::inplace_vector`、constexpr 版 `std::optional` 等的基础。核心语言侧，[[expr.const]] 对常量求值中的 placement new 另有限制（指针必须指向类型相似的对象等）。libc++ 用 `_LIBCPP_CONSTEXPR_SINCE_CXX26` 标注了它们。
+¶1 这四个函数是保留的，程序不能定义自己的版本取代它们（[[constraints]]）。它们不分配内存，所以 [[basic.stc.dynamic]] 的要求对它们不适用。
+
+!!! pitfall "类里的 placement `operator new` 会挡住全局版本"
+    在类作用域里声明 `operator new(size_t, void*)` 是允许的，它是这个类专属的分配函数，会使该类的 `new (buf) T` 调用你的版本。标准容器为此总是写 `::new (p) T(...)`，用 `::` 跳过类作用域的查找。
+
+C++26 把这四个函数改成了 `constexpr`（[[P2747R2]]），常量求值中可以用 placement new 构造对象。`std::inplace_vector` 和 `constexpr` 版本的 `std::optional` 都依赖这一点。核心语言另有限制，比如指针必须指向类型合适的存储（[[expr.const]]）。
 
 ```cpp run title="constexpr-placement.cpp" ok
 #include <memory>
 #include <new>
 
 constexpr int f() {
-    std::allocator<int> a;
-    int* p = a.allocate(1);
-    int* q = ::new (p) int(42);     // C++26：常量求值中允许 placement new
-    int r = *q;
-    std::destroy_at(q);
-    a.deallocate(p, 1);
-    return r;
+  std::allocator<int> a;
+  int* p = a.allocate(1);
+  int* q = ::new (p) int(42);   // C++26 起可在常量求值中使用
+  int r = *q;
+  std::destroy_at(q);
+  a.deallocate(p, 1);
+  return r;
 }
 static_assert(f() == 42);
 
 int main() {}
 ```
 
-!!! pitfall "无法“替换”placement new"
-    写 `void* operator new(std::size_t, void*)` 的全局定义会与 `<new>` 中的 inline 定义冲突（重定义），而且 ¶1 明确禁止。但你可以在类作用域声明 `operator new(size_t, void*)`。那是类专属的分配函数，会隐藏全局的 placement 形式，使该类的 `new (buf) T` 调用你的版本。标准容器为此总是写 `::new (p) T(...)`，用 `::` 跳过类作用域查找。
+本机 Clang 23 在 `-std=c++2c` 下接受这段代码，在 `-std=c++23` 下拒绝 `static_assert`。
 
-## 数据竞争（[new.delete.dataraces]）
+## 分配与释放之间的同步 [new.delete.dataraces]
+
+线程 A 写完一个对象后 `delete` 它，线程 B 随后 `new` 一个对象，恰好拿到同一块内存并写入。两个线程之间没有任何其他同步。如果没有额外的规定，A 的写和 B 的写会构成数据竞争。
+
+¶1 规定了两件事。第一，库版本和替换版本的 `operator new` / `operator delete`，以及 C 库的 `aligned_alloc`、`calloc`、`malloc`、`free`、`realloc`，都不能引入数据竞争（[[res.on.data.races]]）。第二：
 
 !!! std
     Calls to these functions that allocate or deallocate a particular unit of storage shall occur in a single total order, and each such deallocation call shall happen before the next allocation (if any) in this order.
 
-    分配或释放某一特定存储单元的调用必须构成单一全序，并且这个顺序中的每次释放都 happens before 下一次分配（如果有的话）。
+对同一块存储的分配和释放构成一个全序，每次释放都 happens before 下一次分配（[[intro.races]]）。于是 A 在释放之前的写 happens before B 在分配之后的写，上面的场景没有数据竞争。
 
-¶1 第一句：为判定数据竞争，库版本的 `operator new`/`operator delete`、用户替换版本，以及 C 库的 `aligned_alloc`、`calloc`、`malloc`、`free`、`realloc`，都不得引入数据竞争（[[res.on.data.races]]）。第二句（上面引用的）给出了一个跨线程的同步保证：如果线程 A 释放了一块内存，线程 B 随后分配到了同一块内存，那么 A 的释放 happens before B 的分配（[[intro.races]]）。
-
-这条保证的实际含义是：即使 A 和 B 之间没有任何其他同步，**线程 B 在新分配的内存上写，也不会与线程 A 在释放之前对这块内存的写构成数据竞争**。没有这条规则，线程 A 写完对象后 `delete`、线程 B 再 `new` 得到同一地址，这样一个普通程序在形式上就有数据竞争。
-
-注意这同样约束替换版本：自己写的无锁内存池必须提供这个 happens-before 关系，通常意味着释放时用 release 语义、分配时用 acquire 语义。
+这条规定同样约束替换版本。自己写的无锁内存池必须提供这个 happens-before 关系，一般意味着释放用 release 语义、分配用 acquire 语义。
 
 ## 思考题
 
-!!! question "思考题"
-    1. 一个程序只替换了 `void* operator new(std::size_t)`，使用了 `new (std::nothrow) int`，然后 `delete` 它。调用链是怎样的？
-    2. 下面的替换违反了什么？
-       ```cpp
-       void* operator new(std::size_t n) { return std::malloc(n); }
-       ```
-    3. `operator delete(void*, std::size_t)` 的默认版本会用到 `size` 参数吗？
+!!! question "思考题 1"
+    下面这个替换版本违反了什么？
+    ```cpp
+    void* operator new(std::size_t n) { return std::malloc(n); }
+    ```
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-1. `new (std::nothrow) int` 调用库的 nothrow `operator new(size_t, const nothrow_t&)`，其默认行为（¶7）调用 `operator new(size)`，也就是你的替换版本。`delete` 调用 `operator delete(void*)` 或尺寸版本（由实现选择），尺寸版本默认转发到无尺寸版本（¶14），最终由库默认的 `operator delete(void*)` 回收一块由你的 `operator new` 分配的存储。能否正常工作取决于两者是否恰好使用同一个底层分配器（libc++ 的默认实现基于 `malloc`/`free`，所以替换版本若也用 `malloc` 就碰巧可行）。可移植的做法是：替换 `operator new` 时总是同时替换对应的 `operator delete`。
-2. 违反 ¶2 的 *Required behavior*：失败时必须抛 `bad_alloc`，而 `malloc` 失败返回空指针。另外 `malloc(0)` 可以返回空指针，违反 [[basic.stc.dynamic.allocation]] 对零大小请求的要求。由于 *Required behavior* 对替换版本有约束力，这样的程序行为未定义；编译器在 *new-expression* 之后可以假设指针非空并删除空指针检查（当分配函数没有非抛出异常说明时，[[expr.new]] 规定结果非空）。
-3. 不会。¶14 规定默认行为是转发给 `operator delete(ptr)`，丢弃 `size`。只有替换的释放函数才可能利用尺寸信息。
+违反了第 2 段的 Required behavior：失败时必须抛 `bad_alloc`，而 `malloc` 失败返回空指针。另外 `malloc(0)` 可以返回空指针，违反了 [[basic.stc.dynamic.allocation]] 对零字节请求也要返回非空唯一指针的要求。
+
+Required behavior 约束替换版本，所以这样的程序行为未定义。编译器确实会利用这一点：分配函数没有非抛出的异常说明时，*new-expression* 的结果不会是空指针，之后的空指针检查可以删掉（[[expr.new]]）。
 </details>
 
-## 小结
+!!! question "思考题 2"
+    程序只替换了 `operator new(size_t)`，没有替换任何 `operator delete`。`delete new int` 能正常工作吗？
 
-!!! summary
-    - *Required behavior* 约束替换版本，*Default behavior* 只描述库版本。
-    - 抛出版本：成功返回非空对齐指针，失败抛 `bad_alloc`；默认实现循环调用 new_handler；是否用 `malloc` 未指明。
-    - nothrow 版本默认转发给抛出版本并吞掉异常；其返回值如同来自抛出版本，可用普通 `delete` 释放。
-    - 释放的前置条件：指针来源、对齐实参、大小实参都必须与分配时一致；单对象与数组形式不能混用。
-    - 替换无尺寸版本时应当（should）同时替换尺寸版本；替换尺寸版本时必须（shall）同时替换无尺寸版本。
-    - placement 形式保留不可替换，C++26 起为 `constexpr`。
-    - 对同一存储单元的分配/释放形成全序，释放 happens before 下一次分配，替换版本也要保证这一点。
+<details markdown="1">
+<summary>答案</summary>
+
+不一定。`delete` 会调用库默认的 `operator delete`，它回收的是一块由你的 `operator new` 分配的存储。能否工作取决于两者是否恰好使用同一个底层分配器。libc++ 的默认实现基于 `malloc` / `free`，替换版本也用 `malloc` 时碰巧可行，但这不是标准的保证。可移植的做法是替换 `operator new` 时总是同时替换对应的 `operator delete`，包括带大小的版本。
+</details>

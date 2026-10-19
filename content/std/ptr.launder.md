@@ -1,92 +1,20 @@
 ---
 title: 指针优化屏障 std::launder
-summary: std::launder 的完整契约：Mandates 排除函数与 void、Preconditions 要求地址处有生命周期内的相似类型对象且可达字节不扩大、Returns 指向该对象、constexpr 条件；它不创建对象，只修正指针所指向的对象
+summary: std::launder 的契约：给它一个地址正确、但指向旧对象（或指向存储而非对象）的指针，它返回指向该地址上现存对象的指针；它不创建对象，也不能扩大指针可访问的范围。
 status: done
 papers: P0137R1
 related: basic.life, basic.compound, intro.object, conv.qual, expr.new, support.dynamic, expr.const
 tags: 标准库, launder, 对象模型, 生命周期, UB
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-在 C++17 的对象模型里，**指针值不只是地址**。一个指针值指向某个对象（[[basic.compound]]），同一地址上先后存在的不同对象，对应的指针值是不同的。大多数情况下，在旧对象的存储上创建新对象后，旧指针会自动指向新对象，这叫**透明替换**（[[g:transparently-replaceable]]，[[basic.life]] ¶9–¶10）。但透明替换有条件；条件不满足时，旧指针仍然指向已经结束生命周期的旧对象，通过它访问新对象是 UB。
+!!! tldr
+    - 指针不只是地址，它指向某个特定的对象。在旧对象的位置上创建新对象后，旧指针通常自动指向新对象，但有例外；`std::launder` 处理这些例外。
+    - 需要它的典型场合：替换 const 完整对象、替换基类子对象、从 `unsigned char` 缓冲区 `reinterpret_cast` 出对象指针。
+    - 前置条件：地址上必须已经有一个类型相似、处于生命周期内的对象，结果能访问的字节不能多于原指针。违反就是未定义行为。
+    - `T` 是函数类型或 `void` 时程序非良构。`launder` 不产生机器指令，只约束优化器。
 
-`std::launder` 就是为这种情况准备的：给它一个地址正确、但所指对象不对的指针，它返回一个指向该地址处当前那个对象的指针。它的动机、透明替换的条件和典型用法已在 [[basic.life]] 中详细讨论，本页只讲库条款给出的精确契约。
-
-```cpp
-template<class T> constexpr T* launder(T* p) noexcept;
-```
-
-## Mandates：不能洗函数指针和 `void*`（¶1）
-
-*Mandates*：`!is_function_v<T> && !is_void_v<T>` 为 `true`。
-
-在库条款中，*Mandates* 的意思是条件不满足时程序非良构（[[structure.specifications]]），必须给出诊断。它与 *Constraints*（不满足则不参与重载决议）、*Preconditions*（不满足则 UB）是三个不同层级的要求。
-
-```cpp title="launder-mandates.cpp" error
-#include <new>
-
-void f();
-auto p = std::launder(&f);                      // error: T 是函数类型
-auto q = std::launder(static_cast<void*>(nullptr));  // error: T 是 void
-```
-
-排除它们的原因是：函数不是对象，不存在在函数的存储上创建新函数这回事；`void*` 不指向特定类型的对象，`launder` 无法确定要找哪个对象。
-
-## Preconditions：三项要求（¶2）
-
-!!! std
-    `p` represents the address *A* of a byte in memory. An object *X* whose type is similar to `T` is located at the address *A*, and is either within its lifetime or is an array element subobject whose containing array object is within its lifetime. All bytes of storage that would be reachable through the result are reachable through `p`.
-
-    `p` 表示内存中某个字节的地址 *A*。有一个类型与 `T` 相似的对象 *X* 位于地址 *A*，并且它处于生命周期内，或者是一个所在数组对象处于生命周期内的数组元素子对象。经由结果可达的所有存储字节，都可以经由 `p` 到达。
-
-这是 *Preconditions*，违反任何一项，行为都未定义。下面逐项来看。
-
-1. `p` 表示一个字节的地址。空指针、无效指针值（[[g:invalid-pointer-value]]）都不满足。所以 `std::launder(nullptr)` 是 UB（尽管实现上它什么也不做）。
-2. 地址 *A* 处有一个类型与 `T` 相似（[[conv.qual]]）的对象 *X*，且处于生命周期内。相似意味着 cv 限定可以不同：`launder` 一个 `const X*` 可以得到指向非 `const` 对象 `X` 的指针（类型仍是 `const X*`）。后半句关于生命周期内数组的元素的补充，是为了覆盖元素本身生命周期未开始（例如 `std::allocator<T>::allocate` 得到的数组，[[basic.life]]）但仍需对其形成指针的情形。**`launder` 不创建对象**：如果地址处根本没有 `T` 类型的对象（比如只是一个 `unsigned char` 缓冲区），前置条件就不满足，这时应该用隐式对象创建或 `std::start_lifetime_as`（[[obj.lifetime]]）。
-3. 可达性不扩大：通过结果能到达的字节，都必须能通过 `p` 到达。可达性定义在 [[basic.compound]]：经由指向对象 *x* 的指针值可达的字节，是与 *x* 指针可互相转换的某个对象 *y* 所占据的存储——若 *y* 是数组元素，则是其直接外围数组所占据的存储。这一条防止用 `launder` 绕过 [[expr.add]] 的指针算术边界。
-
-```cpp run title="launder-reachability.cpp" ub
-#include <new>
-
-int arr[2][3];
-
-int main() {
-    int* p = &arr[0][0];                 // 经由 p 可达：arr[0] 这个 int[3] 的 12 字节
-    auto q = std::launder(reinterpret_cast<int(*)[3]>(p));
-    // q 将指向 arr[0]（类型为 int[3]，位于同一地址，生命周期内）；
-    // 但 arr[0] 是 arr 的元素，经由 q 可达的是整个 arr（24 字节），
-    // 超出了经由 p 可达的范围 —— 违反 ¶2 的最后一项：UB
-    return q[1][0];
-}
-```
-
-可达性规则的实际意义是：编译器可以假设通过 `p` 只能访问这 12 个字节（例如做别名分析），而 `launder` 不能用来打破这一假设。
-
-## Returns 与 constexpr（¶3–¶4）
-
-¶3 *Returns*：一个类型为 `T*`、指向 *X* 的值。
-
-¶4 *Remarks*：对这个函数的调用可以出现在核心常量表达式中，当且仅当其实参的（转换后）值可以用来代替这次函数调用。换言之，在常量求值中 `launder` 只能是恒等变换，只有实参本身已经指向正确的对象时才能用。常量求值器跟踪每个指针所指的对象，不存在指针仍指向旧对象、需要修正的情况；如果实参指向的对象不是 *X*，调用就不是常量表达式。
-
-## 什么时候需要它（¶5 注 1）
-
-注 1 用一句话概括了需要 `launder` 的场合：
-
-!!! std
-    If a new object is created in storage occupied by an existing object of the same type, a pointer to the original object can be used to refer to the new object unless its complete object is a const object or it is a base class subobject; in the latter cases, this function can be used to obtain a usable pointer to the new object.
-
-    若在一个已有对象占据的存储中创建同类型的新对象，指向原对象的指针可用于指代新对象，除非其完整对象是 const 对象或它是基类子对象；在后两种情况下，可以用本函数获得可用的指向新对象的指针。
-
-C++20 删除了 [[basic.life]] 中不能有 const 或引用成员的条件，此后，需要 `launder` 的场合大幅缩小，主要剩下：
-
-| 场景 | 为什么不能透明替换 |
-|---|---|
-| 替换 `const` 完整对象（动态存储期） | [[basic.life]] ¶9：o1 不能是 const 完整对象 |
-| 替换基类子对象 | 基类子对象是潜在重叠子对象，透明替换要求两者都不是 |
-| 从字节缓冲区 `reinterpret_cast` 得到对象指针 | 转型结果仍指向缓冲区（`unsigned char`），不指向在其中创建的对象（见 [[intro.object]] 中的“提供存储”） |
-| 替换后类型不同 | 透明替换要求同类型（忽略顶层 cv） |
-
-¶6 例 1 是第一种情况的标准例子：
+## 为什么需要它
 
 ```cpp run title="launder-const.cpp" ok
 #include <new>
@@ -94,17 +22,32 @@ C++20 删除了 [[basic.life]] 中不能有 const 或引用成员的条件，此
 struct X { int n; };
 
 int main() {
-    const X* p = new const X{3};
-    const int a = p->n;
-    new (const_cast<X*>(p)) const X{5};  // p 不指向新对象：其完整对象是 const
-    // const int b = p->n;               // UB
-    const int c = std::launder(p)->n;    // OK
-    delete std::launder(p);
-    return a + c == 8 ? 0 : 1;
+  const X* p = new const X{3};
+  const int a = p->n;
+  new (const_cast<X*>(p)) const X{5};  // 完整对象是 const：p 不指向新对象
+  // const int b = p->n;               // UB
+  const int c = std::launder(p)->n;    // OK，c == 5
+  delete std::launder(p);
+  return a + c == 8 ? 0 : 1;
 }
 ```
 
-第三种情况是最常见的实际用途，例如手写的 `optional`/`variant`/小缓冲区优化：
+这是标准第 6 段的例子（加上了 `delete`）。C++ 的指针值指向一个具体的对象，而不只是一个地址（[[basic.compound]]）。同一地址上先后存在的两个对象，指向它们的指针值是不同的。
+
+多数情况下，在旧对象的存储上创建同类型的新对象后，旧指针会自动指向新对象，这称为**透明替换**（[[g:transparently-replaceable]]，[[basic.life#9]]）。但旧对象是 const 完整对象时，透明替换不成立：`p` 仍然指向已经结束生命周期的旧对象，通过它读 `n` 是未定义行为。编译器可以据此假设 `p->n` 还是 3。
+
+`std::launder(p)` 返回一个指向该地址上当前对象（新的 `X{5}`）的指针。透明替换的完整条件和更多例子见 [[basic.life]]。
+
+¶5 注 1 概括了需要 `launder` 的场合：在已有对象的存储里创建同类型的新对象时，指向原对象的指针可以用来访问新对象，除非原对象的完整对象是 const，或者原对象是基类子对象；这两种情况下要用 `launder`。
+
+| 场景 | 为什么旧指针不能用 |
+|---|---|
+| 替换 const 完整对象 | 透明替换要求旧对象不是 const 完整对象（[[basic.life#9]]） |
+| 替换基类子对象 | 基类子对象可能与其他对象重叠，不参与透明替换（[[intro.object#2]]） |
+| 从字节缓冲区 `reinterpret_cast` 出对象指针 | 转型的结果仍指向缓冲区数组，不指向在其中创建的对象（[[intro.object]] 中的提供存储） |
+| 新对象类型不同 | 透明替换要求类型相同（忽略顶层 cv） |
+
+第三种是实际代码里最常见的，手写的 `optional`、`variant`、小缓冲区优化都会遇到：
 
 ```cpp run title="launder-buffer.cpp" ok
 #include <new>
@@ -112,39 +55,87 @@ int main() {
 
 template<class T>
 class Slot {
-    alignas(T) unsigned char buf_[sizeof(T)];
+  alignas(T) unsigned char buf_[sizeof(T)];
 public:
-    template<class... A> void emplace(A&&... a) { ::new (buf_) T(static_cast<A&&>(a)...); }
-    T& get() { return *std::launder(reinterpret_cast<T*>(buf_)); }   // 必须 launder
-    void reset() { get().~T(); }
+  template<class... A> void emplace(A&&... a) {
+    ::new (buf_) T(static_cast<A&&>(a)...);
+  }
+  T& get() {   // 必须 launder：转型结果仍指向 buf_
+    return *std::launder(reinterpret_cast<T*>(buf_));
+  }
+  void reset() { get().~T(); }
 };
 
 int main() {
-    Slot<std::string> s;
-    s.emplace("hello");
-    bool ok = s.get() == "hello";
-    s.reset();
-    return ok ? 0 : 1;
+  Slot<std::string> s;
+  s.emplace("hello");
+  bool ok = s.get() == "hello";
+  s.reset();
+  return ok ? 0 : 1;
 }
 ```
 
-## 实现：零指令，只对优化器生效
+另一种写法是在 `emplace` 里保存 placement new 返回的指针，以后都用它，就不需要 `launder`，代价是多存一个指针。
 
-!!! impl
-    libc++ 的实现就是 `return __builtin_launder(__p);`（`<__new/launder.h>`），注释说明编译器会诊断 `__builtin_launder` 的误用，因此不需要额外的 `static_assert`。¶1 的 Mandates 正是由内建函数实现的：Clang 对函数指针和 `void*` 报 "function pointer argument to '__builtin_launder' is not allowed" 等错误。
+## 签名与 Mandates（¶1）
 
-    `__builtin_launder` 在通常情况下不产生任何机器指令。它的作用是在中间表示中切断指针的来源信息：优化器不能再把通过结果指针的读取与通过原指针观察到的值联系起来（例如把 `const` 成员的旧值传播过来）。在开启 `-fstrict-vtable-pointers` 时，Clang 还把它作为 vptr 不变性假设的屏障。
+```cpp
+template<class T> constexpr T* launder(T* p) noexcept;
+```
 
-!!! pitfall "`launder` 不能消除任意 UB"
-    - 它不创建对象，不开始生命周期，地址处必须已经有那个对象。
-    - 它不能扩大可达范围，不能拿元素指针换整个数组的指针。
-    - 它不能修复类型不对的访问：`launder(reinterpret_cast<float*>(&i))` 在 `&i` 处没有 `float` 对象，前置条件不满足。
+¶1 Mandates：`!is_function_v<T> && !is_void_v<T>` 为 `true`。库条款里的 Mandates 指条件不满足时程序非良构，编译器必须诊断（[[structure.specifications]]）。
 
-## 小结
+```cpp title="launder-mandates.cpp" error
+#include <new>
 
-!!! summary
-    - Mandates：`T` 不能是函数类型或 `void`，违反则非良构。
-    - Preconditions：`p` 是有效地址；该地址处有生命周期内的、类型与 `T` 相似的对象；结果的可达字节不超出 `p` 的可达字节；违反则 UB。
-    - Returns：指向该对象的 `T*`；常量求值中只能作为恒等变换使用。
-    - 典型场合：替换 const 完整对象、替换基类子对象、从字节缓冲区取出对象指针。
-    - 零运行时开销，只约束优化器。
+void f();
+auto p = std::launder(&f);   // error: T 是函数类型
+auto q = std::launder(static_cast<void*>(nullptr));  // error: T 是 void
+```
+
+函数不是对象，不存在在函数的存储上创建新函数的情形；`void*` 不指向特定类型的对象，`launder` 无从知道要找哪个对象。本机 Clang 对两行分别报 "function pointer argument to '__builtin_launder' is not allowed" 和 "void pointer argument ..."。
+
+## 前置条件（¶2）
+
+¶2 的 Preconditions 有三项，违反任何一项都是未定义行为：
+
+1. `p` 表示内存中某个字节的地址 *A*。空指针和无效指针值不满足，所以 `std::launder(nullptr)` 是未定义行为，尽管实际上它什么也不做。
+2. 地址 *A* 上有一个对象 *X*，它的类型与 `T` 相似（只差 cv 限定，见 [[conv.qual]]），并且 *X* 处于生命周期内，或者是一个处于生命周期内的数组的元素。后半句覆盖的是 `std::allocator<T>::allocate` 这类情形：数组已经存在，元素的生命周期还没开始，但仍然需要指向元素的指针。
+3. 通过结果能访问到的每个字节，通过 `p` 也都能访问到。
+
+第 2 项意味着 `launder` 不创建对象，也不开始任何对象的生命周期。地址上只有一个 `unsigned char` 缓冲区、没有 `T` 对象时，应当先创建对象：隐式对象创建或 `std::start_lifetime_as`（[[obj.lifetime]]）。
+
+第 3 项里的能访问到，标准称为**可达**（reachable，[[basic.compound]]）。指向对象 *x* 的指针可达的字节，是 *x* 所占的存储；如果 *x* 是数组元素，则是整个数组所占的存储（严格的定义还要考虑与 *x* 指针可互相转换的对象）。这一项防止用 `launder` 绕过指针算术的边界：
+
+```cpp run title="launder-reachability.cpp" ub
+#include <new>
+
+int arr[2][3];
+
+int main() {
+  int* p = &arr[0][0];   // 经由 p 可达：arr[0] 的 12 字节
+  auto q = std::launder(reinterpret_cast<int(*)[3]>(p));
+  // q 会指向 arr[0]；经由它可达的是整个 arr（24 字节）
+  return q[1][0];        // UB：违反 ¶2 的可达性要求
+}
+```
+
+`arr[0]` 本身是数组 `arr` 的元素，所以指向它的指针可以走到 `arr[1]`；而 `p` 指向的 `arr[0][0]` 只能在 `arr[0]` 之内移动。编译器可以假设通过 `p` 只会访问这 12 个字节，`launder` 不能打破这一假设。这个例子在本机运行时没有任何症状，sanitizer 也不报告。
+
+## 返回值与常量求值（¶3–¶4）
+
+¶3 Returns：一个指向 *X* 的 `T*`。
+
+¶4 在常量表达式中，只有当实参本身就可以代替这次调用时，`launder` 的调用才算核心常量表达式。也就是说，常量求值中的 `launder` 只能是恒等变换。常量求值器知道每个指针指向哪个对象，不会出现需要修正的旧指针；实参指向的不是 *X*，调用就不是常量表达式。
+
+## 实现
+
+!!! impl "libc++：一个内建函数"
+    libc++ 的 `std::launder` 就是 `return __builtin_launder(__p);`，第 1 段的 Mandates 由这个内建函数检查。
+
+    `__builtin_launder` 一般不生成任何指令。它在中间表示中切断结果指针与原指针的联系，优化器不能再把通过原指针得知的值（例如 const 成员的旧值）用在通过结果指针的读取上。开启 `-fstrict-vtable-pointers` 时，Clang 还把它当作虚表指针不变假设的屏障。
+
+!!! pitfall "`launder` 修不了的错误"
+    - 地址上没有对象时，它不会创建对象。
+    - 它不能扩大可达范围，不能把元素指针变成整个数组的指针。
+    - 它不能修复类型错误：`std::launder(reinterpret_cast<float*>(&i))` 在 `&i` 处没有 `float` 对象，前置条件不满足。
