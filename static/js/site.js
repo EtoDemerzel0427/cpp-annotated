@@ -90,12 +90,12 @@
 
   var TABS = [
     { k: "lang", label: "核心语言" }, { k: "lib", label: "标准库" }, { k: "annex", label: "附录" },
-    { k: "topics", label: "专题" }, { k: "toolchain", label: "工具链" }, { k: "history", label: "沿革" }
+    { k: "topics", label: "专题" }, { k: "patterns", label: "模式" }, { k: "toolchain", label: "工具链" }, { k: "history", label: "沿革" }
   ];
   function defaultTab() {
     var act = body.dataset.active;
     if (curPath.length) return NAV.groups[curPath[0].i] || "lang";
-    if (act === "topics" || act === "toolchain" || act === "history" || act === "papers") return act;
+    if (act === "topics" || act === "patterns" || act === "toolchain" || act === "history" || act === "papers") return act;
     return store("tab") || "lang";
   }
   function renderSidebar(tab) {
@@ -118,7 +118,7 @@
       sidebar.classList.toggle("sb-hide-empty", hide);
       sidebar.appendChild(f);
       sidebar.appendChild(el("div", { class: "sb-legend" },
-        '<span><i class="dot"></i>独立成页</span><span><i class="dot hollow"></i>在上级条款页中讲解</span><span class="ext">灰色：链到 eel.is 原文</span>'));
+        '<span><i class="dot"></i>独立成页</span><span><i class="dot hollow"></i>在上级条款页中讲解</span>'));
       var nodes = NAV.clauses.filter(function (c) { return NAV.groups[c.i] === tab; });
       sidebar.appendChild(renderTree(nodes, 0));
     } else {
@@ -151,7 +151,7 @@
     document.head.appendChild(sc);
   }
   var sel = 0, results = [];
-  var KIND = { std: "笔记", clause: "章", topics: "专题", toolchain: "工具链", history: "沿革", papers: "提案", term: "术语", eel: "原文 ↗" };
+  var KIND = { std: "笔记", clause: "章", topics: "专题", patterns: "模式", toolchain: "工具链", history: "沿革", papers: "提案", term: "术语", eel: "原文 ↗" };
 
   function openSearch() {
     if (!modal) return;
