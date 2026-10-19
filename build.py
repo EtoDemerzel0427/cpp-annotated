@@ -60,13 +60,13 @@ BADGES = {
     "dr": ("DR", "defect report：以缺陷报告形式回溯适用于旧标准", "info"),
 }
 VERDICTS = {
-    "ok": ("✓ well-formed", "good"),
-    "error": ("✗ ill-formed", "warn"),
-    "ub": ("☠ UB", "bad"),
+    "ok": ("✓ 良构", "good"),
+    "error": ("✗ 非良构", "warn"),
+    "ub": ("☠ 未定义行为", "bad"),
     "ifndr": ("☠ IFNDR", "bad"),
-    "unspecified": ("? unspecified", "info"),
-    "impl": ("? impl-defined", "info"),
-    "eb": ("⚠ erroneous", "warn"),
+    "unspecified": ("? 未指明", "info"),
+    "impl": ("? 实现定义", "info"),
+    "eb": ("⚠ 错误行为", "warn"),
 }
 ADMONITION_TITLES = {
     "tldr": "本节要点",
@@ -222,6 +222,8 @@ def parse_info(info):
 
 
 CODE_FMT = HtmlFormatter(nowrap=True)
+LANG_LABELS = {"cpp": "C++", "c": "C", "python": "Python", "bash": "Shell", "sh": "Shell", "console": "Shell",
+               "cmake": "CMake", "asm": "ASM", "nasm": "ASM", "llvm": "LLVM IR", "text": "", "json": "JSON"}
 
 
 def mark_comments(code_html):
@@ -250,7 +252,12 @@ def render_code(code, info):
     body = highlight(code, lexer, CODE_FMT)
     if lang in ("cpp", "c"):
         body = mark_comments(body)
-    head = []
+    # one span per line so CSS can number lines; pygments closes its spans at line ends
+    lines = body.rstrip().split("\n")
+    numbered = len(lines) > 2
+    if numbered:
+        body = "\n".join(f'<span class="ln">{l}</span>' for l in lines)
+    head = [f'<span class="code-lang">{LANG_LABELS[lang]}</span>'] if LANG_LABELS.get(lang) else []
     if opts.get("title"):
         head.append(f'<span class="code-title">{html.escape(opts["title"])}</span>')
     verdict = None
@@ -267,7 +274,7 @@ def render_code(code, info):
             f'title="在 Compiler Explorer 中打开">godbolt ↗</a>'
         )
     tools.append('<button class="code-btn copy" type="button" title="复制代码">复制</button>')
-    cls = f"code lang-{lang}" + (f" verdict-{verdict}" if verdict else "")
+    cls = f"code lang-{lang}" + (f" verdict-{verdict}" if verdict else "") + (" numbered" if numbered else "")
     return (
         f'<figure class="{cls}"><figcaption>{"".join(head)}<span class="code-tools">{"".join(tools)}</span></figcaption>'
         f'<pre><code>{body.rstrip()}</code></pre></figure>'
@@ -466,6 +473,9 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
 <title>{esc(full_title)}</title>
 <meta name="description" content="{esc(desc or SITE_SUB)}">
 <link rel="icon" href="{root}static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
 <link rel="stylesheet" href="{root}static/css/site.css?v={ASSET_VERSION}">
 <script>try{{var t=localStorage.getItem('cppstd.theme');if(t)document.documentElement.dataset.theme=t;}}catch(e){{}}</script>
 </head>
@@ -923,8 +933,8 @@ def home_page(clauses, by_id, ctx, pages, toc_meta):
   <div class="hero-mark">§</div>
   <h1>{SITE_NAME}</h1>
   <p class="hero-en">{SITE_SUB}</p>
-  <p class="hero-lede">逐条读 C++ 标准：每一节给出<strong>释义</strong>而不是翻译，补上标准不写的<strong>动机与上下文</strong>，用能在 Compiler Explorer 里跑的<strong>例子</strong>把规则钉死。目标是成为 language lawyer。</p>
-  <button class="hero-search search-btn" type="button"><span>跳到任意条款：试试 <code>basic.life</code>、<code>dcl.init.list</code>、<code>over.match.best</code></span><kbd>/</kbd></button>
+  <p class="hero-lede">逐条读 C++ 标准：每一节给出条文的<strong>释义</strong>，补上标准不写的<strong>设计动机与条款关联</strong>，再用能直接编译运行的<strong>例子</strong>把规则落到实处。</p>
+  <button class="hero-search search-btn" type="button"><span>检索条款或关键词：如 <code>basic.life</code>、<code>dcl.init.list</code>、<code>over.match.best</code></span><kbd>/</kbd></button>
   <div class="hero-stats">
     <div><b>{counts['std']}</b><span>条款笔记</span></div>
     <div><b>{counts['topics']}</b><span>专题</span></div>
