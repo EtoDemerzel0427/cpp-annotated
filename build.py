@@ -325,7 +325,8 @@ def xref_html(target, text, ctx, page_key):
     if sid in ctx.covered:
         p = ctx.covered[sid]
         tip = title + f" — 见本站 [{p['id']}] {p['title']}"
-        return f'<a class="xref std local" href="{{ROOT}}{p["url"]}" data-tip="{html.escape(tip)}">{html.escape(label)}</a>'
+        frag = f"#{sid}-p" + para.split(".")[0] if para and re.match(r"^\d+(\.\d+)*$", para) else ""
+        return f'<a class="xref std local" href="{{ROOT}}{p["url"]}{frag}" data-tip="{html.escape(tip)}">{html.escape(label)}</a>'
     if not entry:
         # stable names deeper than the TOC are fine; just point at eel.is
         if not re.match(r"^[a-z][a-z0-9_.]*$", sid):
@@ -367,17 +368,33 @@ def _expand(s, ctx, page_key):
     return s
 
 
-def para_anchors(s):
-    """`¶3` at the start of a line/heading becomes an anchor #p3 pointing at the standard paragraph."""
-    seen = set()
+def para_anchors(s, covers=(), start=None):
+    """`¶3` becomes an anchor #p3 pointing at the standard paragraph.
+
+    On a page that also covers other subclauses, a heading that names one of them (`[class.access.base]`)
+    switches the current subclause; its paragraphs additionally get #class.access.base-p3, so that
+    [[class.access.base#3]] can land on the right ¶ even though several subclauses restart at ¶1.
+    """
+    seen, seen_sub, cur = set(), set(), start
 
     def repl(m):
         n = re.match(r"\d+", m.group(1)).group(0)
         attr = "" if n in seen else f' id="p{n}"'
         seen.add(n)
-        return f'<span class="para"{attr}>¶{m.group(1)}</span>'
+        extra = ""
+        if cur and (cur, n) not in seen_sub:
+            seen_sub.add((cur, n))
+            extra = f'<span class="sub-anchor" id="{cur}-p{n}"></span>'
+        return f'{extra}<span class="para"{attr}>¶{m.group(1)}</span>'
 
-    return re.sub(r"¶(\d+(?:[.\-–]\d+)*)", repl, s)
+    lines = s.split("\n")
+    for i, line in enumerate(lines):
+        if covers and re.match(r"\s*#{2,6} ", line):
+            named = [x for x in re.findall(r"\[([A-Za-z][\w.]*)\]", line) if x in covers]
+            if named:
+                cur = named[0]
+        lines[i] = re.sub(r"¶(\d+(?:[.\-–]\d+)*)", repl, line)
+    return "\n".join(lines)
 
 
 def render_markdown(src, ctx, page_key):
@@ -396,7 +413,11 @@ def render_markdown(src, ctx, page_key):
     src = ADMON_RE.sub(
         lambda m: f'{m.group(1)}{m.group(2)} {m.group(3)} "{admonition_title(m.group(3))}"', src)
     src = expand_inline(src, ctx, page_key)
-    src = para_anchors(src)
+    page = ctx.pages.get(page_key)
+    covers = {sid for sid, p in ctx.covered.items() if p is page} if page else set()
+    # a page usually opens with its own [x.general] subclause without a heading naming it
+    start = page["id"] + ".general" if page and page.get("id", "") + ".general" in covers else None
+    src = para_anchors(src, covers, start)
     md = markdown.Markdown(
         extensions=["extra", "admonition", "sane_lists", "toc"],
         extension_configs={"toc": {"slugify": slugify_unicode, "toc_depth": "2-3", "permalink": "#",
