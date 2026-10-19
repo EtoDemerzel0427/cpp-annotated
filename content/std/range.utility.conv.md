@@ -1,95 +1,46 @@
 ---
 title: 范围转换 ranges::to
-summary: C++23 的 ranges::to<C>(r, args...) 如何把一个范围物化为容器——四条构造路径的优先级（直接构造、from_range 标签、迭代器对、默认构造后逐个追加并预留）、对范围的范围递归、模板模板形参版本的类型推导（DEDUCE_EXPR）、管道形式与常见编译错误。
+summary: C++23 的 ranges::to 把一个范围物化成容器：它按什么顺序尝试四种构造方式，怎样递归处理范围的范围，to<vector> 这种不写元素类型的形式怎样推导，以及管道形式。
 status: done
 covers: *
 since: c++23
 papers: P1206R7
 related: range.utility, range.adaptor.object, range.req, range.access, containers, container.reqmts, func.require
 tags: 标准库, 范围, ranges::to, 容器
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-视图是惰性的，迟早要"落地"成容器。C++20 里这一步很别扭：
+!!! tldr
+    - `ranges::to<C>(r, args...)` 或 `r | ranges::to<C>(args...)` 用范围 `r` 的元素构造一个 `C`，`C` 不能是视图。
+    - 依次尝试：直接用范围构造，用 `from_range` 标签构造，用一对迭代器构造，默认构造后逐个追加（能预留时先 `reserve`）。
+    - 元素不能直接放进 `C` 而本身又是范围时，`to` 对每个元素递归调用，所以能把范围的范围转成 `vector<vector<int>>` 或 `vector<string>`。
+    - `to<std::vector>()` 不写元素类型，靠容器的类模板实参推导得到完整类型。
+    - 管道形式必须带括号：`to<std::vector>()`；额外实参按值保存在闭包里。
+
+## 从视图到容器
+
+视图是惰性的，最终常常要变成一个容器。C++20 只能借助迭代器对：
+
+<div class="compare" markdown="1">
 
 ```cpp
-auto r = v | std::views::filter(pred);
-std::vector<int> out(r.begin(), r.end());          // 要求 common_range；否则编译失败
+// C++20
+auto r = v | std::views::take_while(pred);
+std::vector<int> out(r.begin(), r.end());
+// error: take_while_view 不是 common_range，
+// begin 和 end 的类型不同
 ```
-
-C++23 的 `ranges::to`（[[P1206R7]]）把它变成：
 
 ```cpp
-auto out = v | std::views::filter(pred) | std::ranges::to<std::vector>();
+// C++23
+auto out = v
+  | std::views::take_while(pred)
+  | std::ranges::to<std::vector>();
 ```
 
-## 总览（[range.utility.conv.general]）
+</div>
 
-¶1 转换函数用以下方式之一从范围构造对象（通常是容器）：接受范围的构造函数、带 `from_range_t` 标签的构造函数、接受一对迭代器的构造函数，或者默认构造后逐个插入。¶2 `ranges::to` 会**递归**应用，所以能转换"范围的范围"。¶2 例 1：
-
-```cpp
-auto words = views::split(str, ' ') | to<vector<string>>();
-```
-
-`split` 的每个元素是 `subrange<const char*>`，它本身是范围而 `string` 也是范围，于是对每个元素再调用 `to<string>`。
-
-¶3–¶5 定义三个说明用的工具：
-
-- *reservable-container*：`sized_range`，且有 `reserve(n)`、`capacity()`、`max_size()`（返回类型与 `n` 相同）；
-- *container-appendable*：能用 `emplace_back` / `push_back` / `emplace_hint(c.end(), …)` / `insert(c.end(), …)` 之一追加；
-- *container-append*：按上述顺序选择第一个可用的方式追加一个元素。
-
-## `to<C>(r, args...)`（[range.utility.conv.to] ¶1–¶2）
-
-```cpp
-template<class C, input_range R, class... Args> requires (!view<C>)
-  constexpr C to(R&& r, Args&&... args);
-```
-
-¶1 *Mandates*：`C` 是 cv 非限定的类类型。约束 `!view<C>`：`to` 是用来**物化**的，`to<string_view>` 不被接受（视图应该用视图适配器构造）。
-
-¶2 返回值按如下顺序构造：
-
-**情形 2.1**：`C` 不是 `input_range`，**或者** `range_reference_t<R>` 可以转换为 `range_value_t<C>`（即"元素可以直接放进去"）：
-
-| 子条 | 条件 | 做法 |
-|---|---|---|
-| 2.1.1 | `constructible_from<C, R, Args...>` | `C(std::forward<R>(r), args...)` |
-| 2.1.2 | `constructible_from<C, from_range_t, R, Args...>` | `C(from_range, std::forward<R>(r), args...)` |
-| 2.1.3 | `common_range<R>`，且 `iterator_traits<iterator_t<R>>::iterator_category` 有效并派生自 `input_iterator_tag`，且 `constructible_from<C, iterator_t<R>, sentinel_t<R>, Args...>` | `C(ranges::begin(r), ranges::end(r), args...)` |
-| 2.1.4 | `constructible_from<C, Args...>` 且 *container-appendable* | 默认构造（带 `args`）；若 `R` 是 `approximately_sized_range` 且 `C` 可预留，先 `reserve(reserve_hint(r))`；再逐个 *container-append* |
-| 2.1.5 | 其他 | 程序非良构 |
-
-**情形 2.2**：否则（元素不能直接转换），若 `range_reference_t<R>` 本身是 `input_range`：对每个元素递归调用 `to<range_value_t<C>>`：
-
-```cpp
-to<C>(ref_view(r) | views::transform([](auto&& elem) {
-  return to<range_value_t<C>>(std::forward<decltype(elem)>(elem));
-}), std::forward<Args>(args)...);
-```
-
-**情形 2.3**：其他，非良构。
-
-几个要点：
-
-- **2.1.3 检查的是 C++17 风格的 `iterator_category`**：老容器的迭代器对构造函数是按 *Cpp17InputIterator* 写的。C++20 视图的迭代器若没有 `iterator_category`（例如 `iota_view` 的迭代器在 `W` 不是整数时、`transform_view` 在某些情况下），这条就不适用，于是退到 2.1.4。
-- **2.1.4 的预留**：C++23 时代用的是 `sized_range` 与 `ranges::size`；当前草案改成了更宽松的 `approximately_sized_range` 与 `ranges::reserve_hint`（{{c++26}}），这样连 `filter_view` 这类"知道上界"的视图也有机会预先分配。
-- **2.1 的"或者 `C` 不是 `input_range`"**：允许转换成不是范围的东西，只要它能由范围构造，例如某个"接受范围的统计累加器"类。
-
-## 模板模板形参版本：`to<vector>(r)`（¶3–¶5）
-
-```cpp
-template<template<class...> class C, input_range R, class... Args>
-  constexpr auto to(R&& r, Args&&... args);
-```
-
-不写元素类型时，需要推导出完整的 `C<...>`。¶4 定义 *DEDUCE_EXPR*，依次尝试：
-
-1. `C(declval<R>(), declval<Args>()...)`；
-2. `C(from_range, declval<R>(), declval<Args>()...)`；
-3. `C(declval<input-iterator>(), declval<input-iterator>(), declval<Args>()...)`——*input-iterator* 是 ¶3 定义的一个满足 *Cpp17InputIterator* 语法要求、`value_type` 为 `range_value_t<R>` 的说明用类型。
-
-也就是说，借助各容器的**类模板实参推导**（CTAD）指引（C++23 为所有容器添加了 `from_range_t` 推导指引）。¶5 结果为 `to<decltype(DEDUCE_EXPR)>(r, args...)`。
+C++23 的 `ranges::to`（[[P1206R7]]）把这一步变成管道的最后一级。下面的例子展示了它的几种用法：
 
 ```cpp run ok
 #include <deque>
@@ -100,23 +51,103 @@ template<template<class...> class C, input_range R, class... Args>
 #include <vector>
 #include <cstdio>
 int main() {
-  auto sq = std::views::iota(1, 5) | std::views::transform([](int i) { return i * i; });
-  auto v = sq | std::ranges::to<std::vector>();                    // vector<int>（CTAD 推导）
-  auto d = std::ranges::to<std::deque<long>>(sq);                  // 元素类型转换
-  auto s = sq | std::ranges::to<std::set<int, std::greater<>>>();  // 带比较器类型
-  // 嵌套：range of ranges → vector<vector<int>>（逐层递归调用 to）
-  std::vector<std::list<int>> ll{{1, 2}, {3}};
+  auto sq = std::views::iota(1, 5)
+          | std::views::transform([](int i) { return i * i; });
+  auto v = sq | std::ranges::to<std::vector>();          // 推导为 vector<int>
+  auto d = std::ranges::to<std::deque<long>>(sq);        // 元素类型转换
+  auto s = sq | std::ranges::to<std::set<int, std::greater<>>>();
+
+  std::vector<std::list<int>> ll{{1, 2}, {3}};           // 范围的范围：逐层递归
   auto vv = ll | std::ranges::to<std::vector<std::vector<int>>>();
-  // 非 common、非 sized 的输入：走 "默认构造 + 逐个追加" 分支
-  auto tw = std::views::iota(0) | std::views::take_while([](int i) { return i < 3; });
-  auto w = tw | std::ranges::to<std::vector<int>>();
+
+  auto tw = std::views::iota(0)                          // 不是 common_range
+          | std::views::take_while([](int i) { return i < 3; });
+  auto w = tw | std::ranges::to<std::vector<int>>();     // 默认构造后逐个追加
+
   auto str = std::ranges::to<std::string>(std::views::repeat('x', 3));
-  std::printf("%zu %zu %d %zu %zu %s\n", v.size(), d.size(), *s.begin(), vv[0].size(), w.size(), str.c_str());
+  std::printf("%zu %zu %d %zu %zu %s\n",
+              v.size(), d.size(), *s.begin(), vv[0].size(), w.size(), str.c_str());
   // 4 4 16 2 3 xxx
 }
 ```
 
-## 管道形式（[range.utility.conv.adaptors]）
+## 四种构造方式 [range.utility.conv.general]
+
+¶1 转换函数用以下方式之一从范围构造对象（通常是容器）：接受范围的构造函数；带 `from_range_t` 标签的构造函数，这是 C++23 给所有标准容器加上的；接受一对迭代器的构造函数；或者默认构造后把元素逐个插入。
+
+¶3–¶5 为了描述最后一种方式，标准定义了三个仅用于说明的工具：
+
+- *reservable-container*：`C` 是 `sized_range`，并且有 `reserve(n)`、`capacity()` 和 `max_size()`；
+- *container-appendable*：能用 `emplace_back`、`push_back`、`emplace_hint(c.end(), x)`、`insert(c.end(), x)` 之一追加元素；
+- *container-append*：按上面的顺序选第一个可用的方式追加一个元素。
+
+### 选择顺序 [range.utility.conv.to]
+
+```cpp
+template<class C, input_range R, class... Args> requires (!view<C>)
+  constexpr C to(R&& r, Args&&... args);
+```
+
+¶1 `C` 必须是 cv 非限定的类类型。约束 `!view<C>` 表示 `to` 只用来物化：`to<std::string_view>(r)` 不被接受，视图应当由视图适配器构造。
+
+¶2 返回值按下面的规则构造。
+
+¶2.1 如果 `C` 不是 `input_range`，或者 `r` 的元素可以转换为 `C` 的元素类型（`convertible_to<range_reference_t<R>, range_value_t<C>>`），依次尝试：
+
+| 条款 | 条件 | 做法 |
+|---|---|---|
+| ¶2.1.1 | `C` 可以由 `R, Args...` 构造 | `C(std::forward<R>(r), args...)` |
+| ¶2.1.2 | `C` 可以由 `from_range_t, R, Args...` 构造 | `C(from_range, std::forward<R>(r), args...)` |
+| ¶2.1.3 | `R` 是 `common_range`，迭代器有 C++17 风格的 `iterator_category`，且 `C` 可以由迭代器对加 `Args...` 构造 | `C(ranges::begin(r), ranges::end(r), args...)` |
+| ¶2.1.4 | `C` 可以由 `Args...` 构造，且可以追加元素 | 默认构造，能预留时先预留，再逐个追加 |
+| ¶2.1.5 | 以上都不满足 | 非良构 |
+
+¶2.2 否则，如果 `r` 的元素本身是范围，就对每个元素递归调用 `to<range_value_t<C>>`，再把结果交给外层的 `to<C>`：
+
+```cpp
+to<C>(ref_view(r) | views::transform([](auto&& elem) {
+  return to<range_value_t<C>>(std::forward<decltype(elem)>(elem));
+}), std::forward<Args>(args)...);
+```
+
+¶2.3 再否则，程序非良构。
+
+¶2 例 1 说明了递归的用途：
+
+```cpp
+string_view str = "the quick brown fox";
+auto words = views::split(str, ' ') | to<vector<string>>();
+// {"the", "quick", "brown", "fox"}
+```
+
+`split` 的每个元素是一个表示一段字符的 `subrange`，它不能隐式转换为 `string`，但它本身是范围，于是走 ¶2.2：对每个元素调用 `to<string>`，后者再走 ¶2.1.2 的 `from_range` 构造。
+
+### 几处细节
+
+¶2.1.3 检查的是 C++17 风格的 `iterator_category`，因为旧容器的迭代器对构造函数是按 *Cpp17InputIterator* 要求写的。C++20 视图的迭代器不一定定义它，例如 `transform_view` 的底层不是 `forward_range` 时，迭代器就没有 `iterator_category`。这时 ¶2.1.3 不适用，退到 ¶2.1.4。
+
+¶2.1.4 的预留条件是 `approximately_sized_range<R> && reservable-container<C>`，预留的大小来自 `ranges::reserve_hint(r)`。C++23 原来的写法是 `sized_range` 和 `ranges::size`；当前草案放宽成只要能给出元素个数的估计即可 {{c++26}}，这样大小不确定但可以估计上界的范围也能预先分配。
+
+¶2.1 开头的条件 `C` 不是 `input_range` 允许转换成不是范围的类型，只要它能由范围构造，例如一个接受范围的统计累加器类。
+
+## 不写元素类型：to<vector>（¶3–¶5）
+
+```cpp
+template<template<class...> class C, input_range R, class... Args>
+  constexpr auto to(R&& r, Args&&... args);
+```
+
+`to<std::vector>(r)` 只给了类模板，需要推导出完整的 `vector<int>`。¶4 定义 *DEDUCE_EXPR*，依次尝试三个表达式，用的都是容器的类模板实参推导（CTAD）：
+
+1. `C(declval<R>(), declval<Args>()...)`；
+2. `C(from_range, declval<R>(), declval<Args>()...)`；
+3. `C(declval<input-iterator>(), declval<input-iterator>(), declval<Args>()...)`。
+
+¶3 第 3 项中的 *input-iterator* 是一个仅用于说明的迭代器类型，它满足 *Cpp17InputIterator* 的语法要求，`value_type` 为 `range_value_t<R>`，用来套用容器的迭代器对推导指引。
+
+¶5 推导出的类型记作 `decltype(DEDUCE_EXPR)`，结果就是 `to<decltype(DEDUCE_EXPR)>(r, args...)`。例如 `views::zip(keys, values) | to<std::map>()` 的元素是 `tuple`，`map` 的迭代器对推导指引从 `tuple` 的第 0、1 个元素得到键和值的类型，本机 Clang 23 推导出 `map<int, std::string>`（键为 `int`、值为 `string` 时）。
+
+## 管道形式 [range.utility.conv.adaptors]
 
 ```cpp
 template<class C, class... Args> requires (!view<C>)
@@ -125,29 +156,31 @@ template<template<class...> class C, class... Args>
   constexpr auto to(Args&&... args);
 ```
 
-¶2 不带范围实参调用时，返回一个**范围适配器闭包对象**（[[range.adaptor.object]]），它是完美转发调用包装器（[[func.require]]）：无目标对象，绑定实参为 `decay_t<Args>...`（按值保存！），调用模式为 `to<C>(r, bound_args...)`。所以 `r | to<vector>(alloc)` 中的分配器会被**复制**进闭包。
+¶2 不带范围实参调用 `to` 时，返回一个范围适配器闭包对象（[[range.adaptor.object]]），所以可以写在 `|` 右边。闭包把 `args` 以 `decay_t<Args>` 类型按值保存，调用时执行 `to<C>(r, bound_args...)`（[[func.require]]）。因此 `r | to<std::vector>(alloc)` 会把分配器复制进闭包。
 
-注意 `to` 本身不是范围适配器对象（它不返回视图），但它的单参数形式返回的闭包对象可以参与 `|` 组合：`auto pipeline = views::filter(p) | ranges::to<vector>();` 是合法的，得到一个"过滤并物化"的闭包。
+`to` 本身不是范围适配器，它不返回视图，但它返回的闭包可以和其他闭包组合：`auto pipeline = views::filter(p) | ranges::to<std::vector>();` 得到一个先过滤再物化的闭包。
+
+<div class="compare" markdown="1">
+
+```cpp run error
+#include <ranges>
+#include <string_view>
+auto x = std::views::iota(0, 3)
+  | std::ranges::to<std::string_view>();
+// error: C 不能是视图
+int main() {}
+```
 
 ```cpp run error
 #include <ranges>
 #include <vector>
-#include <string_view>
-auto x = std::views::iota(0, 3) | std::ranges::to<std::string_view>();  // error: C 不能是视图
+auto x = std::views::iota(0, 3)
+  | std::ranges::to<std::vector>;
+// error: 少了 ()，右边是函数模板
 int main() {}
 ```
 
-## 常见误区
+</div>
 
-!!! pitfall "`to<vector>()` 忘了括号"
-    `r | std::ranges::to<std::vector>` 不能编译——`to<vector>` 是函数模板名，不是对象。必须写成 `to<std::vector>()`。这与 `views::join`（本身就是闭包对象，不带括号）不同。
-
-!!! pitfall "从 `map` 物化需要 pair 而不是 tuple"
-    `views::zip(keys, values) | to<std::map>()` 的元素是 `tuple<K&, V&>`；C++23 起 `pair` 可以从 *pair-like* 的 `tuple` 构造，所以能工作。但推导出来的 `map` 的键类型是什么，取决于 `map` 的 `from_range` 推导指引对 `range_value_t` 的处理——遇到意外类型时，显式写出 `to<std::map<K, V>>()` 最稳妥。
-
-## 小结
-
-- 选择顺序：范围构造 → `from_range` → 迭代器对（需 common 且有 C++17 类别）→ 默认构造 + 预留 + 逐个追加；
-- 元素不能直接放入时递归 `to<range_value_t<C>>`；
-- `to<C>` 要求 `C` 不是视图；`to<Template>` 通过 CTAD 推导完整类型；
-- 无范围实参的形式返回闭包对象，参数按值保存。
+!!! pitfall "to<vector> 忘了括号"
+    `r | std::ranges::to<std::vector>` 不能编译。`to<std::vector>` 是函数模板的名字，不是对象，必须调用它得到闭包：`to<std::vector>()`。`views::join` 则不同，它本身就是闭包对象，不带括号。

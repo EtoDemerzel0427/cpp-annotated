@@ -1,22 +1,39 @@
 ---
 title: filter 视图
-summary: filter_view 的完整契约与它最著名的三个坑——begin() 为满足"摊还 O(1)"而缓存，于是没有 const begin（最新草案只对"仅输入"的底层开放 const 迭代）、首次 begin 后修改底层会得到陈旧结果、通过迭代器把元素改成不满足谓词会导致 UB；迭代器最多双向、谓词必须保持相等性、并发调用 begin 是数据竞争。
+summary: filter_view 只保留满足谓词的元素。为了让 begin() 是摊还常数时间，它缓存第一次的结果，由此带来没有 const begin、修改底层后结果陈旧、并发调用 begin 是数据竞争等问题；把元素改得不再满足谓词还可能导致未定义行为。
 status: done
 covers: *
 since: c++20
 papers: P0896R4, P2494R2
 related: range.adaptors, range.range, range.nonprop.cache, range.move.wrap, range.transform, range.drop, concepts.equality, concepts.callable, res.on.data.races, range.all
 tags: 标准库, 范围, filter, 缓存, 陷阱
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-`views::filter(pred)` 是最常用的适配器，也是把"惰性视图"与"`range` 的复杂度要求"之间的张力暴露得最彻底的一个。本页的主线是 `begin()` 的**缓存**（[[g:begin-caching]]）：它为什么存在、它让 `filter_view` 失去了什么、它在什么情况下会让你得到错误的结果。
+!!! tldr
+    - `views::filter(pred)` 只保留满足 `pred` 的元素。迭代器最多是双向的，视图没有 `size()`，也不是借用范围。
+    - 第一次调用 `begin()` 要线性查找，标准要求把结果缓存在视图里，之后的调用是 O(1)。
+    - 缓存要写入视图，所以 `begin()` 不是 const 成员：底层是前向范围时，`const filter_view` 不能遍历。
+    - 第一次 `begin()` 之后修改底层，同一个视图会给出陈旧的结果；两个线程同时对同一个视图调用 `begin()` 是数据竞争。
+    - 通过迭代器把元素改得不再满足谓词，可能导致未定义行为。谓词必须保持相等性，不能有状态。
 
-## 概览（[range.filter.overview]）
+## 基本用法 [range.filter.overview]
 
-¶1 `filter_view` 给出底层序列中满足谓词的元素的视图。¶2 `views::filter` 是范围适配器对象；`views::filter(E, P)` 表达式等价于 `filter_view(E, P)`。
+```cpp run ok
+#include <ranges>
+#include <vector>
+#include <cstdio>
+int main() {
+  std::vector<int> is{0, 1, 2, 3, 4, 5, 6};
+  auto evens = std::views::filter(is, [](int i) { return i % 2 == 0; });
+  for (int i : evens) std::printf("%d ", i);   // 0 2 4 6
+  std::puts("");
+}
+```
 
-## 类模板（[range.filter.view]）
+¶1 `filter_view` 给出底层序列中满足谓词的那些元素。¶2 `views::filter` 是范围适配器对象（[[range.adaptors]]），`views::filter(E, P)` 等价于 `filter_view(E, P)`。¶3 例 1 就是上面的代码。
+
+## 类模板 [range.filter.view]
 
 ```cpp
 template<input_range V, indirect_unary_predicate<iterator_t<V>> Pred>
@@ -27,7 +44,6 @@ class filter_view : public view_interface<filter_view<V, Pred>> {
   template<bool> class iterator;
   template<bool> class sentinel;
 public:
-  filter_view() requires default_initializable<V> && default_initializable<Pred> = default;
   constexpr explicit filter_view(V base, Pred pred);
   constexpr const Pred& pred() const;
 
@@ -36,61 +52,59 @@ public:
     requires (input_range<const V> && !forward_range<const V> &&
               indirect_unary_predicate<const Pred, iterator_t<const V>>);
 
-  constexpr auto end();                 // common_range<V> 时返回 iterator<false>，否则 sentinel<false>
+  constexpr auto end();       // 底层是 common_range 时返回迭代器，否则返回哨位
   constexpr sentinel<true> end() const requires /* 同上 */;
 };
 template<class R, class Pred>
   filter_view(R&&, Pred) -> filter_view<views::all_t<R>, Pred>;
 ```
 
-- `indirect_unary_predicate<iterator_t<V>>`：谓词要能以 `iter_reference_t` 与 `iter_value_t&` 等多种形式调用（[[indirectcallable.indirectinvocable]]），而且它细化 `predicate` → `regular_invocable`，**要求保持相等性**（[[concepts.equality]]、[[concepts.callable]]）。
-- 谓词存在 *movable-box* 中（[[range.move.wrap]]），所以带捕获的 lambda 也能用；C++23 起只可移动的谓词也行（[[P2494R2]]）。
-- **没有 `size()`**：不遍历无法知道有多少元素满足谓词。所以 `filter_view` 永远不是 `sized_range`。
+- 谓词的约束 `indirect_unary_predicate` 要求它能以底层迭代器的引用类型和值类型的左值调用（[[indirectcallable.indirectinvocable]]）。它细化了 `regular_invocable`，所以谓词必须保持相等性：对相等的输入总是给出相等的结果（[[concepts.equality]]、[[concepts.callable]]）。
+- 谓词存放在 *movable-box* 中（[[range.move.wrap]]），所以带捕获的 lambda 也能用。C++23 起只能移动的谓词也可以（[[P2494R2]]）。
+- 没有 `size()`：不遍历就不知道有多少元素满足谓词，所以 `filter_view` 永远不是 `sized_range`。
+- 底层是 common range 时，`end()` 返回一个指向底层末尾的迭代器，`filter_view` 也是 common 的；否则返回哨位。
 
-### `begin()` 与缓存（¶3–¶7）
+## begin() 的缓存（¶3–¶7）
 
-¶3 前置条件：*pred_*`.has_value()`（*movable-box* 可能因为赋值时构造抛异常而变空）。¶4 返回 `{*this, ranges::find_if(base_, ref(*pred_))}`。
+¶3 `begin()` 的前置条件是 `pred_.has_value()`：*movable-box* 在赋值时如果构造抛出异常，可能变空。¶4 它返回指向 `ranges::find_if(base_, ref(*pred_))` 的迭代器，也就是第一个满足谓词的元素。
+
+[[range.range]] ¶2.2 要求 `begin()` 是摊还常数时间，而找第一个满足谓词的元素需要线性时间。唯一的办法是第一次找到后记下来，¶5 正是这样规定的：
 
 !!! std
     In order to provide the amortized constant time complexity required by the range concept when filter_view models forward_range, this function caches the result within the filter_view for use on subsequent calls.
 
-    为了在 filter_view 建模 forward_range 时提供 range 概念要求的摊还常数时间复杂度，此函数把结果缓存在 filter_view 内，供后续调用使用。
+这句 *Remarks* 是规范性的，实现必须缓存（[[g:begin-caching]]）。缓存写在 `filter_view` 对象里，所以这个 `begin()` 不是 const 成员函数。
 
-[[range.range]] ¶2.2 要求 `begin()` 摊还 O(1)。但"第一个满足谓词的元素"要线性查找。唯一的办法：第一次找到后记住它。这句 *Remarks* 是**规范性的**——实现必须缓存，不是可选的优化。
-
-缓存要写入 `filter_view` 对象，所以这个 `begin()` 是**非 const 的**。
-
-¶6–¶7 是最新草案（C++26 之后的措辞调整）新增的 `const` 重载：只当 `const V` 是**输入但非前向**范围时才存在，并且注 1 明确它**不缓存**。理由是：输入范围只能遍历一次，`begin()` 本来就不必保持相等性，也就不需要缓存来满足"摊还 O(1)"。对 `vector`、`list` 这类前向底层，`const filter_view` **仍然不可迭代**。
+¶6–¶7 是 C++23 之后的新措辞：只有当 `const V` 是输入范围而不是前向范围时，才有一个 const 的 `begin()`，注 1 说明它不缓存。输入范围只能遍历一次，`begin()` 本来就不要求保持相等性（[[range.range]] ¶2.3），也就不需要靠缓存满足复杂度要求。对 `vector`、`list` 这类前向底层，`const filter_view` 仍然不能遍历。
 
 !!! impl "libc++"
-    libc++ 的 `filter_view` 只在 `forward_range<V>` 时才存放缓存（`__non_propagating_cache<iterator_t<V>>`，否则是一个空类型），与"只有 forward 时才需要缓存"的规范意图一致。截至编写时 libc++ 尚未提供上面那个面向"仅输入"底层的 `const begin()`，其迭代器也还不是 `template<bool Const>`。
+    libc++ 的 `filter_view` 只在底层是前向范围时才存放缓存（`__non_propagating_cache<iterator_t<V>>`，否则是一个空类型），与规范的意图一致。截至 Clang 23 附带的 libc++，还没有提供面向输入底层的 const `begin()`，迭代器也还不是 `template<bool Const>`。
 
-### `end()`
+## 迭代器 [range.filter.iterator]
 
-底层是 common range 时，`end()` 返回一个指向底层末尾的 *iterator*，于是 `filter_view` 也是 common 的；否则返回 *sentinel*。
+迭代器保存底层迭代器 `current_`，还保存一个指向父视图的指针 `parent_`，因为 `++` 时要用到谓词。迭代器依赖视图对象，所以 `filter_view` 不是借用范围。
 
-## 迭代器（[range.filter.iterator]）
+¶2 `iterator_concept` 的规则是：`Const` 为真时是输入迭代器；否则底层是双向范围时为双向，底层是前向范围时为前向，其余为输入。它永远不会是随机访问的，因为跳过 n 个满足谓词的元素不可能是常数时间。¶3 C++17 风格的 `iterator_category` 只在底层是前向范围时声明，同样最多到 `bidirectional_iterator_tag`。
 
-迭代器保存底层迭代器 *current_* 和指向父视图的指针 *parent_*（要访问谓词），因此 `filter_view` **不是借用范围**。
+¶8 `operator*` 直接返回底层元素的引用，所以元素是可以写的。¶10 `++` 从下一个位置开始找下一个满足谓词的元素：
 
-- ¶2 `iterator_concept`：`Const` 为真时是 input；否则 V 为 bidirectional 则 **bidirectional**，forward 则 forward，否则 input。**永远不会是 random access**——跳过 n 个"满足谓词的元素"不可能 O(1)。
-- ¶3 `iterator_category`（仅当底层 forward 时声明）同理最多到 `bidirectional_iterator_tag`。
-- ¶10 `++`：`current_ = ranges::find_if(std::move(++current_), ranges::end(parent_->base_), ref(*parent_->pred_));`
-- ¶12 `--`：`do --current_; while (!invoke(*parent_->pred_, *current_));`——注意这里**没有下界检查**：从 `begin()` 再往前退是越界（违反前置条件）。
-- ¶8 `operator*` 直接返回底层的引用——**元素是可写的**。
+```cpp
+current_ = ranges::find_if(std::move(++current_), ranges::end(parent_->base_),
+                           ref(*parent_->pred_));
+```
 
-¶1 注 1 给出了一条重要警告：
+¶12 `--` 一直后退，直到遇到满足谓词的元素：`do --current_; while (!invoke(*parent_->pred_, *current_));`。这里没有下界检查，从 `begin()` 再往前退就越过了底层的开头，违反前置条件。
+
+¶1 注 1 给出了一条警告：
 
 !!! std
-    Modification of the element a filter_view::iterator denotes can result in undefined behavior if the underlying range is a forward_range and the resulting value does not satisfy the filter predicate when the predicate is next evaluated for that element.
+    Modification of the element a filter_view::iterator denotes can result in undefined behavior if the underlying range is a forward_range and the resulting value does not satisfy the filter predicate when the predicate is next evaluated for that element
 
-    若底层是 forward_range，而通过 filter_view::iterator 修改元素后，该值在谓词下次对此元素求值时不再满足谓词，可能导致未定义行为。
+原因在于，缓存的 `begin()` 和正在使用的迭代器都假定自己指向满足谓词的元素。把元素改成不满足谓词后，这个假定不再成立，算法的前提被破坏了。
 
-机理：谓词是 `regular_invocable`，必须保持相等性——对"相等的输入"给出相等的结果。把元素改成不满足谓词之后，缓存的 `begin()`、或者正在使用的迭代器所"假定满足谓词"的位置就不再满足了；对同一元素再次求值的谓词给出了不同的结果——这违反了 `indirect_unary_predicate` 的语义要求，而违反库组件的语义要求即为未定义行为（[[res.on.requirements]]）。
+## 常见陷阱
 
-## 坑点合集
-
-### 1. const 的 filter_view 不是范围
+### const 的 filter_view 不能遍历
 
 ```cpp run error
 #include <ranges>
@@ -103,9 +117,9 @@ int main() {
 }
 ```
 
-修复方式：形参用转发引用 `auto&&`（或按值 `std::ranges::view auto`）；或者在调用处传 `ev` 的副本。这并非 `filter_view` 独有：`drop_view`（底层非随机访问+sized 时）、`drop_while_view`、`reverse_view`（底层非 common 时）、`split_view`、`chunk_by_view`、`slide_view` 等，只要有 `begin()` 缓存，就都没有可用的 const `begin`。
+修复方法是把形参改成转发引用 `auto&&`，或者按值接收 `std::ranges::view auto`。这不是 `filter_view` 独有的问题，凡是缓存 `begin()` 的视图都有：`drop_while_view`、`split_view`、`chunk_by_view` 没有 const 的 `begin`；`drop_view` 在底层不是随机访问且有大小时、`reverse_view` 在底层不是 common 时，也没有。
 
-### 2. 第一次 begin() 之后修改底层：陈旧的缓存
+### 第一次 begin() 之后修改底层
 
 ```cpp run ok
 #include <ranges>
@@ -114,19 +128,18 @@ int main() {
 int main() {
   std::vector<int> v{1, 2, 3, 4};
   auto ev = v | std::views::filter([](int x) { return x % 2 == 0; });
-  auto copy = ev;              // 复制视图：缓存不随之复制（non-propagating）
-  auto it = ev.begin();        // ev 缓存了指向 2 的迭代器
+  auto copy = ev;           // 复制视图：缓存不会跟着复制
+  (void)ev.begin();         // ev 缓存了指向 2 的迭代器
   v[0] = 0;
-  std::printf("%d %d\n", *ev.begin(), *copy.begin());   // 2 0：副本重新查找
-  (void)it;
+  std::printf("%d %d\n", *ev.begin(), *copy.begin());   // 2 0
 }
 ```
 
-`v[0] = 0` 之后，满足谓词的第一个元素其实是 `0`，但 `ev.begin()` 仍然给出 `2`。同一个视图、同样的底层数据，迭代结果取决于"之前有没有调用过 `begin()`"。复制出来的 `copy` 没有继承缓存（[[range.nonprop.cache]] 的"不传播"语义），于是得到 `0`。实践上的规则：**视图应当在创建后尽快一次性使用**；若底层可能变化，就重新创建视图。
+`v[0] = 0` 之后，第一个满足谓词的元素其实是 `0`，但 `ev.begin()` 仍然给出缓存的 `2`。同一个视图、同样的底层数据，遍历结果取决于之前有没有调用过 `begin()`。`copy` 没有继承缓存（缓存不传播，见 [[range.nonprop.cache]]），重新查找，得到 `0`。
 
-若修改导致底层重新分配（`v.push_back(...)`），缓存的迭代器直接失效，再调用 `ev.begin()` 就是{{ub}}。
+所以视图最好在创建后尽快使用一次就丢掉；底层可能变化时，就重新创建视图。如果修改导致底层重新分配内存（例如 `v.push_back(...)`），缓存的迭代器就失效了，再调用 `ev.begin()` 是{{ub}}。
 
-### 3. 通过 filter 把元素改得不再满足谓词
+### 通过 filter 把元素改得不再满足谓词
 
 ```cpp run ub
 #include <ranges>
@@ -135,53 +148,60 @@ int main() {
 int main() {
   std::vector<int> v{2, 4, 6};
   auto ev = v | std::views::filter([](int x) { return x % 2 == 0; });
-  for (int& x : ev) x += 1;     // 写成奇数：之后谓词对这些元素不再成立
+  for (int& x : ev) x += 1;     // 全部改成奇数
   for (int x : ev) std::printf("%d ", x);   // UB：缓存的 begin 指向不满足谓词的 3
   std::puts("");
 }
 ```
 
-在本站环境中第二个循环输出 `3`——一个"过滤偶数"的视图吐出了奇数。按 ¶1 注 1 这是未定义行为。如果需要"修改匹配的元素使之不再匹配"，用 `std::ranges::for_each` 配合手写条件，或者先收集到容器里。
+本机 Clang 23 运行时第二个循环输出 `3`：一个过滤偶数的视图给出了奇数。按 ¶1 注 1，这是未定义行为。需要把匹配的元素改得不再匹配时，可以用 `std::ranges::for_each` 加手写的条件，或者先把元素收集到容器里。
 
-### 4. 有状态的谓词
+### 有状态的谓词
 
 ```cpp
 int n = 0;
-auto first3 = v | views::filter([&n](int) { return n++ < 3; });   // 违反 regular_invocable 的语义要求
+auto first3 = v | views::filter([&n](int) { return n++ < 3; });
+// 违反 regular_invocable 的语义要求
 ```
 
-谓词在 `++`、`--` 时都可能被调用，`filter` 也不保证每个元素只调用一次（双向遍历时会再次调用）。有状态的谓词违反保持相等性，行为不受保证。要"取前 3 个"请用 `views::take(3)`。
+谓词在 `++`、`--` 时都可能被调用，`filter` 也不保证每个元素只调用一次，双向遍历时会再次调用。有状态的谓词不保持相等性，行为没有保证。想取前 3 个元素，用 `views::take(3)`。
 
-### 5. 并发
+### 并发调用 begin()
 
-标准库只保证**并发调用 const 成员函数**不产生数据竞争（[[res.on.data.races]]）。`filter_view::begin()` 是非 const 的、会写缓存，所以两个线程同时对**同一个** `filter_view` 对象调用 `begin()`（例如两个线程都在 `for` 遍历它）是数据竞争——{{ub}}。每个线程使用自己的视图副本即可（副本不共享缓存）。
+标准库只保证并发调用 const 成员函数不会产生数据竞争（[[res.on.data.races]]）。`filter_view::begin()` 不是 const 的，它会写缓存。两个线程同时对同一个 `filter_view` 对象调用 `begin()`，例如都用范围 `for` 遍历它，就是数据竞争，行为未定义{{ub}}。每个线程使用自己的视图副本即可，副本之间不共享缓存。
 
-### 6. 与 transform 组合时函数被调用两次
+### 与 transform 组合时函数被调用两次
 
-`transform | filter` 时，`filter` 判定要解引用一次（调用变换函数），你读取元素时又解引用一次。见 [[range.transform]]。
+`transform | filter` 中，`filter` 判断时解引用一次，调用一次变换函数；读取元素时又解引用一次，再调用一次。见 [[range.transform]]。
 
 ## 思考题
 
-<details markdown="1">
-<summary>1. 为什么标准不让 filter_view 用 mutable 成员实现缓存，从而提供 const begin()？</summary>
+!!! question "思考题 1"
+    为什么标准不用 `mutable` 成员实现缓存，从而提供 const 的 `begin()`？
 
-可以这么做，但那样 `const` 成员函数就会写共享状态，违背 [[res.on.data.races]] 的承诺——"并发调用库类型的 const 成员是安全的"。要么加锁（违背零开销），要么让 const 成员不再线程安全（破坏整个库的约定）。标准选择了第三条路：不提供 const 迭代，把"缓存属于这个对象"写进类型。
+<details markdown="1">
+<summary>答案</summary>
+
+那样 const 成员函数就会写共享状态，违背 [[res.on.data.races]] 的约定：并发调用库类型的 const 成员是安全的。要么加锁，带来额外开销；要么让 const 成员不再线程安全，破坏整个库的约定。标准选择不提供 const 遍历，把缓存属于这个对象写进类型。
 </details>
 
-<details markdown="1">
-<summary>2. 底层是 `istream_view` 时，`filter_view` 会缓存 begin 吗？</summary>
+!!! question "思考题 2"
+    底层是 `istream_view` 时，`filter_view` 会缓存 `begin()` 吗？
 
-不会也不需要。¶5 只说"当 filter_view 建模 forward_range 时"缓存。输入范围只能遍历一次，`begin()` 本就不要求保持相等性（[[range.range]] ¶2.3）。最新草案还为 `const V` 是"仅输入"的情况补上了不缓存的 `const begin()`（¶6–¶7）。
+<details markdown="1">
+<summary>答案</summary>
+
+不会，也不需要。¶5 只要求 `filter_view` 建模 `forward_range` 时缓存。输入范围只能遍历一次，`begin()` 本来就不要求保持相等性（[[range.range]] ¶2.3）。当前草案还为 `const V` 是输入但非前向范围的情况提供了不缓存的 const `begin()`（¶6–¶7）。
 </details>
 
 ## 小结
 
 | 性质 | `filter_view` |
 |---|---|
-| 迭代器强度 | 最多 bidirectional |
-| sized | 永不 |
+| 迭代器强度 | 最多双向 |
+| sized | 永远不是 |
 | common | 底层 common 时是 |
 | 借用 | 否 |
-| const 可迭代 | 否（仅"仅输入"的底层在最新草案中例外） |
-| `begin()` | 首次 O(n)，之后 O(1)，结果被缓存 |
-| 元素可写 | 是，但写成不满足谓词是 UB |
+| const 可遍历 | 否；输入但非前向的底层例外 |
+| `begin()` | 第一次 O(n)，之后 O(1)，结果被缓存 |
+| 元素可写 | 是，但改得不满足谓词可能是 UB |

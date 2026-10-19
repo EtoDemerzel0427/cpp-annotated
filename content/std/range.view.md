@@ -1,56 +1,93 @@
 ---
 title: 视图
-summary: view = range + movable + enable_view；O(1) 移动构造、移动赋值不贵于"析构+移动构造"、N 个副本的析构为 O(N+M)、可复制时复制 O(1)——语义要求的精确措辞与它在 C++20 期间的两次修改；enable_view、view_base 与 view_interface 的判定规则。
+summary: 什么样的范围可以被适配器廉价地按值持有：view 概念的定义、它的复杂度要求，以及用 view_base、view_interface 或 enable_view 声明一个类型是视图。
 status: done
 since: c++20
 papers: P0896R4, P1456R1, P2325R3, P2415R2
 related: range.req, range.range, range.all, view.interface, range.adaptors, concepts.object, namespace.std, views.contiguous, string.view
 tags: 标准库, 范围, 视图, 概念
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-什么样的范围可以放进适配器管道？如果 `views::filter` 收到一个 `vector<int>` 就复制一份，管道的每一级都可能复制整个数据集——惰性求值就失去了意义。[range.view] 用一个概念 `view` 回答"哪些范围可以被**廉价地按值持有**"，所有适配器都**按值**存储它们的底层视图（[[range.adaptors]]）。
+!!! tldr
+    - `view` 是可以被廉价地按值传递的范围，范围适配器按值保存的底层范围都是视图。
+    - 定义是 `range<T> && movable<T> && enable_view<T>`。视图和普通容器在语法上无法区分，所以类型要主动声明自己是视图。
+    - 语义要求全部是复杂度承诺：移动构造 O(1)，可复制时复制构造 O(1)，N 个副本的析构总代价 O(N+M)。
+    - 视图可以拥有元素，只要不会因为复制而重复拥有。`owning_view`、`single_view`、`std::generator` 都是视图。
+    - 声明方式有三种：公开继承 `view_base`，公开继承唯一的 `view_interface<D>`，或者特化 `enable_view`。
 
-## 定义（¶1）
+## 为什么需要 view 概念
+
+```cpp
+std::vector<int> v = /* 一百万个元素 */;
+auto r = v | std::views::filter(pred)
+           | std::views::transform(f);
+```
+
+适配器把它的底层范围按值保存起来（[[range.adaptors]]）。如果 `filter` 保存的是 `vector` 的一份副本，管道的每一级都可能复制整个数据集，惰性求值就失去了意义。实际上 `v` 先被 `views::all` 包装成 `ref_view`，它只保存一个指针（[[range.all]]）。
+
+所以适配器需要一个概念来回答：哪些范围可以放心地按值保存？这个概念就是 `view`，术语见 [[g:range-view]]。
+
+## 定义（¶1、¶5）
+
+¶1 `view` 由三个条件组成：
 
 ```cpp
 template<class T>
   concept view = range<T> && movable<T> && enable_view<T>;
 ```
 
-（术语见 [[g:range-view]]。）三部分：是范围；是可移动的对象类型（[[concepts.object]]）；并且通过 `enable_view` **主动声明**自己是视图。语义要求无法从语法上区分（`vector` 和 `span` 都有 `begin/end`、都可移动），所以要靠"选择加入"（opt-in）。
+`range<T>` 要求有 `begin` 和 `end`（[[range.range]]）。`movable<T>` 要求 `T` 是可以移动构造、移动赋值和交换的对象类型（[[concepts.object]]）。
 
-## 语义要求（¶2–¶4）
+¶5 第三个条件 `enable_view<T>` 是一个变量模板，由类型自己声明。原因是 `vector` 和 `span` 都有 `begin`、`end`，都可以移动，语法上看不出区别；两者的差别在复制和析构的代价上，这只能由类型作者来承诺。
 
-¶2 `T` 建模 `view` 仅当：
+## 复杂度要求（¶2–¶4）
 
-- ¶2.1 `T` 有 **O(1) 移动构造**；
-- ¶2.2 `T` 的移动赋值**不比"析构后再移动构造"更复杂**；
-- ¶2.3 若从一个含 **M** 个元素的 `T` 对象做了 **N** 次复制和/或移动，这 N 个对象的析构总代价为 **O(N+M)**；
-- ¶2.4 `copy_constructible<T>` 为假，或者 `T` 有 O(1) 复制构造；
-- ¶2.5 `copyable<T>` 为假，或者复制赋值不比"析构后再复制构造"更复杂。
+¶2 一个类型满足上面的概念，还要符合下面五条才算建模（model）`view`，也就是真正是一个视图：
 
-!!! std
-    if N copies and/or moves are made from an object of type T that contained M elements, then those N objects have O(N+M) destruction
+- ¶2.1 移动构造是 O(1)；
+- ¶2.2 移动赋值不比先析构再移动构造更复杂；
+- ¶2.3 从一个含 M 个元素的对象复制或移动出 N 个对象后，析构这 N 个对象的总代价是 O(N+M)；
+- ¶2.4 要么不可复制构造，要么复制构造是 O(1)；
+- ¶2.5 要么不可复制，要么复制赋值不比先析构再复制构造更复杂。
 
-    若从含 M 个元素的 T 对象做了 N 次复制和/或移动，则这 N 个对象的析构总共为 O(N+M)。
+¶3 注 1 指出，由这些条件可以推出：被移出的对象，析构是 O(1)。
 
-¶3 注 1：这些约束意味着**被移出的** `T` 对象的析构是 O(1)。
+¶2.3 的写法允许视图拥有元素，只要这些元素总共只被析构一次。下面三种类型可以对照着看：
 
-¶2.3 是 C++20 之后的措辞（[[P2415R2]]），值得逐字体会。它允许视图**拥有**元素——只要元素只被析构一次：
+| 类型 | N 个副本的析构 | 是否符合 |
+|---|---|---|
+| `owning_view<vector<int>>`：只能移动，被移出的对象为空 | 一个对象析构 M 个元素，其余 N−1 个是空的 | O(N+M)，符合 |
+| 用 `shared_ptr` 共享元素 | 最后一个副本析构 M 个元素，其余只减引用计数 | O(N+M)，符合 |
+| 可复制，每份副本都深复制元素 | 每份都析构 M 个元素 | 复制本身就违反 ¶2.4 |
 
-- `owning_view<vector<int>>` 只能移动，N 次移动后只有一个对象真正持有 M 个元素，其余 N−1 个是空壳：总析构 O(N+M) ✓；
-- `shared_ptr` 持有的数据被 N 个副本共享，最后一个副本析构 M 个元素，其余只减引用计数：O(N+M) ✓；
-- 一个**可复制**且每份副本都深复制元素的类型：复制本身就违反 ¶2.4，N 份副本析构是 O(N·M) ✗。
+¶4 例 1 列出了三种典型的视图：包装一对迭代器的类型；用 `shared_ptr` 持有元素、所有副本共享所有权的类型；按需生成元素的类型。`vector<string>` 不是视图，因为复制它要复制全部元素，不能在常数时间内完成。
 
-¶4 例 1 列举了典型的视图：包装一对迭代器的类型、用 `shared_ptr` 持有元素并与所有副本共享所有权的类型、按需生成元素的类型。`vector<string>` 不是视图，因为复制它要复制所有元素，无法在常数时间内完成。
+## 怎样声明一个视图（¶5–¶7）
+
+```cpp
+template<class T>
+  constexpr bool enable_view =
+    derived_from<T, view_base> || is-derived-from-view-interface<T>;
+```
+
+¶6 *is-derived-from-view-interface*`<T>` 是一个仅用于说明的变量模板。当且仅当 `T` 恰好有一个公开基类 `view_interface<U>`，并且没有其他 `view_interface<V>` 基类时，它为 `true`。
+
+因此一个类型有三种方式成为视图：
+
+1. 公开继承 `std::ranges::view_base`，这是一个空的标签类；
+2. 公开继承 `std::ranges::view_interface<Derived>`（[[view.interface]]），同时得到 `empty()`、`size()`、`front()`、`operator[]` 等成员。通常推荐这种做法；
+3. 特化 `enable_view`。¶7 允许用户为 cv 非限定的程序定义类型特化它：建模 `view` 的类型特化为 `true`，不建模的特化为 `false`。特化必须能用于常量表达式，类型为 `const bool`。
+
+特化为 `false` 有实际用途：一个类型因为继承了某个从 `view_interface` 派生的基类而被误判为视图时，可以这样关掉。标准库的 `basic_string_view` 和 `span` 用的是第 3 种方式，它们在各自的头文件概要（[[string.view.synop]]、[[span.syn]]）里把 `enable_view` 和 `enable_borrowed_range` 都特化为 `true`。
 
 ```cpp run ok
 #include <memory>
 #include <ranges>
 #include <vector>
 #include <cstdio>
-// 共享所有权的视图：复制只增加引用计数，O(1)
+
+// 共享所有权：复制只增加引用计数，O(1)
 class shared_ints : public std::ranges::view_interface<shared_ints> {
   std::shared_ptr<std::vector<int>> p_ = std::make_shared<std::vector<int>>();
 public:
@@ -62,14 +99,6 @@ public:
 };
 static_assert(std::ranges::view<shared_ints>);
 
-// 一个"看起来像视图"但其实拥有元素的类型：语法上满足 view，语义上不建模
-struct fat : std::ranges::view_base {
-  std::vector<int> v;
-  auto begin() const { return v.begin(); }
-  auto end() const { return v.end(); }
-};
-static_assert(std::ranges::view<fat>);   // 满足，但复制是 O(N)：违反 [range.view]/2.4
-
 // 只能移动的视图
 struct once : std::ranges::view_interface<once> {
   std::unique_ptr<int[]> data{new int[3]{1, 2, 3}};
@@ -78,75 +107,62 @@ struct once : std::ranges::view_interface<once> {
 };
 static_assert(std::ranges::view<once> && !std::copyable<once>);
 
+// 满足概念，但复制是 O(M)，不建模 view
+struct fat : std::ranges::view_base {
+  std::vector<int> v;
+  auto begin() const { return v.begin(); }
+  auto end() const { return v.end(); }
+};
+static_assert(std::ranges::view<fat>);
+
 int main() {
-  auto r = shared_ints({1, 2, 3, 4}) | std::views::transform([](int x) { return x * 10; });
+  auto r = shared_ints({1, 2, 3, 4})
+         | std::views::transform([](int x) { return x * 10; });
   for (int x : r) std::printf("%d ", x);
   for (int x : once{} | std::views::reverse) std::printf("%d ", x);
   std::puts("");   // 10 20 30 40 3 2 1
 }
 ```
 
-`fat` 的例子说明：编译器只检查**满足**；它声称自己是视图，就要对语义负责。把 `fat` 放进管道，每一级适配器复制它时都会深复制 `vector`——程序仍然"能跑"，只是标准不再保证任何复杂度，且严格说来程序已违反库的要求（[[res.on.requirements]]）。
+编译器只检查概念是否满足。`fat` 声称自己是视图，`static_assert` 通过，但它的复制是深复制，违反了 ¶2.4。把它放进管道，程序照样能运行，只是每一级适配器复制它时都会复制整个 `vector`。严格地说，这时程序已经违反了库的要求（[[res.on.requirements]]），标准对它的行为不再作任何保证。
 
-## `enable_view`（¶5–¶7）
+!!! pitfall "必须恰好一个 view_interface 基类"
+    如果一个类同时从 `view_interface<X>` 和 `view_interface<Y>` 派生，例如继承了两个各自用 CRTP 定义的视图，*is-derived-from-view-interface* 为假。两个基类各自提供 `empty()`、`size()` 等成员，本来就会造成歧义。
 
-```cpp
-template<class T>
-  constexpr bool is-derived-from-view-interface = see below;   // exposition only
-template<class T>
-  constexpr bool enable_view =
-    derived_from<T, view_base> || is-derived-from-view-interface<T>;
-```
+## 历史与演进
 
-¶6 *is-derived-from-view-interface*`<T>` 为 `true` 当且仅当 `T` **恰好有一个**公开基类 `view_interface<U>`（对某个 `U`），且没有其他 `view_interface<V>` 基类。
+!!! history "视图的定义放宽了三次"
+    1. C++20 最初的 Ranges 提案（[[P0896R4]]）要求视图是 `semiregular`（可复制、可默认构造），复制、移动、析构都是 O(1)。这实际上禁止了视图拥有元素。
+    2. [[P1456R1]]（进入 C++20）把 `semiregular` 放宽为 `movable`，允许只能移动的视图，比如持有 `unique_ptr` 或协程句柄的类型。
+    3. [[P2325R3]] 把可默认构造从 `view` 中去掉，标准视图的默认构造函数都改成有条件的（`requires default_initializable<V>`）。
+    4. [[P2415R2]] 把析构 O(1) 改成今天 ¶2.3 的 O(N+M)，允许只能移动、拥有元素的视图，并据此新增了 `owning_view`，让 `views::all(std::move(vec))` 合法（[[range.all]]）。
 
-所以有三种方式成为视图：
+    后两项都作为对 C++20 的缺陷报告（DR）处理，所以主流实现在 `-std=c++20` 下也采用新的规则。
 
-1. 公开继承 `std::ranges::view_base`（一个空标签类）；
-2. 公开继承 `std::ranges::view_interface<Derived>`（[[view.interface]]，同时还能免费得到 `empty()`、`size()`、`front()`、`operator[]` 等成员）——这是推荐做法；
-3. 为自己的类型特化 `enable_view`。¶7：用户可以对**cv 非限定的程序定义类型**特化为 `true`（若它建模 `view`）或 `false`（若它不建模），特化须可用于常量表达式且类型为 `const bool`。
+## 常见误解
 
-第 3 条的"`false`"方向有实际用途：一个类型因为继承了某个从 `view_interface` 派生的基类而被误判为视图时，可以显式关掉。
+!!! pitfall "视图就是不拥有元素的范围"
+    今天的定义只关心代价，不关心所有权。`owning_view`、`single_view`（自带一个元素）、`std::generator`（拥有协程帧）都是视图。更准确的理解是：按值传递一个视图，不会让总代价超过与元素个数成线性的范围。
 
-标准库自己的 `basic_string_view`、`span` 并不继承 `view_base`，而是在各自的头文件概要（[[string.view.synop]]、[[span.syn]]）中把 `ranges::enable_view` 与 `ranges::enable_borrowed_range` 都特化为 `true`。
-
-!!! pitfall "“恰好一个” view_interface 基类"
-    如果一个类从两个不同的 `view_interface<X>`、`view_interface<Y>` 派生（例如继承了两个各自用 CRTP 定义的视图），*is-derived-from-view-interface* 为假。这不是吹毛求疵：两个 CRTP 基类各自提供 `empty()`、`size()` 等成员会造成歧义。
-
-## 历史：视图的定义改过三次
-
-!!! history "从 semiregular 到 movable，再到 “允许拥有”"
-    1. **C++20 初版**（[[P0896R4]]）：`view` 要求 `semiregular`（可复制、可默认构造），并要求复制、移动、析构都是 O(1)。这实际上禁止了视图拥有元素。
-    2. **只可移动的视图**（[[P1456R1]]，进入 C++20）：把 `semiregular` 放宽为 `movable`，允许仅可移动的视图（如持有 `unique_ptr`、或者持有只能移动的协程句柄的生成器）。
-    3. **不要求可默认构造**（[[P2325R3]]，C++23 但作为 C++20 的 DR）：`default_initializable` 被移出 `view`；各标准视图的默认构造函数改成有条件的（`requires default_initializable<V>`）。
-    4. **"什么是视图？"**（[[P2415R2]]，同样作为 C++20 DR）：把"析构 O(1)"改成今天 ¶2.3 的 O(N+M) 措辞，从而允许**拥有元素但只能移动**的视图，并据此新增了 `owning_view`，让 `views::all(std::move(vec))` 合法（[[range.all]]）。
-
-    因为后三者都是对 C++20 的 DR，主流实现在 `-std=c++20` 下也采用了新语义。
-
-## 常见误区
-
-!!! pitfall "以为视图就是“不拥有元素”"
-    今天的定义只关心**代价**，不关心所有权。`owning_view`、`single_view`（自带一个元素）、`std::generator`（拥有协程帧）都是视图。正确的心智模型是："按值传递它不会让总代价超出与元素数成线性的范围"。
-
-!!! pitfall "以为视图都是可复制的"
-    `owning_view`、`generator`、以及底层为只移动视图的适配器结果都**只能移动**。泛型代码应以 `std::ranges::view auto v` 按值接收后 `std::move(v)` 继续传递，而不是到处复制。
+!!! pitfall "视图都可以复制"
+    `owning_view`、`generator`，以及底层是只移动视图的适配器结果，都只能移动。泛型代码用 `std::ranges::view auto v` 按值接收视图后，应当用 `std::move(v)` 继续传递，而不是复制。
 
 ## 思考题
 
-<details markdown="1">
-<summary>1. `std::vector<int>` 显式特化 `enable_view` 为 true 是合法的吗？</summary>
-
-不合法。¶7 只允许为**程序定义类型**特化（[[namespace.std]]），`std::vector<int>` 不是程序定义类型；而且即便允许，它的复制是 O(N)，也不建模 `view`。
-</details>
+!!! question "思考题 1"
+    为 `std::vector<int>` 显式特化 `enable_view` 为 `true`，合法吗？
 
 <details markdown="1">
-<summary>2. 为什么 ¶2.2 不直接要求"移动赋值 O(1)"？</summary>
+<summary>答案</summary>
 
-移动赋值要先销毁左操作数原有的状态。若视图拥有元素（如 `owning_view`），销毁旧内容是 O(M)，不可能是 O(1)。所以措辞改成"不比析构加移动构造更复杂"：析构的代价已经由 ¶2.3 的 O(N+M) 总量控制，移动构造是 O(1)。
+不合法。¶7 只允许为程序定义类型特化（[[namespace.std]]），`std::vector<int>` 不是程序定义类型。即使允许，它的复制是 O(N)，也不建模 `view`。
 </details>
 
-## 小结
+!!! question "思考题 2"
+    ¶2.2 为什么不直接要求移动赋值是 O(1)？
 
-- `view` = `range` + `movable` + `enable_view`；语义要求全是**复杂度**承诺；
-- 成为视图的三种方式：继承 `view_base`、继承唯一的 `view_interface<D>`、特化 `enable_view`；
-- C++20 的 DR 序列把视图从"semiregular、O(1) 析构"放宽为"movable、N 份副本 O(N+M) 析构"，从而允许只移动的、拥有元素的视图。
+<details markdown="1">
+<summary>答案</summary>
+
+移动赋值要先销毁左操作数原有的内容。视图拥有元素时（如 `owning_view`），销毁旧内容是 O(M)，不可能是 O(1)。所以措辞改成不比析构加移动构造更复杂：析构的代价已经由 ¶2.3 的 O(N+M) 总量控制，移动构造是 O(1)。
+</details>
