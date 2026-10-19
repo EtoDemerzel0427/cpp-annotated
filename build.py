@@ -403,6 +403,8 @@ def render_markdown(src, ctx, page_key):
                                    "permalink_class": "anchor", "permalink_title": "链接到此处"}},
     )
     out = md.convert(src)
+    # `\|` is the way to write a pipe inside inline code in a table cell; drop the escape in the output
+    out = re.sub(r"<code>([^<]*)</code>", lambda m: "<code>" + m.group(1).replace("\\|", "|") + "</code>", out)
     for i, b in enumerate(blocks):
         out = out.replace(f"<p>XCODEBLOCKX{i}X</p>", b).replace(f"XCODEBLOCKX{i}X", b)
     return out, md.toc_tokens
