@@ -1,26 +1,68 @@
 ---
 title: 通用算法要求
-summary: 把迭代器概念组合成"算法族"的需求——indirectly_movable(_storable)、indirectly_copyable(_storable)、indirectly_swappable、indirectly_comparable、permutable、mergeable、sortable；"_storable" 版本额外要求能经由值类型的中间对象中转；permutable 只要求前向迭代器，sortable 不含遍历类别要求，所以 ranges::sort 还要另加 random_access_iterator。
+summary: 算法族常用的几个组合概念：在迭代器之间移动、复制、交换元素，跨序列比较，以及原地重排、合并和排序。
 status: done
 covers: *
 since: c++20
 papers: P0896R4
 related: iterator.concepts, indirectcallable, iterator.cust, concepts.object, range.cmp, algorithms.requirements, lib.types.movedfrom
 tags: 标准库, 迭代器, 概念, 算法
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-单个迭代器概念描述的是"一个迭代器能做什么"；而算法关心的是**迭代器之间、迭代器与函数对象之间**的关系：能不能把 `In` 读出的东西写进 `Out`？能不能原地交换两个元素？能不能拿比较器比较两个序列的元素？[alg.req] 把这些常用组合起了名字，让 [[algorithms]] 中上百个 `ranges::` 算法的约束保持简短一致。
+!!! tldr
+    - 这一节给算法常用的约束组合起了名字：移动、复制、交换元素，跨序列比较，以及原地重排、合并、排序。
+    - 带 `_storable` 的版本还要求能先把元素存进一个值类型的临时对象再写出去，`sort`、`rotate` 这类需要暂存元素的算法要用它。
+    - `sortable` 只描述元素能不能排，不含遍历类别；`ranges::sort` 另外要求随机访问，所以 `std::list` 的迭代器是 `sortable`，却不能交给 `ranges::sort`。
+    - 默认比较器 `ranges::less` 要求类型 `totally_ordered`，只定义了 `operator<` 的类型能用 `std::sort`，不能用 `ranges::sort`。
 
-¶1 of [alg.req.general] 把它们分为三组：
+单个迭代器概念描述一个迭代器能做什么（[[iterator.concepts]]）。算法关心的往往是几个类型之间的关系：从 `In` 读出的东西能不能写进 `Out`，两个元素能不能原地交换，能不能用比较器比较两个序列的元素。
 
-- 元素在 `indirectly_readable` 与 `indirectly_writable` 之间**转移**：`indirectly_movable`、`indirectly_copyable`、`indirectly_swappable`；
-- **重排**：`permutable`、`mergeable`、`sortable`；
-- 跨序列**比较**：`indirectly_comparable`。
+¶1 [alg.req.general] 把这些组合分成三组：
 
-¶2（注 1）提醒：下文用作默认参数的 `ranges::less` 自身的约束（`totally_ordered_with`，[[range.cmp]]）也会施加到这些概念的实参上——默认比较器不是"无条件可用"的。
+- 在可读类型和可写类型之间转移元素：`indirectly_movable`、`indirectly_copyable`、`indirectly_swappable`；
+- 重排：`permutable`、`mergeable`、`sortable`；
+- 跨序列比较：`indirectly_comparable`。
 
-## 移动与复制（[alg.req.ind.move]、[alg.req.ind.copy]）
+## 默认比较器也有约束（¶2）
+
+<div class="compare" markdown="1">
+
+```cpp run error
+#include <algorithm>
+#include <vector>
+struct L {
+  int v;
+  bool operator<(const L& o) const
+  { return v < o.v; }
+};
+int main() {
+  std::vector<L> v{{2}, {1}};
+  std::sort(v.begin(), v.end());  // OK
+  std::ranges::sort(v);  // error
+}
+```
+
+```cpp run ok
+#include <algorithm>
+#include <vector>
+struct S {
+  int v;
+  auto operator<=>(const S&) const
+    = default;
+};
+int main() {
+  std::vector<S> v{{2}, {1}};
+  std::sort(v.begin(), v.end());  // OK
+  std::ranges::sort(v);           // OK
+}
+```
+
+</div>
+
+¶2 注 1 提醒，下面几个概念用作默认实参的 `ranges::less` 本身带有约束（[[range.cmp]]），它要求两边的类型建模 `totally_ordered_with`，也就是 `==`、`!=`、`<`、`>`、`<=`、`>=` 都要有。左边的 `L` 只有 `operator<`，所以不是 `sortable<L*>`。最简单的修法是像右边那样默认 `operator<=>`，它同时带来 `==`。也可以显式传一个 `std::less<>{}` 作比较器。
+
+## 移动与复制 [alg.req.ind.move] [alg.req.ind.copy]
 
 ```cpp
 template<class In, class Out>
@@ -36,10 +78,11 @@ concept indirectly_movable_storable =
   assignable_from<iter_value_t<In>&, iter_rvalue_reference_t<In>>;
 ```
 
-- `indirectly_movable`：能 `*out = ranges::iter_move(in)`——直接"搬"过去。对应 `ranges::move`。
-- `indirectly_movable_storable`：还能先搬进一个**值类型的临时对象**、再从临时对象搬出去。这是 `rotate`、`sort` 中"拿出一个元素暂存"的需要。¶3 语义：`iter_value_t<In> obj(ranges::iter_move(i));` 之后 `obj` 等于 `*i` 原先的值；若 `iter_rvalue_reference_t<In>` 是右值引用，`*i` 处于有效但未指明状态（[[lib.types.movedfrom]]）。
+¶1 `indirectly_movable` 表示可以 `*out = ranges::iter_move(in)`，把元素直接搬过去，`ranges::move` 用的就是它。
 
-复制版本平行：
+¶2 `indirectly_movable_storable` 还要求可以先搬进一个值类型的临时对象，再从临时对象搬出去。`rotate`、`sort` 这类算法需要把一个元素拿出来暂存，就要这个概念。¶3 语义要求：执行 `iter_value_t<In> obj(ranges::iter_move(i));` 之后，`obj` 等于 `*i` 原来的值；如果 `iter_rvalue_reference_t<In>` 是右值引用，`*i` 处于有效但未指明的状态（[[lib.types.movedfrom]]）。
+
+复制版本与之平行：
 
 ```cpp
 template<class In, class Out>
@@ -58,11 +101,11 @@ concept indirectly_copyable_storable =
   assignable_from<iter_value_t<In>&, iter_reference_t<In>>;
 ```
 
-`_storable` 版要求临时值的**四种值类别**都能写入 `Out`，因为算法可能以任意方式使用暂存值。¶3 语义：`iter_value_t<In> obj(*i);` 之后 `obj` 等于 `*i` 原先的值；若 `iter_reference_t<In>` 本身是右值引用（如 `move_iterator`），`*i` 处于有效但未指明状态。
+¶2 `_storable` 版本要求暂存的值以四种形式（左值、const 左值、右值、const 右值）都能写进 `Out`，因为算法怎样使用暂存值不受限制。¶3 语义要求：执行 `iter_value_t<In> obj(*i);` 之后 `obj` 等于 `*i` 原来的值；如果 `iter_reference_t<In>` 本身是右值引用（例如 `move_iterator`），`*i` 处于有效但未指明的状态。
 
-典型用户：`ranges::copy` 只要 `indirectly_copyable`；`ranges::unique_copy` 在输入是单遍迭代器、输出又不可读时，必须把"上一个元素"存成值，因而要 `indirectly_copyable_storable`。
+`ranges::copy` 只要求 `indirectly_copyable`。`ranges::unique_copy` 要记住上一个元素：输入是前向迭代器时可以记一个迭代器，否则往往只能把元素复制成值保存，这时就要求 `indirectly_copyable_storable`。
 
-## 交换（[alg.req.ind.swap]）
+## 交换 [alg.req.ind.swap]
 
 ```cpp
 template<class I1, class I2 = I1>
@@ -76,9 +119,9 @@ concept indirectly_swappable =
   };
 ```
 
-完全建立在 `ranges::iter_swap`（[[iterator.cust]]）之上：只要它的某个分支可用即可。注意对 `const I1` 调用——交换的是**所指元素**，迭代器自身是 const 也无妨。
+¶1 这个概念完全建立在定制点 `ranges::iter_swap` 上（[[iterator.cust]]）。实参是 `const I1`，因为交换的是迭代器所指的元素，迭代器本身是不是 const 无关紧要。
 
-## 比较（[alg.req.ind.cmp]）
+## 比较 [alg.req.ind.cmp]
 
 ```cpp
 template<class I1, class I2, class R, class P1 = identity, class P2 = identity>
@@ -86,9 +129,9 @@ concept indirectly_comparable =
   indirect_binary_predicate<R, projected<I1, P1>, projected<I2, P2>>;
 ```
 
-"用 `R` 比较两个序列各自投影后的元素"。`ranges::equal`、`ranges::search`、`ranges::find_first_of` 用它。
+¶1 意思是能用 `R` 比较两个序列各自投影之后的元素（`projected` 见 [[indirectcallable]]）。`ranges::equal`、`ranges::search`、`ranges::find_first_of` 用它。
 
-## 重排（[alg.req.permutable]、[alg.req.mergeable]、[alg.req.sortable]）
+## 重排 [alg.req.permutable] [alg.req.mergeable] [alg.req.sortable]
 
 ```cpp
 template<class I>
@@ -106,9 +149,11 @@ template<class I, class R = ranges::less, class P = identity>
 concept sortable = permutable<I> && indirect_strict_weak_order<R, projected<I, P>>;
 ```
 
-- `permutable`：**原地**重排所需的最低条件——前向迭代器（多遍）、能暂存、能交换。`rotate`、`reverse`（另需双向）、`partition`、`remove` 等用它。
-- `mergeable`：把两个有序输入序列**复制**合并到输出——不要求原地，所以只要 `input_iterator` 与 `indirectly_copyable`。
-- `sortable`：`permutable` + 投影后的严格弱序。它**不含**随机访问要求：`ranges::sort` 另外写了 `random_access_iterator<I>`，而 `ranges::stable_sort`、`ranges::partial_sort` 等也各自加上遍历要求；`ranges::inplace_merge` 则要求 `bidirectional_iterator` + `sortable`。
+- `permutable` 是原地重排的最低条件：前向迭代器、能暂存、能交换。`rotate`、`partition`、`remove` 等用它，`reverse` 另外要求双向。
+- `mergeable` 把两个有序的输入序列复制合并到输出，不是原地操作，所以只要求输入迭代器和 `indirectly_copyable`。
+- `sortable` 是 `permutable` 加上投影后的严格弱序。
+
+`sortable` 不含随机访问要求。`ranges::sort`、`ranges::stable_sort`、`ranges::partial_sort` 各自另加 `random_access_iterator`，`ranges::inplace_merge` 另加 `bidirectional_iterator`。
 
 ```cpp run title="alg_req.cpp" ok
 #include <iterator>
@@ -116,9 +161,9 @@ concept sortable = permutable<I> && indirect_strict_weak_order<R, projected<I, P
 #include <memory>
 #include <vector>
 
-// list 的迭代器"可排序"——sortable 不关心遍历类别
+// sortable 不关心遍历类别
 static_assert(std::sortable<std::list<int>::iterator>);
-// const_iterator 不能写入：不是 permutable
+// const_iterator 不能写入，所以不是 permutable
 static_assert(!std::sortable<std::vector<int>::const_iterator>);
 
 // unique_ptr：能移动暂存，不能复制暂存
@@ -127,39 +172,30 @@ static_assert(std::indirectly_movable_storable<UP, UP>);
 static_assert(!std::indirectly_copyable_storable<UP, UP>);
 static_assert(std::permutable<std::vector<std::unique_ptr<int>>::iterator>);
 
-// 代理迭代器也可以 permutable：vector<bool>
+// 代理迭代器也可以是 permutable
 static_assert(std::permutable<std::vector<bool>::iterator>);
 
 int main() {}
 ```
 
-`std::ranges::sort(lst)` 对 `std::list` 依然编译失败，原因在于 `ranges::sort` 的 `random_access_range` 约束，而不是 `sortable`——这正好说明了两者的分工：`sortable` 描述"元素层面能不能排"，遍历概念描述"算法能不能高效地走"。
-
-## 常见误区
-
-!!! pitfall "以为 `sortable<I>` 就能调用 `ranges::sort`"
-    见上：`sortable` 不含遍历类别。查找"某算法到底要求什么"时，以该算法自己的声明为准（[[algorithms]]），这些组合概念只是其中一部分。
-
-!!! pitfall "默认比较器的约束被遗忘"
-    `sortable<I>` 的默认 `R` 是 `ranges::less`，它要求值类型 `totally_ordered`（¶2 注 1）。一个只定义了 `operator<` 的类型满足不了 `totally_ordered`（还需要 `>`、`<=`、`>=` 与 `==`）——C++20 中最简单的做法是给它 `operator<=>` 与 `operator==`。
+`std::ranges::sort(lst)` 对 `std::list` 编译失败，Clang 的诊断指出的是 `random_access_range` 不满足，而不是 `sortable`。两者分工不同：`sortable` 说元素层面能不能排，遍历概念说算法能不能高效地在序列上移动。查一个算法到底要求什么，要看它自己的声明（[[algorithms]]）。
 
 ## 思考题
 
-!!! question "思考题"
-    1. 为什么 `permutable` 要求 `forward_iterator`，而不是 `input_iterator`？
-    2. `mergeable` 为什么用 `indirectly_copyable` 而不是 `indirectly_copyable_storable`？
+!!! question "思考题 1"
+    为什么 `permutable` 要求 `forward_iterator`，而不只是 `input_iterator`？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-1. 原地重排至少要回到某个位置写入（比如 `remove` 把后面的元素搬到前面，`rotate` 要记住中点），这要求同一位置能被访问多次、迭代器能被复制保存——这就是多遍保证（[[iterator.concept.forward]]）。单遍迭代器"走过即作废"，无法原地重排。
-2. 合并时每一步只需比较两个输入的当前元素、把较小者直接从输入复制到输出，不需要中间暂存。`ranges::merge` 的实现不会创建 `iter_value_t` 临时对象，所以不必要求值类型可复制——这让元素是只读代理或复制代价高的情形也能使用。
+原地重排需要回到已经走过的位置写入：`remove` 把后面的元素搬到前面，`rotate` 要记住中点。这要求迭代器可以复制保存，同一位置可以多次访问，也就是多遍保证（[[iterator.concept.forward]]）。单遍迭代器走过即作废，无法原地重排。
 </details>
 
-## 小结
+!!! question "思考题 2"
+    `mergeable` 为什么用 `indirectly_copyable`，而不是 `indirectly_copyable_storable`？
 
-!!! summary
-    - 转移：`indirectly_movable/copyable`（直接搬）与 `_storable`（可经值类型临时对象中转）；`indirectly_swappable` 基于 `ranges::iter_swap`。
-    - 比较：`indirectly_comparable` = 投影后的二元谓词。
-    - 重排：`permutable` = 前向 + 可暂存 + 可交换；`mergeable` = 两个输入 + 可复制 + 严格弱序；`sortable` = `permutable` + 严格弱序。
-    - 这些概念都不包含算法所需的遍历类别（`permutable` 的前向除外）；遍历要求写在各算法自己的约束里。
+<details markdown="1">
+<summary>答案</summary>
+
+合并的每一步只需比较两个输入的当前元素，把较小的那个直接从输入复制到输出，不需要中间暂存。所以概念不要求值类型可以复制构造，元素复制代价高或者只能通过代理读写的情形也能使用。
+</details>
