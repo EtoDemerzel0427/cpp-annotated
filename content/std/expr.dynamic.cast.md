@@ -1,35 +1,64 @@
 ---
 title: dynamic_cast
-summary: 唯一带运行期检查的转换：目标类型的要求、向上转换（编译期完成）、转换到 void*（取最派生对象）、向下转换与交叉转换的运行期检查算法、失败时返回空指针或抛 std::bad_cast、对生命周期外对象的 UB、构造析构期间的行为，以及 Itanium ABI 中 __dynamic_cast 的实现与代价
-status: draft
+summary: 唯一在运行期检查对象实际类型的转换：什么时候能写、哪些情形在编译期就完成、向下转换和交叉转换怎样检查、失败时得到什么，以及它在构造期间、常量求值中和 ABI 层面的表现。
+status: done
 papers: P1327R1
-related: expr.static.cast, expr.typeid, class.cdtor, class.virtual, class.derived, intro.object, conv.ptr, bad.cast, basic.life, topics/casts
+related: expr.static.cast, expr.typeid, class.cdtor, class.virtual, class.derived, intro.object, bad.cast, basic.life, topics/casts
 tags: 类型转换, RTTI, 多态, 继承
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-`dynamic_cast` 是四个具名转换中唯一可能在运行期做检查的。给它一个指向基类子对象的指针，它会查看对象的动态类型，判断这个对象里是否真的有所要的那个类的子对象：有就返回指向它的指针，没有就返回空指针（或抛异常）。它相当于 C++ 版的 `instanceof`，也就是安全的向下转换。
+!!! tldr
+    - `dynamic_cast` 在运行期查看对象的实际类型，转换成功就得到指向目标子对象的指针或引用，失败时指针版本得到空指针，引用版本抛出 `std::bad_cast`。
+    - 向上转换和同类型转换在编译期完成，不需要虚函数；其余情形要求操作数是多态类型，也就是至少有一个虚函数的类。
+    - 运行期检查只走 public 继承路径，能做向下转换，也能做 `static_cast` 做不到的交叉转换和从虚基类向下转换。
+    - 交给 `dynamic_cast` 的指针必须指向一个活着的对象；悬垂指针是未定义行为，不会安全地返回空指针。
+    - 在基类的构造函数和析构函数里，对象被当作基类本身，向派生类的转换总会失败。
 
-不过 `dynamic_cast` 也处理几种根本不需要运行期检查的情况：向上转换、同类型转换。本节按顺序列出全部情形（¶3、¶4、¶8、¶9）。顺序本身就是规则的一部分：**先匹配的情形优先**。
+## 带检查的向下转换
 
-阅读前提：多态类（[[class.virtual]]）、最派生对象与基类子对象（[[intro.object]]）、继承中的访问与二义性（[[class.derived]]、[[class.access.base]]）。
+```cpp run title="dyn-intro.cpp" ok
+struct Shape { virtual ~Shape() = default; };
+struct Circle : Shape { int r = 1; };
+struct Square : Shape {};
 
-## 形式与目标类型（¶1–2）
+int radius(Shape* s) {
+  if (auto* c = dynamic_cast<Circle*>(s))
+    return c->r;          // s 确实指向一个 Circle
+  return 0;               // 不是 Circle：得到空指针
+}
 
-¶1：`dynamic_cast<T>(v)` 的结果是把 `v` 转换为 `T` 的结果。`T` 必须是：
+int main() {
+  Circle c;
+  Square q;
+  return radius(&c) == 1 && radius(&q) == 0 ? 0 : 1;
+}
+```
 
-- 指向完整类类型的指针或引用，或
-- "指向 cv `void` 的指针"。
+`static_cast<Circle*>(s)` 也能编译，但它相信程序员：`s` 实际指向 `Square` 时，结果就是一个错误的指针。`dynamic_cast` 在运行期查看 `*s` 的**动态类型**（dynamic type，对象实际的类型，与表达式的静态类型相对），判断它里面是否真的有一个 `Circle`。
 
-`dynamic_cast` 不能去掉常量性（casts away constness，[[expr.const.cast#6]]），如果还要去掉 `const`，需要再套一层 `const_cast`。
+能做这个检查，是因为 `Shape` 有虚函数。有虚函数的类叫**多态类**（polymorphic class，[[class.virtual]]），它的对象里存着一个指向虚表的指针，虚表里有类型信息（RTTI）。没有虚函数的类，对象里没有这份信息，`dynamic_cast` 也就无从检查。
 
-¶2 规定操作数与结果的值类别：
+## 能写成什么样（¶1、¶2、¶5）
+
+¶1 `dynamic_cast<T>(v)` 中的 `T` 必须是下面两种之一：
+
+- 指向完整类类型的指针或引用；
+- 指向（可能带 cv 限定的）`void` 的指针。
+
+`dynamic_cast` 也不能去掉 `const` 或 `volatile`（[[expr.const.cast#6]]），需要的话再套一层 `const_cast`。
+
+¶2 操作数的形式要和 `T` 对应，结果的值类别也随之确定：
 
 | `T` | 操作数 `v` | 结果 |
 |---|---|---|
-| 指针类型 | 指向完整类类型的指针 prvalue | prvalue |
-| 左值引用 `C&` | 完整类类型的左值 | lvalue |
-| 右值引用 `C&&` | 完整类类型的 glvalue | xvalue |
+| 指针类型 | 指向完整类类型的指针，prvalue | prvalue |
+| 左值引用 `C&` | 完整类类型的左值 | 左值 |
+| 右值引用 `C&&` | 完整类类型的 glvalue | 亡值（xvalue） |
+
+右值引用的版本也接受 prvalue 操作数：prvalue 作为运算符的操作数时，会先经过[[g:temporary-materialization-conversion|临时量实质化]]成为亡值（[[basic.lval#7]]）。
+
+¶5 下一节的两种情形之外，`v` 必须是多态类型的指针或 glvalue。
 
 ```cpp title="dyn-requirements.cpp" error
 struct V { virtual ~V() = default; };
@@ -39,73 +68,65 @@ struct N {};
 struct M : N {};
 
 void f(const V* cv, V* v, N* n, Inc* pi) {
-    dynamic_cast<D*>(cv);         // error: 去掉了 const
-    dynamic_cast<const D*>(cv);   // OK
-    dynamic_cast<int*>(v);        // error: T 必须是指向类类型的指针（或 void*）
-    dynamic_cast<D>(*v);          // error: T 必须是指针或引用
-    dynamic_cast<M*>(n);          // error: 向下转换要求操作数是多态类型（¶5）
-    dynamic_cast<D&>(V{});        // error: 左值引用要求左值操作数
-    dynamic_cast<D&&>(V{});       // OK：右值引用接受 glvalue（prvalue 被实质化）
-    dynamic_cast<Inc*>(v);        // error: 目标类不完整
-    dynamic_cast<V*>(pi);         // error: 操作数指向不完整类
+  dynamic_cast<D*>(cv);        // error: 去掉了 const
+  dynamic_cast<const D*>(cv);  // OK
+  dynamic_cast<int*>(v);       // error: int 不是类类型
+  dynamic_cast<D>(*v);         // error: T 必须是指针或引用
+  dynamic_cast<M*>(n);         // error: N 不是多态类型（¶5）
+  dynamic_cast<D&>(V{});       // error: 左值引用要求左值
+  dynamic_cast<D&&>(V{});      // OK：prvalue 先实质化
+  dynamic_cast<Inc*>(v);       // error: 目标类不完整
+  dynamic_cast<V*>(pi);        // error: 操作数指向不完整类
 }
 ```
 
-## 无需检查的情形（¶3–4）
+## 在编译期完成的情形（¶3、¶4）
 
-### 同类型（¶3）
+¶3 `v` 的类型与 `T` 相同（忽略 cv 限定）时，结果就是 `v`，必要时加上 cv 限定。
 
-¶3：如果 `v` 的类型与 `T` 相同（忽略 cv），结果就是 `v`（必要时加上 cv）。
-
-### 向上转换（¶4）
-
-¶4：如果 `T` 是"指向 *cv1* `B` 的指针"而 `v` 是"指向 *cv2* `D` 的指针"，且 `B` 是 `D` 的基类，结果是指向 `v` 所指 `D` 对象中唯一的 `B` 子对象的指针（`v` 为空则结果为空）。引用同理。如果 `B` 是不可访问或二义的基类，程序非良构。脚注 45：最派生对象中可能还有其他 `B` 子对象，但它们会被忽略，这里只从静态类型 `D` 的角度看。
-
-标准例 1：
+¶4 从派生类向基类的转换，即**向上转换**（upcast），结果指向 `v` 所指 `D` 对象中唯一的那个 `B` 子对象；`v` 为空时结果为空。引用的情形相同。`B` 是 `D` 的不可访问或有二义的基类时，程序非良构。
 
 ```cpp run title="dyn-upcast.cpp" ok
 struct B {};
 struct D : B {};
 
 void foo(D* dp) {
-    B* bp = dynamic_cast<B*>(dp);   // 等价于 B* bp = dp;
-    (void)bp;
+  B* bp = dynamic_cast<B*>(dp);   // 等价于 B* bp = dp;
+  (void)bp;
 }
 
 int main() { D d; foo(&d); }
 ```
 
-注意，向上转换不要求多态类型（`B` 没有虚函数也可以），也不需要 RTTI。它与隐式转换完全一样，在编译期完成。这条规则存在的意义只是让 `dynamic_cast` 在泛型代码里能统一处理向上和向下两个方向。
+这就是标准的例 1。`B` 没有虚函数也可以，因为向上转换和隐式转换完全一样，偏移在编译期就能算出来。这条规则的用处是让泛型代码里的 `dynamic_cast` 两个方向都能写。
 
-## 需要运行期检查的情形（¶5–9）
+脚注 45 补充了一点：`v` 所在的完整对象里可能还有别的 `B` 子对象，但它们不在考虑之内，向上转换只从 `v` 的静态类型 `D` 出发。
 
-### 操作数必须是多态的（¶5）
+## 运行期检查（¶6–¶10）
 
-¶5：除上述情形外，`v` 必须是多态类型的指针或 glvalue，即类至少有一个虚函数（[[class.virtual]]）。这是因为运行期检查需要知道对象的动态类型，而只有多态对象才在对象里携带这一信息（vptr 指向的虚表中的 RTTI 指针）。非多态类根本无从查询。
+### 空指针与悬垂指针（¶6、¶7）
 
-### 空指针（¶6）
+¶6 `v` 是空指针值时，结果是空指针值。
 
-¶6：`v` 是空指针值时，结果是空指针值。（引用不可能为空，所以无需规定。）
-
-### 生命周期之外：UB（¶7）
-
-¶7：如果 `v` 是"指向 cv `U` 的指针"，而它不指向一个类型与 `U` 相似、且处于生命周期内或构造/析构期间的对象，行为未定义；glvalue 同理。也就是说，悬垂指针、指向已析构对象的指针、类型错误（经 `reinterpret_cast` 得到）的指针，交给 `dynamic_cast` 都是 UB。**`dynamic_cast` 不能用来检查指针是否有效**：它要读 vptr，而此时 vptr 已经不存在或不正确。这与 [[basic.life#7]] 的第 4 项相呼应。
+¶7 `v` 必须指向一个类型与 `v` 所指类型[[g:similar-types|相似]]、并且处于生命期内或正在构造、析构的对象，否则行为未定义。glvalue 操作数同样如此。
 
 ```cpp run title="dyn-dangling.cpp" ub
 struct B { virtual ~B() = default; };
 struct D : B {};
 
 int main() {
-    B* p = new D;
-    delete p;
-    D* d = dynamic_cast<D*>(p);   // UB: *p 不在生命周期内（¶7）；不会"安全地"返回空指针
-    return d != nullptr;
+  B* p = new D;
+  delete p;
+  D* d = dynamic_cast<D*>(p);   // UB: *p 已经不在生命期内
+  return d != nullptr;
 }
 ```
 
-### 转换到 `void*`（¶8 前半）
+`dynamic_cast` 要先读对象里的虚表指针，而这时那块内存已经释放，虚表指针也就不存在了。本机 AddressSanitizer 在这一行报告 heap-use-after-free。所以 `dynamic_cast` 不能用来检查指针是否还有效，经 `reinterpret_cast` 得到的类型不对的指针同样不行（参见 [[basic.life#7]]）。
 
-¶8：如果 `T` 是"指向 cv `void` 的指针"，结果是指向 `v` 所指的最派生对象（[[intro.object]]）的指针。从任意基类子对象找回整个对象的起始地址，这是唯一可移植的方式，在多重继承中很有用（例如用对象地址比较身份，或者实现自定义的内存管理）。
+### 找回整个对象：转换到 `void*`（¶8）
+
+¶8 `T` 是指向 `void` 的指针时，结果指向 `v` 所指的**最派生对象**（most derived object，不是任何其他对象的子对象的那个完整对象，[[intro.object]]）。
 
 ```cpp run title="dyn-void.cpp" ok
 struct A { virtual ~A() = default; int a; };
@@ -113,50 +134,55 @@ struct B { virtual ~B() = default; int b; };
 struct D : A, B {};
 
 int main() {
-    D d;
-    B* pb = &d;                       // 指向 B 子对象，地址 ≠ &d
-    void* whole = dynamic_cast<void*>(pb);
-    return (whole == static_cast<void*>(&d) && static_cast<void*>(pb) != whole) ? 0 : 1;
+  D d;
+  B* pb = &d;                          // 指向 B 子对象
+  void* whole = dynamic_cast<void*>(pb);
+  return whole == static_cast<void*>(&d)
+      && static_cast<void*>(pb) != whole ? 0 : 1;
 }
 ```
 
-### 运行期检查（¶8 后半、¶9）
+在多重继承中，`B` 子对象不在 `d` 的起始地址。`static_cast<void*>(pb)` 只是换个类型，地址不变；`dynamic_cast<void*>(pb)` 才能找回整个对象的起点。需要用地址判断两个基类指针是否指向同一个对象时，这是唯一可移植的办法。
 
-其他情形施加运行期检查，判断 `v` 所指对象能否转换为 `T` 所指类型 `C`。¶9 给出逻辑步骤：
+### 检查的算法（¶8、¶9）
 
-1. ¶9.1 向下转换：如果在 `v` 所指的最派生对象中，`v` 指向某个 `C` 对象的 public 基类子对象，并且从 `v` 所指的子对象派生出的 `C` 对象只有一个，结果指向那个 `C` 对象。
-2. ¶9.2 交叉转换（cross-cast / sidecast）：否则，如果 `v` 指向最派生对象的一个 public 基类子对象，并且最派生对象的类型有一个无二义的 public 基类 `C`，结果指向最派生对象的那个 `C` 子对象。
-3. ¶9.3：否则检查失败。
+其余情形都要做运行期检查。设 `C` 是 `T` 所指或所引用的类，第 9 段规定的检查逻辑上分三步：
 
-直观地理解：
+1. ¶9.1 **向下转换**：在 `v` 所在的最派生对象中，如果 `v` 指向某个 `C` 对象的 public 基类子对象，而且从 `v` 所指子对象派生出的 `C` 对象只有一个，结果指向这个 `C` 对象。
+2. ¶9.2 **交叉转换**（cross-cast）：否则，如果 `v` 指向最派生对象的一个 public 基类子对象，并且最派生对象的类型有一个无二义的 public 基类 `C`，结果指向最派生对象的这个 `C` 子对象。
+3. ¶9.3 否则检查失败。
 
-- ¶9.1 从当前子对象出发向派生方向找：`v` 所指的子对象是不是某个 `C` 的一部分？只看包含它的那一条继承链。
-- ¶9.2 从顶部找：先走到最派生对象，再看它有没有唯一的 public `C` 基类。这一步允许转到另一个继承分支。
-- 两步都要求路径是 public 的：`dynamic_cast` 遵守访问控制，私有继承关系在运行期是不可见的。
+第一步从 `v` 所指的子对象出发，沿包含它的那条继承链往派生方向找。第二步先走到最派生对象，再看整个对象里有没有唯一的 public `C`，所以可以转到另一个继承分支上。两步都只认 public 继承：私有继承关系在运行期是看不见的。
 
 ```cpp run title="dyn-cross.cpp" ok
 struct Shape { virtual ~Shape() = default; };
-struct Drawable { virtual ~Drawable() = default; virtual int draw() const = 0; };
-struct Circle : Shape, Drawable { int draw() const override { return 1; } };
+struct Drawable {
+  virtual ~Drawable() = default;
+  virtual int draw() const = 0;
+};
+struct Circle : Shape, Drawable {
+  int draw() const override { return 1; }
+};
 struct Square : Shape {};
 
 int main() {
-    Circle c;
-    Square s;
-    Shape* p1 = &c;
-    Shape* p2 = &s;
-    Circle* down = dynamic_cast<Circle*>(p1);        // ¶9.1 向下转换：成功
-    Drawable* side = dynamic_cast<Drawable*>(p1);    // ¶9.2 交叉转换：Shape → Drawable，成功
-    Drawable* none = dynamic_cast<Drawable*>(p2);    // Square 不是 Drawable：失败，空指针
-    return (down == &c && side && side->draw() == 1 && none == nullptr) ? 0 : 1;
+  Circle c;
+  Square s;
+  Shape* p1 = &c;
+  Shape* p2 = &s;
+  auto* down = dynamic_cast<Circle*>(p1);    // ¶9.1：成功
+  auto* side = dynamic_cast<Drawable*>(p1);  // ¶9.2：成功
+  auto* none = dynamic_cast<Drawable*>(p2);  // 失败：空指针
+  return down == &c && side && side->draw() == 1
+      && none == nullptr ? 0 : 1;
 }
 ```
 
-交叉转换是 `dynamic_cast` 独有的能力：`static_cast<Drawable*>(p1)` 是非良构的（`Shape` 和 `Drawable` 没有继承关系）；`reinterpret_cast` 能编译，但结果不指向 `Drawable` 子对象。
+`Shape` 和 `Drawable` 之间没有继承关系，所以 `static_cast<Drawable*>(p1)` 是非良构的；`reinterpret_cast` 能编译，但得到的指针并不指向 `Drawable` 子对象。交叉转换只有 `dynamic_cast` 能做。
 
 ### 失败的结果（¶10）
 
-¶10：转换到指针失败时，结果是目标类型的空指针值；转换到引用失败时，抛出一个能被 `std::bad_cast`（[[bad.cast]]）处理器捕获的异常。原因很简单，引用不能为空，只能用异常表达失败。
+¶10 转换到指针类型失败时，结果是目标类型的空指针值。转换到引用类型失败时，抛出一个能被 `std::bad_cast`（[[bad.cast]]）处理器捕获的异常，因为引用没有空值可用。
 
 ```cpp run title="dyn-bad-cast.cpp" ok
 #include <typeinfo>
@@ -165,61 +191,63 @@ struct B { virtual ~B() = default; };
 struct D : B {};
 
 int main() {
-    B b;
-    try {
-        D& d = dynamic_cast<D&>(b);   // 失败：抛出 std::bad_cast
-        (void)d;
-        return 1;
-    } catch (const std::bad_cast&) {
-        return 0;
-    }
+  B b;
+  try {
+    D& d = dynamic_cast<D&>(b);   // b 不是 D：抛出 std::bad_cast
+    (void)d;
+    return 1;
+  } catch (const std::bad_cast&) {
+    return 0;
+  }
 }
 ```
 
-### 标准例 2：私有继承、虚继承与多重子对象
+### 私有继承、虚基类和重复的子对象
 
-标准的例 2 集中了所有边界情况，逐行解释如下：
+标准的例 2 把这些边界情况放在了一起。下面是可以编译的改编版，原文中非良构和会抛异常的两行改成了注释：
 
 ```cpp run title="dyn-std-example.cpp" ok
 class A { virtual void f() {} };
 class B { virtual void g() {} };
-class D : public virtual A, private B { };
+class D : public virtual A, private B {};
 
 void g() {
-    D   d;
-    B*  bp = (B*)&d;                  // C 风格转换无视私有继承（[expr.cast]/4.6）
-    A*  ap = &d;                      // public 派生，无需转换
-    // D&  dr = dynamic_cast<D&>(*bp);  // 失败（抛 bad_cast）：B 是 D 的私有基类，¶9.1 要求 public
-    ap = dynamic_cast<A*>(bp);        // 失败：bp 指向的不是 public 基类子对象，¶9.2 不适用
-    bp = dynamic_cast<B*>(ap);        // 失败：最派生对象 D 的 B 基类不是 public
-    ap = dynamic_cast<A*>(&d);        // 成功：¶4 向上转换
-    // bp = dynamic_cast<B*>(&d);     // 非良构：¶4 向上转换到不可访问的基类（编译期错误，不是运行期检查）
+  D  d;
+  B* bp = (B*)&d;                // C 风格转换可以无视私有继承
+  A* ap = &d;                    // public 派生，不需要转换
+  // D& dr = dynamic_cast<D&>(*bp);  // 失败，抛出 bad_cast
+  ap = dynamic_cast<A*>(bp);     // 失败：B 不是 D 的 public 基类
+  bp = dynamic_cast<B*>(ap);     // 失败：D 的 B 基类不是 public
+  ap = dynamic_cast<A*>(&d);     // 成功：¶4 向上转换
+  // bp = dynamic_cast<B*>(&d);  // 非良构：向上转换到私有基类
 }
 
-class E : public D, public B { };
-class F : public E, public D { };
+class E : public D, public B {};
+class F : public E, public D {};
 
 void h() {
-    F   f;
-    A*  ap  = &f;                     // 成功：A 是虚基类，F 中只有一个 A
-    D*  dp  = dynamic_cast<D*>(ap);   // 失败，得到空指针：F 有两个 D 子对象，¶9.1 要求唯一、¶9.2 要求无二义
-    // E*  ep  = (E*)ap;              // 非良构：不能从虚基类 static_cast 向下转换
-    E*  ep1 = dynamic_cast<E*>(ap);   // 成功：F 中只有一个 E
-    (void)dp; (void)ep1;
+  F  f;
+  A* ap  = &f;                   // 成功：A 是虚基类，F 里只有一个
+  D* dp  = dynamic_cast<D*>(ap); // 失败，空指针：F 里有两个 D
+  // E* ep = (E*)ap;             // 非良构：不能从虚基类向下转换
+  E* ep1 = dynamic_cast<E*>(ap); // 成功：F 里只有一个 E
+  (void)dp; (void)ep1;
 }
 
 int main() { g(); h(); }
 ```
 
-几个要点：
+从中可以读出三点：
 
-- 私有继承在运行期不可见：即使对象在内存中确实有 `B` 子对象，`dynamic_cast` 也不会经由私有继承关系转换。
-- 虚基类：`static_cast` 无法从虚基类向下转换（[[expr.static.cast#10]]），因为虚基类子对象的偏移在编译期未知；`dynamic_cast` 可以，因为它在运行期查询对象布局。这是 `dynamic_cast` 不可替代的场景之一。
-- 多个同类子对象：`F` 有两个 `D`，从 `A`（经虚继承共享的唯一子对象）出发无法确定是哪一个，所以失败。
+- 对象里确实有 `B` 子对象，但它经由私有继承得到，第 9 段的两步都不认，转换失败。向上转换到私有基类则在编译期就是错误，不会推迟到运行期。
+- 虚基类子对象相对于整个对象的偏移在编译期未知，所以 `static_cast` 和 C 风格转换都不能从虚基类向下转换（[[expr.static.cast#10]]）；`dynamic_cast` 在运行期查对象布局，可以做到。
+- `F` 有两个 `D` 子对象，从共享的唯一 `A` 出发不知道该选哪一个，9.1 和 9.2 两项都不满足，转换失败。
 
-## 构造与析构期间（注 1）
+本机 Clang 编译这段代码时，对 `E` 和 `F` 各给一条 direct base is inaccessible due to ambiguity 警告，这正是重复子对象的提示。
 
-注 1 指向 [[class.cdtor#6]]：在构造函数或析构函数中（包括其调用的函数），如果 `dynamic_cast` 的操作数指向正在构造或析构的对象，该对象被视为一个最派生对象，其类型是当前构造函数或析构函数所属的类。于是在 `B` 的构造函数里，即使最终对象是 `D`，`dynamic_cast<D*>(this)` 也会失败。另外，如果操作数的静态类型既不是当前类也不是其基类，行为未定义。
+## 构造与析构期间
+
+第 10 段之后的注 1 指向 [[class.cdtor#6]]：在构造函数或析构函数里（包括它们直接或间接调用的函数），如果操作数指向正在构造或析构的对象，这个对象被当作一个最派生对象，类型就是当前构造函数或析构函数所属的类。
 
 ```cpp run title="dyn-ctor.cpp" ok
 struct V { virtual ~V() = default; };
@@ -228,23 +256,25 @@ struct B : V { B(); bool saw_d = true; };
 struct D : B {};
 
 B::B() {
-    V* v = this;
-    saw_d = dynamic_cast<D*>(v) != nullptr;   // 构造 B 期间，对象被视为最派生类型 B：失败
+  V* v = this;
+  saw_d = dynamic_cast<D*>(v) != nullptr;  // 失败：此时对象被当作 B
 }
 
 int main() {
-    D d;
-    V* v = &d;
-    bool after = dynamic_cast<D*>(v) != nullptr;   // 构造完成后：成功
-    return (!d.saw_d && after) ? 0 : 1;
+  D d;
+  V* v = &d;
+  bool after = dynamic_cast<D*>(v) != nullptr;  // 构造完成后：成功
+  return !d.saw_d && after ? 0 : 1;
 }
 ```
 
-这与虚函数在构造期间按当前类分派（[[class.cdtor#4]]）是同一个原理：派生类部分还没有构造，任何机制都不应访问到它。实现上，构造 `B` 期间对象的 vptr 指向的就是 `B` 的虚表（或构造虚表）。
+这和构造期间虚函数按当前类分派（[[class.cdtor#4]]）是同一个道理：派生类的部分还没有构造，不能让任何机制访问到它。实现上，构造 `B` 期间对象的虚表指针指向的就是 `B` 的虚表。
+
+[[class.cdtor#6]] 还规定，如果操作数指向正在构造的对象，而它的静态类型既不是当前类也不是当前类的基类，行为未定义。
 
 ## 常量求值
 
-C++20 起（[[P1327R1]]），`dynamic_cast` 和多态 `typeid` 可以出现在常量表达式中。常量求值器知道每个对象的确切类型，所以检查是精确的：
+C++20 起（[[P1327R1]]），`dynamic_cast` 可以出现在常量表达式中。常量求值器知道每个对象的确切类型，检查是精确的：
 
 ```cpp run title="dyn-constexpr.cpp" ok
 struct B { virtual ~B() = default; };
@@ -252,81 +282,96 @@ struct D : B {};
 struct E : B {};
 
 constexpr bool test() {
-    D d;
-    B* p = &d;
-    return dynamic_cast<D*>(p) != nullptr && dynamic_cast<E*>(p) == nullptr;
+  D d;
+  B* p = &d;
+  return dynamic_cast<D*>(p) != nullptr
+      && dynamic_cast<E*>(p) == nullptr;
 }
 static_assert(test());
 
 int main() {}
 ```
 
-常量求值中失败的引用转换会抛 `std::bad_cast`。C++23 及之前，常量求值中抛异常直接使表达式不是常量表达式；C++26 {{c++26}} 允许在常量求值中抛出并捕获异常，只是当异常类型的定义不可达时（例如没有包含 `<typeinfo>`），这样的 `dynamic_cast` 不是核心常量表达式（[[expr.const.core#2]]，列表项 2.31）。另外，对动态类型为 constexpr 未知的对象（例如函数形参引用的对象）做 `dynamic_cast` 也不是核心常量表达式（列表项 2.30）。
+有两种情况不是核心常量表达式（[[expr.const.core#2]]）：
+
+- ¶2.30 操作数引用的对象的动态类型在编译期未知，例如函数形参引用的对象；
+- ¶2.31 转换失败要抛出 `std::bad_cast`，而这里看不到这个异常类型的定义（例如没有包含 `<typeinfo>`）。C++26 允许在常量求值中抛出和捕获异常，所以看得到定义时，失败的引用转换可以在编译期被捕获。
 
 ## 实现视角
 
 !!! impl "Itanium C++ ABI 中的 dynamic_cast"
-    - 向上转换（¶4）：编译期计算偏移，与 `static_cast` 生成相同的代码（虚基类则从虚表读取偏移）。不需要 RTTI。
-    - 转换到 `void*`（¶8）：从虚表的 *offset-to-top* 槽（vptr 前第二个字）读出当前子对象到最派生对象起点的偏移，加到指针上。只需要两次加载，也不需要 RTTI。本机 Clang 在 `-fno-rtti` 下仍接受 `dynamic_cast<void*>`，但拒绝其他需要运行期检查的 `dynamic_cast`（"use of dynamic_cast requires -frtti"）。
-    - 向下/交叉转换：调用运行时库函数 `__dynamic_cast(const void* src, const __class_type_info* src_type, const __class_type_info* dst_type, ptrdiff_t hint)`（libstdc++ 的 libsupc++、LLVM 的 libc++abi 都提供）。它先用 offset-to-top 找到最派生对象，再从最派生对象的 `type_info`（`__si_class_type_info` 或 `__vmi_class_type_info`）开始遍历整棵继承图，寻找 `dst_type` 的 public 子对象，并检查唯一性与可访问性。`hint` 是编译器静态计算出的提示（例如 `src_type` 是 `dst_type` 的唯一 public 非虚基类，偏移为 N），用于加速常见情况。
-    - 类型比较：遍历中需要比较 `type_info`。在类型名唯一的平台上比较指针即可；在某些平台/动态库配置下需要比较类型名字符串，代价显著更高。
+    GCC 和 Clang 在 Linux、macOS 上使用的 Itanium C++ ABI 这样实现各种情形：
+
+    - 向上转换：编译期算出偏移，生成的代码与 `static_cast` 相同；经过虚基类时从虚表读偏移。不需要 RTTI。
+    - 转换到 `void*`：虚表里有一个 offset-to-top 槽，记录当前子对象到最派生对象起点的距离，加上它即可。也不需要 RTTI。本机 Clang 在 `-fno-rtti` 下仍接受 `dynamic_cast<void*>`，但拒绝其他需要运行期检查的 `dynamic_cast`。
+    - 向下转换和交叉转换：调用运行时库函数 `__dynamic_cast`。它先用 offset-to-top 找到最派生对象，再从最派生对象的 `type_info` 出发遍历整个继承图，找 `C` 的 public 子对象并检查唯一性。编译器会额外传入一个静态算出的提示，用来加速常见情况。
+    - 遍历中要比较 `type_info`。类型名在程序中唯一时比较指针即可；某些平台和动态库配置下要比较名字字符串，代价更高。
 
 !!! impl "final 类的快速路径"
-    如果目标类是 `final` 的，最派生对象只可能是它本身，检查就简化为比较对象的 vptr 是否等于 `C` 的虚表地址。本机 Clang 以 `--target=x86_64-linux-gnu -O2` 编译 `dynamic_cast<D*>(b)`（`D` 为 `final`）时，生成的就是一次 vptr 比较，不调用 `__dynamic_cast`；而以默认的 macOS 目标编译时仍调用 `__dynamic_cast`。能否使用这条快速路径取决于虚表在整个程序中是否唯一，因此与目标平台和链接模型有关。
+    目标类是 `final` 时，最派生对象只能是它本身，检查可以简化为比较对象的虚表指针是否等于 `C` 的虚表地址。本机 Clang 以 `--target=x86_64-linux-gnu -O2` 编译 `dynamic_cast<D*>(b)`（`D` 为 `final`）时生成的就是一次指针比较；以默认的 macOS 目标编译时仍调用 `__dynamic_cast`。能否这样做取决于虚表在整个程序中是否唯一，所以与目标平台和链接模型有关。
 
-!!! impl "代价与替代"
-    非 final 的 `dynamic_cast` 要调用运行时库并遍历继承图，通常比一次虚函数调用贵得多，且代价随继承图的复杂度增长。性能敏感的代码常用以下替代：在基类里放一个虚函数 `kind()` 或枚举标签再 `static_cast`；用 `std::variant` 代替继承体系；LLVM 项目自己的 `isa<>`/`dyn_cast<>` 就采用手写标签加 `static_cast` 的模式，LLVM 本身以 `-fno-rtti` 编译。
+非 final 的 `dynamic_cast` 要调用运行时库并遍历继承图，通常比一次虚函数调用贵得多。性能敏感的代码常用替代方案：在基类里放一个返回类型标签的虚函数，再 `static_cast`；或者用 `std::variant` 代替继承体系。LLVM 自己的 `isa<>`、`dyn_cast<>` 就是手写标签加 `static_cast`，LLVM 本身以 `-fno-rtti` 编译。
 
 ## 历史与演进
 
 !!! history
     - C++98：`dynamic_cast` 与 RTTI 一同标准化。
-    - C++11：增加右值引用目标类型（结果为亡值）。
-    - C++20：可用于常量表达式（[[P1327R1]]）。
+    - C++11：目标类型可以是右值引用，结果是亡值。
+    - C++20：可以用在常量表达式中（[[P1327R1]]）。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "`dynamic_cast` 不能检测悬垂指针"
-    ¶7：对已析构对象使用 `dynamic_cast` 是 UB，不会返回空指针。
+!!! pitfall "用 dynamic_cast 检查指针是否还有效"
+    对已经析构的对象做 `dynamic_cast` 是未定义行为（¶7），它不会返回空指针，而是读取已经释放的内存。
 
-!!! pitfall "私有/保护继承导致运行期失败"
-    即使对象确实有那个基类子对象，非 public 继承路径会让运行期检查失败（或在向上转换时编译失败）。
+!!! pitfall "对象里有那个基类，转换就一定成功"
+    私有或保护继承的路径在运行期检查中不算数，转换会失败；向上转换到这样的基类则直接编译失败。
 
-!!! pitfall "构造/析构函数中向下转换总是失败"
-    在基类构造函数中 `dynamic_cast<Derived*>(this)` 总是得到空指针。这不是 bug，而是规则如此。
+!!! pitfall "基类构造函数里转换到派生类"
+    在基类的构造函数或析构函数里，`dynamic_cast<Derived*>(this)` 总是得到空指针。这是规则规定的行为，不是编译器的问题。
 
-!!! pitfall "跨动态库的 RTTI"
-    如果同一个类在两个动态库中各有一份 `type_info`（例如符号可见性设置为隐藏），某些平台上 `dynamic_cast` 会因类型比较失败而返回空指针。这超出了标准的范围（标准不涉及动态库），但在实践中是 `dynamic_cast` 意外失败的常见原因。
+!!! pitfall "跨动态库的 dynamic_cast 意外失败"
+    同一个类在两个动态库里各有一份 `type_info`（例如符号可见性设成了隐藏）时，某些平台上类型比较会失败，`dynamic_cast` 返回空指针。标准不涉及动态库，但这是实践中 `dynamic_cast` 意外失败的常见原因。
 
 ## 思考题
 
 !!! question "思考题 1"
-    `struct L { virtual ~L(); }; struct R { virtual ~R(); }; struct X : L, R {}; struct Y : X, R {};`（`Y` 有两个 `R` 子对象），`L* pl = static_cast<X*>(&y);` 之后 `dynamic_cast<R*>(pl)` 结果如何？
+    ```cpp
+    struct L { virtual ~L(); };
+    struct R { virtual ~R(); };
+    struct X : L, R {};
+    struct Y : X, R {};   // Y 里有两个 R
+    ```
+    `Y y; L* pl = static_cast<X*>(&y);` 之后，`dynamic_cast<R*>(pl)` 的结果是什么？
 
 <details markdown="1">
 <summary>答案</summary>
 
-¶9.1：`pl` 指向的 `L` 子对象不是任何 `R` 的基类子对象（`L` 与 `R` 无继承关系），不适用。¶9.2：最派生对象类型 `Y` 有两个 `R` 基类子对象（一个经 `X`，一个直接），`R` 是二义基类，不适用。检查失败，结果为空指针。如果想取得经 `X` 的那个 `R`，先 `dynamic_cast<X*>(pl)`（¶9.1 成功）再隐式向上转换。
+¶9.1 不适用：`pl` 指向的 `L` 子对象不是任何 `R` 的一部分，`L` 和 `R` 没有继承关系。¶9.2 也不适用：最派生对象 `Y` 有两个 `R` 子对象（一个经过 `X`，一个直接继承），`R` 是有二义的基类。检查失败，结果是空指针。
+
+想拿到经过 `X` 的那个 `R`，先 `dynamic_cast<X*>(pl)`（¶9.1 成功），再隐式向上转换到 `R*`。
 </details>
 
 !!! question "思考题 2"
-    为什么 `dynamic_cast<void*>(p)` 要求 `*p` 是多态类型，而 `static_cast<void*>(p)` 不要求？二者结果何时不同？
+    为什么 `dynamic_cast<void*>(p)` 要求 `*p` 是多态类型，而 `static_cast<void*>(p)` 不要求？两者的结果什么时候不同？
 
 <details markdown="1">
 <summary>答案</summary>
 
-`dynamic_cast<void*>` 要找的是最派生对象的起始地址，这需要运行期知道 `*p` 是哪个更大对象的一部分，只有多态对象（通过 vptr 和 offset-to-top）携带这一信息。`static_cast<void*>(p)` 只是把 `p` 本身的地址值换个类型，不关心更大的对象。当 `*p` 是某个最派生对象的非首个基类子对象（多重继承中第二个及以后的基类）时，二者的值不同。
+`dynamic_cast<void*>` 要找的是最派生对象的起点，必须在运行期知道 `*p` 属于哪个更大的对象，只有多态对象通过虚表携带这一信息。`static_cast<void*>(p)` 只改变指针的类型，不关心更大的对象。
+
+`*p` 是某个对象中不在起始位置的基类子对象时，比如多重继承中的第二个基类，两者的值不同。
 </details>
 
 ## 小结
 
 !!! summary
-    | 情形 | 条款 | 需要多态？ | 需要 RTTI？ | 失败可能？ |
-    |---|---|---|---|---|
-    | 同类型 | ¶3 | 否 | 否 | 否 |
-    | 向上转换到可访问、无二义的基类 | ¶4 | 否 | 否 | 否（不可访问/二义则编译期非良构） |
-    | 转换到 `void*` | ¶8 | 是 | 否（Itanium 只读 offset-to-top） | 否 |
-    | 向下转换 | ¶9.1 | 是 | 是 | 是 |
-    | 交叉转换 | ¶9.2 | 是 | 是 | 是 |
-    | 失败 | ¶10 | | | 指针 ⇒ 空指针；引用 ⇒ `std::bad_cast` |
-    | 操作数不指向生命周期内对象 | ¶7 | | | UB |
+    | 情形 | 条文 | 需要多态 | 可能失败 |
+    |---|---|---|---|
+    | 同类型 | ¶3 | 否 | 否 |
+    | 向上转换 | ¶4 | 否 | 否；基类不可访问或有二义时编译期非良构 |
+    | 转换到 `void*` | ¶8 | 是 | 否 |
+    | 向下转换 | ¶9.1 | 是 | 是 |
+    | 交叉转换 | ¶9.2 | 是 | 是 |
+    | 失败 | ¶10 | | 指针得到空指针，引用抛出 `std::bad_cast` |
+    | 操作数不指向活着的对象 | ¶7 | | 未定义行为 |

@@ -1,116 +1,63 @@
 ---
 title: static_cast
-summary: static_cast 的全部合法转换，按标准顺序：引用向下转换、左值到右值引用（std::move 的本质）、转换到 void、能隐式转换或能直接初始化的一切，以及标准转换的逆（有作用域枚举到整数、整数/浮点到枚举、浮点之间、指针向下转换、成员指针向上转换、void* 到 T* 与指针可互转规则）；每种情形的 UB 边界
-status: draft
+summary: static_cast 能做哪些转换：凡是能隐式转换或能直接初始化的都能做，此外还能做大多数标准转换的逆（向下转换、void* 到 T*、整数到枚举等），以及每一种情形在什么时候是未定义行为。
+status: done
 papers: P0137R1, P0960R3, P2738R1
 related: expr.cast, expr.dynamic.cast, expr.reinterpret.cast, expr.const.cast, conv, over.best.ics, dcl.init, dcl.init.ref, dcl.enum, conv.ptr, conv.mem, basic.compound, topics/casts, topics/value-categories
 tags: 类型转换, 继承, 枚举, 指针, 移动语义, UB
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-`static_cast` 负责语义上说得通的转换：凡是语言认为合理、但可能需要程序员明确写出的转换，都归它管。它的规则可以粗略概括为三句话：
+!!! tldr
+    - 能隐式转换的，或者能用 `T t(e);` 直接初始化的，`static_cast<T>(e)` 都能做，包括调用 `explicit` 构造函数和窄化转换。
+    - 它还能做大多数标准转换的逆：基类指针到派生类指针、`void*` 到 `T*`、整数到枚举、派生类成员指针到基类成员指针。这些反向转换不做任何检查，类型不对就是未定义行为。
+    - `std::move(x)` 就是 `static_cast<T&&>(x)`：它只改变值类别，本身不移动任何东西。
+    - 它不能去掉 `const`、不能在无关的指针类型之间转换、不能在指针和整数之间转换，也不能经过虚基类向下转换。
+    - 经 `void*` 中转的 `static_cast` 和 `reinterpret_cast` 完全等价，并不能绕过严格别名规则。
 
-1. 能隐式完成的转换（以及能直接初始化完成的转换），`static_cast` 都能做（¶5）；
-2. 大多数标准转换的逆，`static_cast` 也能做（¶7–¶12），比如基类指针 → 派生类指针、`void*` → `T*`、`int` → 枚举；
-3. 它不做的事：去掉 `const`（交给 `const_cast`）、在无关指针类型之间转换、指针 ↔ 整数（交给 `reinterpret_cast`）、运行期检查（交给 `dynamic_cast`）。
+## 一个关键字，两个方向
 
-第二类转换是逆向的，标准只能信任程序员：**向下转换不做任何检查**，如果对象实际上不是那个派生类，就是 UB。
+```cpp run title="static-cast-overview.cpp" ok
+struct Base { virtual ~Base() = default; };
+struct Derived : Base { int extra = 42; };
+enum class Color { red, green };
 
-本节的结构很规整：¶1 定义结果的值类别，¶2–¶5 按顺序列出若干优先的情形，¶6 说"否则"，然后 ¶7–¶12 列出剩下的允许转换，并规定除此之外一概不允许。
+int main() {
+  double d = 3.9;
+  int i = static_cast<int>(d);              // 截断为 3
+  int c = static_cast<int>(Color::green);   // 1
+  Derived obj;
+  Base* pb = &obj;                          // 隐式向上转换
+  auto* pd = static_cast<Derived*>(pb);     // 显式向下转换，不检查
+  return i == 3 && c == 1 && pd->extra == 42 ? 0 : 1;
+}
+```
+
+前两次转换是正方向的：`double` 到 `int` 本来就能隐式发生，写出 `static_cast` 只是表明意图。第三次是反方向的：派生类指针到基类指针是隐式转换，`static_cast` 允许把它倒过来，但不检查 `*pb` 是否真的是 `Derived`。
+
+整节的结构就是这两个方向。第 2–5 段处理正方向和几种特殊情形，按先后顺序匹配；第 6 段说其余情况下只允许第 7–12 段列出的几种反向转换，除此之外都不行。
 
 ## 结果的值类别（¶1）
 
-¶1：`static_cast<T>(v)` 的结果是把 `v` 转换为 `T`。值类别只由 `T` 决定：
+¶1 结果的值类别只由 `T` 决定：
 
 | `T` | 结果 |
 |---|---|
-| 左值引用；或函数的右值引用 | lvalue |
-| 对象的右值引用 | xvalue |
-| 非引用 | prvalue |
+| 左值引用，或函数的右值引用 | 左值 |
+| 对象的右值引用 | 亡值（xvalue） |
+| 非引用类型 | prvalue |
 
-这条与 [[expr.call#15]]（函数调用按返回类型）、[[expr.reinterpret.cast#1]]、[[expr.cast#1]] 完全平行。`std::move(x)` 的实现就是 `static_cast<std::remove_reference_t<T>&&>(x)`，即一个结果为亡值的 `static_cast`。
-
-## 引用的向下转换（¶2）
-
-¶2：类型为 *cv1* `B` 的左值（`B` 是类类型）可以转换为"*cv2* `D` 的引用"，其中 `D` 是从 `B` 派生的完整类，且 *cv2* 不少于 *cv1*。限制如下：
-
-- 如果 `B` 是 `D` 的虚基类，或虚基类的基类，非良构；
-- 如果不存在从"指向 `D` 的指针"到"指向 `B` 的指针"的有效标准转换（[[conv.ptr]]），即 `B` 是 `D` 的不可访问或二义基类，非良构；
-- 类型为 *cv1* `B` 的 xvalue 可以按同样的限制转换为"*cv2* `D` 的右值引用"。
-
-如果 `B` 对象确实是某个 `D` 对象的基类子对象，结果指代那个外围的 `D` 对象；**否则行为未定义**。
-
-```cpp run title="ref-downcast.cpp" ok
-struct B {};
-struct D : public B { int extra = 42; };
-
-int main() {
-    D d;
-    B& br = d;
-    D& dr = static_cast<D&>(br);   // OK：br 确实是 D 的基类子对象
-    return dr.extra == 42 ? 0 : 1;
-}
-```
-
-```cpp run title="ref-downcast-ub.cpp" ub
-struct B {};
-struct D : B { int extra = 42; };
-
-int main() {
-    B b;
-    D& dr = static_cast<D&>(b);    // UB: b 不是任何 D 对象的子对象
-    return dr.extra;
-}
-```
-
-不能经虚基类向下转换，是因为虚基类子对象在最派生对象中的位置取决于最派生类型：`struct D : virtual B` 中，`B` 子对象相对 `D` 的偏移在 `D` 作为完整对象时是一个值，在 `D` 作为某个 `E` 的基类子对象时可能是另一个值。`static_cast` 只做编译期偏移计算，无从得知。要经虚基类向下转换，必须用 [[expr.dynamic.cast]]。
-
-## 左值到右值引用（¶3）
-
-¶3：如果 `T2` 与 `T1` 引用兼容（reference-compatible，[[dcl.init.ref]]），即 `T2` 是 `T1` 本身或其基类、cv 不少于 `T1`，那么类型为 `T1` 的左值可以转换为"`T2` 的右值引用"。
-
-- 如果不是位域，结果指代该对象或其指定的基类子对象；
-- 如果是位域，先对位域施行左值到右值转换，然后把得到的 prvalue 作为本节其余部分的操作数（于是最终绑定到一个临时量）；
-- 如果 `T2` 是 `T1` 的不可访问或二义基类，"需要这种转换的程序"非良构。
-
-这就是 `std::move` 的语言基础：**它不移动任何东西，只是把左值标记为亡值**，让重载决议选中移动构造函数/移动赋值运算符。
-
-```cpp run title="lvalue-to-xvalue.cpp" ok
-#include <string>
-#include <type_traits>
-
-struct B {};
-struct D : B {};
-struct BF { int b : 3; };
-
-int main() {
-    std::string s = "hello";
-    std::string t = static_cast<std::string&&>(s);   // 等同于 std::move(s)：调用移动构造
-    D d;
-    B&& br = static_cast<B&&>(d);                     // 指代 d 的 B 子对象
-    BF bf{1};
-    int&& r = static_cast<int&&>(bf.b);               // 位域：先读值，再绑定到临时量
-    static_assert(std::is_same_v<decltype(static_cast<int&&>(bf.b)), int&&>);
-    (void)br;
-    return (t == "hello" && r == 1) ? 0 : 1;
-}
-```
-
-## 转换到 `void`（¶4）
-
-¶4：任何表达式都可以显式转换为 cv `void`，此时操作数是一个弃值表达式（[[expr.context]]）。注 1：这样的 `static_cast` 是 `void` 类型的 prvalue，没有结果。注 2：如果值位于临时对象中，该对象的析构函数照常在通常的时间执行。
-
-它的用途是明确表示有意丢弃这个值，从而压制 `[[nodiscard]]` 和未使用变量之类的警告；在 `,` 运算符中，它还能阻止选中用户重载的 `operator,`（`(void)a, b`）。
+这与函数调用的规则（[[expr.call#15]]）一致：返回 `T&&` 的函数调用也是亡值。
 
 ## 能初始化就能转换（¶5）
 
-¶5 是 `static_cast` 适用面最宽的一条。"否则"（即不属于 ¶2–¶4）时，只要满足以下条件之一，表达式 `E` 就能显式转换为类型 `T`：
+¶5 是适用面最宽的一条。不属于 ¶2–¶4 时，只要满足下面任何一条，表达式 `E` 就能转换为 `T`：
 
 1. 存在从 `E` 到 `T` 的隐式转换序列（[[over.best.ics]]）；
-2. 用 `E` 直接初始化 `T` 类型的对象或引用时，重载决议能找到至少一个可行函数（[[over.match.viable]]），这样就把 `explicit` 构造函数和 `explicit` 转换函数纳入了进来；
-3. `T` 是聚合类型，有第一个元素 `x`，且存在从 `E` 到 `x` 的类型的隐式转换序列 {{c++20}}（配合圆括号聚合初始化 [[P0960R3]]）。
+2. 用 `E` 直接初始化一个 `T` 类型的对象或引用时，重载决议能找到至少一个可行函数（[[over.match.viable]]），这样 `explicit` 构造函数和 `explicit` 转换函数也算在内；
+3. {{c++20}} `T` 是聚合类型，存在从 `E` 到它第一个元素的类型的隐式转换序列。这是为了配合圆括号初始化聚合（[[P0960R3]]）。
 
-效果：如果 `T` 是引用类型，如同声明 `T t(E);` 并使用 `t`；否则结果对象从 `E` 直接初始化。
+`T` 是引用类型时，效果如同声明 `T t(E);` 再使用 `t`；否则结果对象从 `E` 直接初始化。
 
 ```cpp run title="static-cast-init.cpp" ok
 struct Ex { explicit Ex(int) {} };
@@ -118,94 +65,120 @@ struct Conv { explicit operator int() const { return 7; } };
 struct Agg { int a; double b; };
 
 int main() {
-    double d = static_cast<double>(3);     // 隐式转换（int → double）
-    long l = static_cast<long>(3.9);       // 隐式转换（浮点 → 整数，截断）
-    Ex e = static_cast<Ex>(1);             // explicit 构造函数：直接初始化可行
-    int i = static_cast<int>(Conv{});      // explicit 转换函数：直接初始化可行
-    Agg g = static_cast<Agg>(1);           // C++20：聚合，以 1 初始化第一个元素 a
-    const int& cr = static_cast<const int&>(42);   // 引用：如同 const int& t(42);
-    (void)e;
-    return (d == 3.0 && l == 3 && i == 7 && g.a == 1 && cr == 42) ? 0 : 1;
+  double d = static_cast<double>(3);    // 隐式转换
+  long l = static_cast<long>(3.9);      // 浮点到整数，截断
+  Ex e = static_cast<Ex>(1);            // explicit 构造函数
+  int i = static_cast<int>(Conv{});     // explicit 转换函数
+  Agg g = static_cast<Agg>(1);          // C++20：初始化第一个元素 a
+  const int& cr = static_cast<const int&>(42);  // 如同 const int& t(42);
+  (void)e;
+  return d == 3.0 && l == 3 && i == 7 && g.a == 1 && cr == 42 ? 0 : 1;
 }
 ```
 
-注 3：转换到不可访问或二义的基类时非良构。注 4：如果 `T` 是"`U` 的未知边界数组"，这一直接初始化把表达式的类型定为 `U[1]`。
+窄化转换只在列表初始化中被禁止（[[dcl.init.list]]）。`static_cast<int>(3.9)` 走的是直接初始化，所以允许。
+
+注 3 提醒，把类类型的表达式转换到不可访问或有二义的基类是非良构的。
 
 !!! lawyer "Clang 与注 4"
-    按注 4，`decltype(static_cast<int[]>(1))` 应为 `int[1]`。本机 Clang 给出的是 `int[]`（`static_assert(std::is_same_v<decltype(static_cast<int[]>(1)), int[1]>)` 失败）。注 4 本身不具规范效力，但它描述的是 [[dcl.init]] 中以圆括号初始化未知边界数组时确定边界这一规则的推论，所以这是 Clang 与标准的一个分歧。
+    注 4 说，`T` 是未知边界数组 `U[]` 时，这次直接初始化把表达式的类型定为 `U[1]`。所以 `decltype(static_cast<int[]>(1))` 应当是 `int[1]`。本机 Clang 23 给出的是 `int[]`，与标准不一致。
 
-¶5 也说明了 `static_cast` 为什么能做窄化：窄化只在列表初始化中被禁止，`static_cast<int>(3.9)` 走的是直接初始化，所以允许。
+## 丢弃一个值（¶4）
 
-## 其余的转换（¶6）
+¶4 任何表达式都可以转换为 `void`，这时操作数是一个**弃值表达式**（discarded-value expression，计算出来但不使用其值的表达式，[[expr.context]]）。
 
-¶6："否则"，对操作数施行左值到右值、数组到指针、函数到指针转换，可以用 `static_cast` 进行的转换列举如下（¶7–¶12），**除此之外的转换都不能用 `static_cast` 完成**。这些基本都是某个标准转换的逆向：
-
-| 条款 | 转换 | 对应的正向隐式转换 |
-|---|---|---|
-| ¶7 | 有作用域枚举 → 整型 / 浮点 | （无隐式转换；有作用域枚举故意不隐式转换） |
-| ¶8 | 整型/枚举/浮点 → 枚举 | 无作用域枚举 → 整型（整型提升） |
-| ¶9 | 浮点 → 任意其他浮点 | 浮点转换（[[conv.double]]，对扩展浮点类型只允许等级不降） |
-| ¶10 | 指向基类的指针 → 指向派生类的指针 | 派生类指针 → 基类指针（[[conv.ptr]]） |
-| ¶11 | 派生类成员指针 → 基类成员指针 | 基类成员指针 → 派生类成员指针（[[conv.mem]]） |
-| ¶12 | `void*` → `T*` | `T*` → `void*`（[[conv.ptr]]） |
-
-## 有作用域枚举 → 数值（¶7）
-
-¶7：有作用域枚举的值可以显式转换为整型，结果等同于先转换到枚举的底层类型，再转换到目标类型。也可以转换为浮点类型，结果等同于把原值转换为该浮点类型。
-
-```cpp run title="scoped-enum-out.cpp" ok
-enum class Color : unsigned char { red = 1, big = 200 };
+```cpp run title="cast-to-void.cpp" ok
+[[nodiscard]] int compute() { return 42; }
 
 int main() {
-    int a = static_cast<int>(Color::big);            // 200
-    signed char b = static_cast<signed char>(Color::big);   // 先到 unsigned char 200，再转 signed char：模 2^8，-56
-    double c = static_cast<double>(Color::red);      // 1.0
-    return (a == 200 && b == -56 && c == 1.0) ? 0 : 1;
+  static_cast<void>(compute());   // 明确丢弃，不触发 nodiscard 警告
+  int unused = 0;
+  (void)unused;                   // C 风格写法，效果相同
 }
 ```
 
-（C++20 起有符号整数采用二进制补码，整数转换取模 2^N 的结果是确定的，见 [[conv.integral]]。）
+注 1 说明这样的转换没有结果，因为它是一个 `void` 类型的 prvalue。注 2 说明，如果值在一个临时对象里，这个临时对象照常在完整表达式结束时析构。
 
-## 数值 → 枚举（¶8）
+## `std::move` 的本质（¶3）
 
-¶8：整型或枚举类型的值可以显式转换为完整的枚举类型。
+¶3 类型为 `T1` 的左值可以转换为 `T2&&`，条件是 `T2` 与 `T1` **引用兼容**（reference-compatible，[[dcl.init.ref]]），大致是说 `T2` 是 `T1` 本身或它的基类，cv 限定不少于 `T1`。结果指代这个对象，或者它的那个基类子对象。`T2` 是不可访问或有二义的基类时，非良构。
 
-- 枚举有固定底层类型（有作用域枚举总是有；无作用域枚举写了 `: type` 才有）：值先经整型提升或整型转换变为底层类型，再变为枚举类型。这种转换总是有定义的，任何底层类型的值都是合法的枚举值。
-- 枚举没有固定底层类型：如果原值在枚举的**值域**（range of the enumeration values，[[dcl.enum]]）之内，值不变；**否则行为未定义**。
-- 浮点值也可以转换为枚举：等同于先把原值转换为枚举的底层类型（[[conv.fpint]]，截断；超出范围是 UB），再转换为枚举。
+```cpp run title="lvalue-to-xvalue.cpp" ok
+#include <string>
 
-无固定底层类型的枚举，其值域是能表示所有枚举符的最小位域的范围：`enum E { a, b, c };` 的枚举符是 0–2，需要 2 位，值域是 0–3。所以 `static_cast<E>(3)` 合法，`static_cast<E>(4)` 是 UB。
+struct B {};
+struct D : B {};
+struct BF { int b : 3; };
 
-```cpp title="enum-range.cpp" error
-enum E { a, b, c };                          // 无固定底层类型，值域 [0, 3]
-enum F : unsigned char { x };                // 固定底层类型
-
-constexpr E e1 = static_cast<E>(3);          // OK：在值域内（虽然不等于任何枚举符）
-constexpr E e2 = static_cast<E>(4);          // error: UB，常量求值中必须诊断
-constexpr F f1 = static_cast<F>(255);        // OK：固定底层类型，任何 unsigned char 值都合法
-constexpr F f2 = static_cast<F>(300);        // OK：300 先整型转换为 unsigned char（44）
+int main() {
+  std::string s = "hello";
+  std::string t = static_cast<std::string&&>(s);  // 等同于 std::move(s)
+  D d;
+  B&& br = static_cast<B&&>(d);      // 指代 d 的 B 子对象
+  BF bf{1};
+  int&& r = static_cast<int&&>(bf.b);  // 位域：先读出值，绑定到临时量
+  (void)br;
+  return t == "hello" && r == 1 ? 0 : 1;
+}
 ```
 
-Clang 在常量求值中会给出 "integer value 4 is outside the valid range of values [0, 3] for the enumeration type 'E'"。运行期则不检查（UBSan 的 `-fsanitize=enum` 只检查读取枚举对象时的值）。
+`std::move(x)` 的实现就是 `static_cast<std::remove_reference_t<T>&&>(x)`。它把左值变成亡值，让重载决议选中移动构造函数或移动赋值运算符；真正的移动发生在那个函数里。
 
-无固定底层类型的枚举这样规定，是因为编译器可以利用值域做优化，例如 `switch` 覆盖了整个值域后省略默认分支，或者用更窄的类型存储。有固定底层类型的枚举则被视为带有具名常量的整数类型，常用作强类型的 ID 或位标志，必须能容纳任何值。
+引用不能绑定到位域，所以操作数是位域时，先把它的值读出来，用得到的 prvalue 继续本节其余的规则，最终绑定到一个临时量。
 
-## 浮点之间（¶9）
+## 反方向的转换（¶6）
 
-¶9：浮点类型的 prvalue 可以显式转换为任何其他浮点类型：
+¶6 不属于 ¶2–¶5 时，先对操作数做左值到右值、数组到指针、函数到指针转换，然后只允许 ¶7–¶12 列出的转换。这些基本上都是某个隐式转换的逆：
 
-- 如果源值能在目标类型中精确表示，结果就是那个精确值；
-- 如果源值介于目标类型的两个相邻值之间，结果是二者之一，选哪个由实现定义（通常按当前舍入模式）；
-- 否则行为未定义（源值超出目标类型的范围，例如把 `1e300` 转换为 `float`）。
+| 条文 | 转换 | 对应的正方向 |
+|---|---|---|
+| ¶7 | 有作用域枚举到整数、浮点 | 无，有作用域枚举故意不隐式转换 |
+| ¶8 | 整数、枚举、浮点到枚举 | 无作用域枚举到整数 |
+| ¶9 | 浮点到任意其他浮点 | 浮点转换（[[conv.double]]） |
+| ¶10 | 基类指针到派生类指针 | 派生类指针到基类指针（[[conv.ptr]]） |
+| ¶11 | 派生类成员指针到基类成员指针 | 基类成员指针到派生类成员指针（[[conv.mem]]） |
+| ¶12 | `void*` 到 `T*` | `T*` 到 `void*`（[[conv.ptr]]） |
 
-这一条之所以单独列出，是因为 C++23 引入了扩展浮点类型（`std::float16_t`、`std::bfloat16_t` 等，[[basic.extended.fp]]），它们之间的隐式转换只允许等级不降（[[conv.double]]）。`double` → `std::float16_t` 不能隐式进行，必须用 `static_cast`，依据的就是这条规则。
+¶2 处理引用的向下转换，与 ¶10 的指针版本规则相同，下面放在一起讲。
 
-!!! lawyer "IEEE 754 下的超出范围"
-    如果目标类型能表示无穷大（IEEE 754，`std::numeric_limits<float>::has_infinity`），那么 `+inf` 也是 `float` 的一个值，`1e300` 就落在 `FLT_MAX` 与 `+inf` 这两个相邻值之间，按第二条属于实现定义的选择，而不是 UB。主流实现正是这样处理的：本机 Clang 在常量求值中接受 `constexpr float f = static_cast<float>(1e300);` 并得到 `+inf`。对没有无穷大的浮点格式，第三条的 UB 才真正适用。
+## 向下转换（¶2、¶10）
 
-## 指针的向下转换（¶10）
+¶10 类型为指向 *cv1* `B` 的指针可以转换为指向 *cv2* `D` 的指针，其中 `D` 是从 `B` 派生的完整类，*cv2* 不少于 *cv1*。空指针转换为空指针。如果 `*p` 确实是某个 `D` 对象的基类子对象，结果指向这个外围的 `D` 对象；否则行为未定义。
 
-¶10：类型为"指向 *cv1* `B` 的指针"的 prvalue（`B` 是类类型）可以转换为"指向 *cv2* `D` 的指针"，`D` 是从 `B` 派生的完整类，*cv2* 不少于 *cv1*。限制与 ¶2 相同：虚基类（或虚基类的基类）非良构；不可访问或二义非良构。空指针值转换为目标类型的空指针值。如果 `B` 对象确实是 `D` 对象的基类子对象，结果指向外围的 `D`；否则是 UB。
+¶2 是引用的版本：*cv1* `B` 的左值可以转换为 *cv2* `D&`，亡值可以转换为 *cv2* `D&&`，限制和后果都与 ¶10 相同。
+
+<div class="compare" markdown="1">
+
+```cpp run ok
+struct B {};
+struct D : B { int extra = 42; };
+
+int main() {
+  D d;
+  B& br = d;
+  D& dr = static_cast<D&>(br);
+  // OK：br 确实是 D 的子对象
+  return dr.extra == 42 ? 0 : 1;
+}
+```
+
+```cpp run ub
+struct B {};
+struct D : B { int extra = 42; };
+
+int main() {
+  B b;
+  D& dr = static_cast<D&>(b);
+  // UB: b 不是任何 D 的子对象
+  return dr.extra;
+}
+```
+
+</div>
+
+右边的程序在本机 AddressSanitizer 下报告 stack-buffer-overflow：`dr.extra` 读的是 `b` 后面的栈内存。
+
+下面几种情况在编译期就是错误：
 
 ```cpp title="ptr-downcast-rules.cpp" error
 struct VB {};
@@ -217,104 +190,153 @@ struct L : A {};
 struct R : A {};
 struct M : L, R {};
 
-VD* f(VB* p) { return static_cast<VD*>(p); }   // error: 经虚基类
-PD* g(B* p)  { return static_cast<PD*>(p); }   // error: 私有基类
-M*  h(A* p)  { return static_cast<M*>(p); }    // error: A 是 M 的二义基类
-M*  k(L* p)  { return static_cast<M*>(p); }    // OK：L 是 M 的无二义基类
+VD* f(VB* p) { return static_cast<VD*>(p); }  // error: 经过虚基类
+PD* g(B* p)  { return static_cast<PD*>(p); }  // error: 私有基类
+M*  h(A* p)  { return static_cast<M*>(p); }   // error: A 是 M 的二义基类
+M*  k(L* p)  { return static_cast<M*>(p); }   // OK
 ```
 
-与 `dynamic_cast` 的对比：
+`static_cast` 只能在编译期加减一个固定的偏移。虚基类子对象的位置取决于整个对象的类型：`VD` 单独存在时，`VB` 子对象在某个偏移处；`VD` 作为另一个类的基类时，`VB` 可能在别处。编译期算不出偏移，所以禁止。这种情况要用 [[expr.dynamic.cast]]。
 
 | | `static_cast<D*>(pb)` | `dynamic_cast<D*>(pb)` |
 |---|---|---|
-| 检查 | 无（编译期偏移调整） | 运行期检查动态类型 |
-| 错误时 | UB | 空指针 |
-| 要求多态 | 否 | 是 |
-| 经虚基类 | 非良构 | 可以 |
+| 检查 | 无 | 运行期检查动态类型 |
+| 类型不对时 | 未定义行为 | 空指针 |
+| 要求多态类型 | 否 | 是 |
+| 经过虚基类 | 非良构 | 可以 |
 | 交叉转换 | 非良构 | 可以 |
-| 代价 | 一次加/减常量（并检查空指针） | 运行时库调用 |
+| 代价 | 加减一个常量，偏移非零时还要先判空 | 调用运行时库 |
 
-注意表中的"并检查空指针"：当基类子对象偏移非零时，`static_cast` 必须先检查 `pb` 是否为空，因为空指针转换后仍应是空指针，不能减去偏移。所以即使是 `static_cast`，多重继承下的指针转换也不是零开销的。
+判空是必要的：空指针转换后还必须是空指针，不能减去偏移。所以多重继承下即使是 `static_cast`，也不是零开销。
 
-## 成员指针的向上转换（¶11）
+## 枚举（¶7、¶8）
 
-¶11：类型为"`D` 的成员指针，类型为 *cv1* `T`"的 prvalue 可以转换为"`B` 的成员指针，类型为 *cv2* `T`"，其中 `D` 是完整类、`B` 是 `D` 的基类，*cv2* 不少于 *cv1*（注 5：函数类型没有 cv，这里的 cv 只对数据成员有意义）。
+¶7 有作用域枚举可以转换为整数类型，结果等同于先转换到枚举的底层类型，再转换到目标类型。也可以转换为浮点类型，结果等同于把原值直接转换为该浮点类型。
 
-注意方向：隐式成员指针转换是基类 → 派生类（[[conv.mem]]：基类的成员当然也是派生类的成员），所以 `static_cast` 的逆向是派生类 → 基类。限制：如果不存在从"`B` 的成员指针"到"`D` 的成员指针"的有效标准转换，非良构。空成员指针转换为空成员指针。
+```cpp run title="scoped-enum-out.cpp" ok
+enum class Color : unsigned char { red = 1, big = 200 };
 
-如果 `B` 包含原成员，或者是包含原成员的类的基类，结果成员指针指向原成员；否则是 UB。注 6：`B` 本身不必包含原成员；但随后用这个成员指针做间接访问时，对象的动态类型必须包含原成员（[[expr.mptr.oper]]）。
+int main() {
+  int a = static_cast<int>(Color::big);          // 200
+  auto b = static_cast<signed char>(Color::big); // 200 → -56
+  double c = static_cast<double>(Color::red);    // 1.0
+  return a == 200 && b == -56 && c == 1.0 ? 0 : 1;
+}
+```
+
+`b` 的值先是 `unsigned char` 的 200，再转换为 `signed char`。C++20 起整数转换按模 2<sup>8</sup> 取值（[[conv.integral]]），结果是确定的 -56。
+
+¶8 整数或枚举类型的值可以转换为完整的枚举类型，结果取决于枚举有没有**固定底层类型**（fixed underlying type）。有作用域枚举总是有；无作用域枚举写了 `: 类型` 才有。
+
+- 有固定底层类型：值先经整型提升或整型转换变成底层类型，再变成枚举。任何底层类型的值都是合法的枚举值，所以这总是有定义的。
+- 没有固定底层类型：原值在枚举的**值域**（range of enumeration values，[[dcl.enum]]）内时不变，否则行为未定义。
+
+值域是能容纳所有枚举符的最小位域的取值范围。`enum E { a, b, c };` 的枚举符是 0 到 2，需要 2 位，值域是 0 到 3：
+
+```cpp title="enum-range.cpp" error
+enum E { a, b, c };            // 值域 [0, 3]
+enum F : unsigned char { x };  // 固定底层类型
+
+constexpr E e1 = static_cast<E>(3);    // OK：在值域内
+constexpr E e2 = static_cast<E>(4);    // error: UB，常量求值中被拒绝
+constexpr F f1 = static_cast<F>(255);  // OK
+constexpr F f2 = static_cast<F>(300);  // OK：先转换为 unsigned char 44
+```
+
+本机 Clang 报告 integer value 4 is outside the valid range of values [0, 3]。运行期不检查。
+
+为什么要有值域：没有固定底层类型的枚举，编译器可以假设它的值总在值域内，用更窄的类型存储，或者在 `switch` 覆盖整个值域时省掉默认分支。有固定底层类型的枚举则相当于带了具名常量的整数类型，常用作强类型的 ID 或位标志，必须能容纳任何值。
+
+¶8 最后还允许浮点值转换为枚举：先把原值转换为底层类型（[[conv.fpint]]，向零截断，超出范围是未定义行为），再转换为枚举。
+
+## 浮点之间（¶9）
+
+¶9 浮点 prvalue 可以转换为任何其他浮点类型：
+
+- 源值在目标类型中能精确表示时，结果就是这个值；
+- 源值落在目标类型两个相邻的值之间时，结果是二者之一，选哪个由实现定义，通常按当前舍入模式；
+- 否则行为未定义。
+
+这一条在 C++23 之后变得必要。C++23 引入了扩展浮点类型（`std::float16_t`、`std::bfloat16_t` 等，[[basic.extended.fp]]），它们之间的隐式转换只允许不降低精度等级（[[conv.double]]）。`double` 到 `std::float16_t` 不能隐式进行，只能靠 `static_cast`。
+
+!!! lawyer "IEEE 754 下的超出范围"
+    目标类型能表示无穷大时，`+inf` 也是它的一个值，于是 `1e300` 落在 `FLT_MAX` 和 `+inf` 两个相邻值之间，按第二条是实现定义的选择，而不是未定义行为。本机 Clang 在常量求值中接受 `constexpr float f = static_cast<float>(1e300);`，结果是 `+inf`。对没有无穷大的浮点格式，第三条才真正适用。
+
+## 成员指针（¶11）
+
+¶11 `D` 的成员指针（类型为 *cv1* `T`）可以转换为 `B` 的成员指针（类型为 *cv2* `T`），其中 `B` 是 `D` 的基类，*cv2* 不少于 *cv1*。注 5 提醒，函数类型没有 cv 限定，所以这里的 cv 只对数据成员有意义。
+
+方向与指针相反。隐式的成员指针转换是基类到派生类（[[conv.mem]]）：`B` 的成员也是 `D` 的成员，`int B::*` 用在任何 `D` 对象上都安全。`static_cast` 允许倒过来，从 `int D::*` 到 `int B::*`。
 
 ```cpp run title="pm-upcast.cpp" ok
 struct B { int b = 1; };
 struct D : B { int d = 2; };
 
 int main() {
-    int D::* pmd = &D::d;
-    int B::* pmb = static_cast<int B::*>(pmd);   // OK：B 是"包含原成员 d 的类"D 的基类
-    D obj;
-    B& br = obj;
-    int v = br.*pmb;      // OK：br 的动态类型 D 包含成员 d
-    return v == 2 ? 0 : 1;
-    // 若 br 指代一个纯粹的 B 对象，br.*pmb 是 UB（[expr.mptr.oper]）
+  int D::* pmd = &D::d;
+  int B::* pmb = static_cast<int B::*>(pmd);
+  D obj;
+  B& br = obj;
+  return br.*pmb == 2 ? 0 : 1;   // OK：br 的动态类型 D 有成员 d
 }
 ```
 
-Qt 信号槽、早期 MFC 消息映射之类在基类中存储派生类成员函数指针的技术，都以这条规则为基础。
+`B` 包含原成员，或者是包含原成员的类的基类时，结果指向原成员；否则行为未定义。注 6 补充，`B` 本身不必有这个成员，但之后用这个成员指针访问时，对象的动态类型必须有它（[[expr.mptr.oper]]）。上面如果 `br` 指代一个单纯的 `B` 对象，`br.*pmb` 就是未定义行为。MFC 的消息映射就依靠这条规则，把派生类的成员函数指针存成基类的成员函数指针。
 
-## `void*` → `T*`（¶12）
+## `void*` 到 `T*`（¶12）
 
-¶12：类型为"指向 *cv1* `void` 的指针"的 prvalue 可以转换为"指向 *cv2* `T` 的指针"，`T` 是对象类型，*cv2* 不少于 *cv1*。结果分三种情况：
+¶12 指向 *cv1* `void` 的指针可以转换为指向 *cv2* `T` 的指针，`T` 是对象类型，*cv2* 不少于 *cv1*。结果分三种情况：
 
-1. 如果原指针值表示内存中字节的地址 `A`，而 `A` 不满足 `T` 的对齐要求，结果指针值未指定；
-2. 否则，如果原指针值指向对象 *a*，且存在一个类型与 `T` 相似、与 *a* **指针可互转**（pointer-interconvertible，[[basic.compound]]）的对象 *b*，结果指向 *b*；
+1. 原指针值是某个字节的地址，而这个地址不满足 `T` 的对齐要求：结果指针值未指定。
+2. 否则，原指针指向对象 *a*，并且有一个类型与 `T` 相似、与 *a* **指针可互转**（pointer-interconvertible，[[basic.compound]]）的对象 *b*：结果指向 *b*。
 3. 否则，指针值不变。
 
-第 2 条体现了 C++17（[[P0137R1]]）引入的对象模型的关键点：指针不再只是地址，还携带指向哪个对象的信息。从 `void*` 回到 `T*` 时，只有那个地址上确实有一个可以互转过去的 `T` 对象，结果才指向 `T` 对象。指针可互转的情形包括：同一个对象；联合体与其成员；标准布局类对象与其第一个非静态数据成员（或基类子对象）。
-
-第 3 条意味着，如果那里没有可互转的 `T` 对象，结果指针**仍然指向原来的对象**（只是类型变成了 `T*`），通过它访问就可能违反 [[basic.lval#11]] 的严格别名规则。
+指针可互转是指两个对象可以用同一个地址互相到达，例如同一个对象、联合体和它的成员、标准布局类对象和它的第一个非静态数据成员。
 
 ```cpp run title="void-to-T.cpp" ok
 struct S { int first; double second; };   // 标准布局
 
 int main() {
-    S s{1, 2.0};
-    void* vp = &s;
-    int* pi = static_cast<int*>(vp);       // OK：s 与 s.first 指针可互转 ⇒ pi 指向 s.first
-    *pi = 10;                              // OK
-    int x = 5;
-    void* vx = &x;
-    int* px = static_cast<int*>(vx);       // 指向同一个对象 x
-    return (s.first == 10 && px == &x) ? 0 : 1;   // 标准例 2：往返得到原指针值
+  S s{1, 2.0};
+  void* vp = &s;
+  int* pi = static_cast<int*>(vp);  // s 与 s.first 可互转：pi 指向 s.first
+  *pi = 10;
+  int x = 5;
+  void* vx = &x;
+  int* px = static_cast<int*>(vx);  // 往返：得到原来的指针
+  return s.first == 10 && px == &x ? 0 : 1;
 }
 ```
+
+第 2 条体现了 C++17（[[P0137R1]]）以来的对象模型：指针不只是一个地址，还记着它指向哪个对象。第 3 条的意思是，地址上没有可以互转过去的 `T` 对象时，结果仍然指向原来的对象，只是类型变成了 `T*`。通过它访问对象，就可能违反[[basic.lval#11|严格别名规则]]：
 
 ```cpp run title="void-to-T-alias.cpp" ub
 int main() {
-    float f = 1.0f;
-    void* vp = &f;
-    int* pi = static_cast<int*>(vp);   // 合法：没有可互转的 int 对象，指针值不变（仍指向 f）
-    return *pi;                        // UB: 经 int 左值读取 float 对象，违反严格别名规则
+  float f = 1.0f;
+  void* vp = &f;
+  int* pi = static_cast<int*>(vp);  // 合法：指针值不变，仍指向 f
+  return *pi;                       // UB: 用 int 左值读取 float 对象
 }
 ```
 
-这正是 `reinterpret_cast<T*>(p)` 的定义方式：[[expr.reinterpret.cast#7]] 规定对象指针之间的 `reinterpret_cast` 就是 `static_cast<cv T*>(static_cast<cv void*>(v))`。所以经 `void*` 中转的 `static_cast` 并不比 `reinterpret_cast` 更安全，两者完全等价。
+对象指针之间的 `reinterpret_cast<T*>(p)` 正是用这两步 `static_cast` 定义的（[[expr.reinterpret.cast#7]]）。所以经 `void*` 中转并不比 `reinterpret_cast` 更安全，两者完全等价。要重新解释一个对象的位模式，用 `std::bit_cast` 或 `std::memcpy`（[[topics/type-punning]]）。
 
-### C++26：常量求值中的 `void*` → `T*`
+### 常量求值中的 `void*` 到 `T*` {{c++26}}
 
-C++26（[[P2738R1]]）允许在常量表达式中把 `void*` 转换为 `T*`，前提是指针确实指向一个类型与 `T` 相似的对象。这让 `std::any`、类型擦除的函数包装器等可以在编译期工作。C++23 及之前，常量求值中的这种转换直接使表达式不是常量表达式。
+C++26（[[P2738R1]]）允许常量求值中把 `void*` 转换为 `T*`，前提是指针确实指向一个类型与 `T` 相似的对象。这样 `std::any`、类型擦除的函数包装器之类可以在编译期工作。
 
 ```cpp run title="constexpr-void-cast.cpp" ok
 constexpr int f() {
-    int x = 42;
-    void* p = &x;
-    return *static_cast<int*>(p);   // C++26 起可以出现在常量求值中
+  int x = 42;
+  void* p = &x;
+  return *static_cast<int*>(p);
 }
 static_assert(f() == 42);
 
 int main() {}
 ```
 
-本机 Clang 在 `-std=c++23` 下拒绝此例（"cast from 'void *' is not allowed in a constant expression in C++ standards before C++2c"），在 `-std=c++2c` 下接受。
+本机 Clang 在 `-std=c++23` 下拒绝这个例子，在 `-std=c++2c` 下接受。
 
 ## `static_cast` 不能做的事
 
@@ -323,44 +345,48 @@ struct A {};
 struct B {};
 
 void f(const int* cp, int* ip, A* pa, void (*fp)()) {
-    static_cast<int*>(cp);       // error: 去掉 const —— 用 const_cast
-    static_cast<long*>(ip);      // error: 无关指针类型 —— 用 reinterpret_cast（或经 void*）
-    static_cast<B*>(pa);         // error: 无继承关系
-    static_cast<long>(ip);       // error: 指针 → 整数 —— 用 reinterpret_cast
-    static_cast<void*>(fp);      // error: 函数指针 → 对象指针 —— 有条件支持，只能用 reinterpret_cast
+  static_cast<int*>(cp);    // error: 去掉 const，用 const_cast
+  static_cast<long*>(ip);   // error: 无关的指针类型
+  static_cast<B*>(pa);      // error: 没有继承关系
+  static_cast<long>(ip);    // error: 指针到整数，用 reinterpret_cast
+  static_cast<void*>(fp);   // error: 函数指针到 void*
 }
 ```
+
+后三种需要 `reinterpret_cast`（[[expr.reinterpret.cast]]）。函数指针到对象指针的转换是有条件支持的，主流平台都支持。
 
 ## 历史与演进
 
 !!! history
     - C++98：引入四个具名转换，取代 C 风格转换的大部分用途。
-    - C++11：¶3 左值到右值引用（为移动语义服务）；有作用域枚举的转换（¶7）。
-    - C++17：[[P0137R1]] 引入指针可互转与指针指向对象的模型，¶12 改写为当前形式；无固定底层类型的枚举值域外转换由"未指定"改为 UB（CWG issue 解决）。
-    - C++20：聚合的第一个元素情形（¶5，配合 [[P0960R3]]）；有符号整数二进制补码使整数转换结果确定。
-    - C++23：扩展浮点类型使 ¶9 的显式浮点转换变得必要。
-    - C++26：常量求值中的 `void*` → `T*`（[[P2738R1]]）。
+    - C++11：加入第 3 段的左值到右值引用转换，为移动语义服务；加入有作用域枚举及第 7 段的转换。
+    - C++17：[[P0137R1]] 引入指针可互转和指针指向对象的模型，第 12 段改写为现在的形式。无固定底层类型的枚举超出值域的转换，从结果未指定改为未定义行为。
+    - C++20：第 5 段增加聚合第一个元素的情形（[[P0960R3]]）；有符号整数采用二进制补码，整数转换的结果变得确定。
+    - C++23：扩展浮点类型让第 9 段的显式浮点转换成为必需。
+    - C++26：常量求值中允许 `void*` 到 `T*`（[[P2738R1]]）。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "向下转换的类型写错时，UB 不会有任何提示"
-    `static_cast<Derived*>(base_ptr)` 在类型不对时不会失败，只会得到一个偏移错误的指针。在不能保证类型的地方用 `dynamic_cast`，或者用 `assert(dynamic_cast<D*>(p))` 在调试构建中检查。
+!!! pitfall "类型写错的向下转换总会出点错"
+    `static_cast<Derived*>(base_ptr)` 在类型不对时不会失败，只会得到一个偏移错误的指针，之后的访问是未定义行为。不能保证类型的地方用 `dynamic_cast`，或者在调试构建里用 `assert(dynamic_cast<D*>(p))` 检查。
 
-!!! pitfall "`static_cast<E>(n)` 对无固定底层类型的枚举可能是 UB"
-    从网络或文件读入的整数转换为枚举前，要么给枚举指定底层类型，要么先检查范围。
+!!! pitfall "任何整数都能 static_cast 成枚举"
+    对没有固定底层类型的枚举，超出值域就是未定义行为。从网络或文件读入的整数转换为枚举之前，要么给枚举指定底层类型，要么先检查范围。
 
-!!! pitfall "经 `void*` 中转不是类型双关的合法途径"
-    `static_cast<int*>(static_cast<void*>(&f))` 与 `reinterpret_cast<int*>(&f)` 完全等价；读取结果都违反严格别名规则。合法的位模式重新解释请用 `std::bit_cast` 或 `std::memcpy`（见 [[topics/casts]]）。
+!!! pitfall "经 void* 中转可以合法地做类型双关"
+    `static_cast<int*>(static_cast<void*>(&f))` 和 `reinterpret_cast<int*>(&f)` 完全等价，用结果读取 `f` 都违反严格别名规则。
 
 ## 思考题
 
 !!! question "思考题 1"
-    `struct B {}; struct D : B {}; B b; D&& r = static_cast<D&&>(std::move(b));` 是否良构？行为如何？
+    `struct B {}; struct D : B {}; B b;` 下，`D&& r = static_cast<D&&>(std::move(b));` 是否良构？行为如何？
 
 <details markdown="1">
 <summary>答案</summary>
 
-良构：¶2 允许"cv1 `B` 的亡值"转换为"cv2 `D` 的右值引用"（`D` 派生自 `B`，非虚、可访问、无二义）。但 `b` 不是任何 `D` 对象的基类子对象，所以行为未定义；即使之后不使用 `r`，转换本身就已经是 UB。
+良构。第 2 段允许 *cv1* `B` 的亡值转换为 *cv2* `D&&`，这里 `D` 以非虚、可访问、无二义的方式派生自 `B`。
+
+但 `b` 不是任何 `D` 对象的基类子对象，所以行为未定义。即使之后不使用 `r`，转换本身就已经是未定义行为。
 </details>
 
 !!! question "思考题 2"
@@ -369,30 +395,33 @@ void f(const int* cp, int* ip, A* pa, void (*fp)()) {
 <details markdown="1">
 <summary>答案</summary>
 
-合法（¶8 最后一句，浮点可转换为枚举）：等同于先把 3.9f 转换为底层类型 `int`（截断为 3，[[conv.fpint]]），再转换为 `E`，结果是值为 3 的 `E`。`1e20f` 截断后的值超出 `int` 的范围，[[conv.fpint]] 规定为 UB。
+合法（第 8 段最后一句）。先把 3.9f 转换为底层类型 `int`，向零截断得到 3（[[conv.fpint]]），再转换为 `E`，结果是值为 3 的 `E`。
+
+`1e20f` 截断后超出 `int` 的范围，[[conv.fpint]] 规定这是未定义行为。
 </details>
 
 !!! question "思考题 3"
-    为什么 `static_cast<int B::*>(&D::d)` 被允许，而 `int B::* p = &D::d;` 不行？哪一个方向是安全的？
+    为什么 `static_cast<int B::*>(&D::d)` 可以，而 `int B::* p = &D::d;` 不行？哪个方向是安全的？
 
 <details markdown="1">
 <summary>答案</summary>
 
-隐式成员指针转换的方向是 `int B::*` → `int D::*`：`B` 的任何成员都是 `D` 的成员，所以对任何 `D` 对象使用它都安全。反方向 `int D::*` → `int B::*` 并非对每个 `B` 对象都有意义（纯 `B` 对象没有 `d` 成员），所以只能显式 `static_cast`（¶11），并由程序员保证使用时对象的动态类型包含该成员。这与指针转换恰好方向相反：`D*` → `B*` 是隐式安全的，`B*` → `D*` 需要 `static_cast`。
+隐式的成员指针转换是 `int B::*` 到 `int D::*`：`B` 的成员都是 `D` 的成员，用在任何 `D` 对象上都安全。反方向不是对每个 `B` 对象都有意义，单纯的 `B` 对象没有成员 `d`，所以只能显式 `static_cast`（¶11），由程序员保证使用时对象的动态类型有这个成员。
+
+这与对象指针恰好相反：`D*` 到 `B*` 是安全的隐式转换，`B*` 到 `D*` 需要 `static_cast`。
 </details>
 
 ## 小结
 
 !!! summary
-    | 条款 | 转换 | 失败/错误时 |
+    | 条文 | 转换 | 出错时 |
     |---|---|---|
-    | ¶2 | `B` 左值/亡值 → `D&`/`D&&` | 非真子对象 ⇒ UB；虚基/不可访问/二义 ⇒ 非良构 |
-    | ¶3 | 左值 → `T&&`（`std::move`） | 不可访问/二义基类 ⇒ 非良构 |
-    | ¶4 | 任意 → `void` | — |
-    | ¶5 | 隐式转换、显式构造/转换函数、聚合首元素 | 按初始化规则 |
-    | ¶7 | 有作用域枚举 → 整数/浮点 | — |
-    | ¶8 | 整数/枚举/浮点 → 枚举 | 无固定底层类型且超出值域 ⇒ UB |
-    | ¶9 | 浮点 → 浮点 | 超出范围 ⇒ UB；介于两值之间 ⇒ 实现定义 |
-    | ¶10 | `B*` → `D*` | 非真子对象 ⇒ UB |
-    | ¶11 | `T D::*` → `T B::*` | 不含原成员 ⇒ UB |
-    | ¶12 | `void*` → `T*` | 未对齐 ⇒ 未指定值；无可互转对象 ⇒ 指针值不变 |
+    | ¶2、¶10 | 基类引用、指针到派生类 | 不是真的子对象：UB；虚基类、不可访问、二义：非良构 |
+    | ¶3 | 左值到 `T&&`（`std::move`） | 不可访问或二义基类：非良构 |
+    | ¶4 | 任意表达式到 `void` | 无 |
+    | ¶5 | 隐式转换、explicit 构造或转换函数、聚合首元素 | 按初始化规则 |
+    | ¶7 | 有作用域枚举到整数、浮点 | 无 |
+    | ¶8 | 整数、枚举、浮点到枚举 | 无固定底层类型且超出值域：UB |
+    | ¶9 | 浮点到浮点 | 介于两值之间：实现定义；超出范围：UB |
+    | ¶11 | `T D::*` 到 `T B::*` | 不含原成员：UB |
+    | ¶12 | `void*` 到 `T*` | 未对齐：值未指定；没有可互转的对象：指针值不变 |
