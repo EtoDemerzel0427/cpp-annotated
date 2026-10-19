@@ -1,29 +1,35 @@
 ---
 title: 核心 UB 目录 · 第 [basic] 章
-summary: Annex F.2 的 22 条：隐式对象创建、对齐、生命周期之外的指针与 glvalue、不确定值、分配函数契约、失效指针、无序修改、数据竞争、前进保证、静态对象析构顺序——逐条给出正文出处、改写后的例子与 Clang 23 实测。
-status: draft
+summary: Annex F.2 的 22 条未定义行为：隐式对象创建、对齐、生命周期之外的指针与 glvalue、不确定值、分配函数的约定、失效指针、无序修改、数据竞争、前进保证和静态对象的析构顺序，每条给出正文出处、可编译的例子和 Clang 23 实测。
+status: done
+papers: P2795R5
 related: ub, basic.life, intro.object, basic.indet, intro.execution, intro.races, intro.progress, basic.start.term
 tags: UB, 附录, 对象模型, 生命周期, sanitizer
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-这一页是 [[ub]] 的第一部分，对应 Annex F.2，收录正文第 6 章 [basic] 以及第 4 章 [intro] 中执行模型相关小节（[[intro.object]]、[[intro.execution]]、[[intro.races]]、[[intro.progress]]）里的显式 UB。附录把这些都归在"Clause [basic]"名下，我们沿用它的编号与分组。
+!!! tldr
+    - 生命周期之外的指针只能当作 `void*` 用。经由它访问成员、`delete`、转换到虚基类或做 `dynamic_cast` 都是 UB，而且运行时几乎检测不到。
+    - C++26 起，读取未初始化的自动变量通常是错误行为（结果确定），只有用 `[[indeterminate]]` 显式选择不初始化时，读取才是 UB。
+    - 释放后的指针不是完全不能碰：对它做间接是 UB，拿它比较、做加减或转换为 `bool` 是实现定义的。
+    - `i = i++ + i` 仍是 UB，`i = i++ + 1` 自 C++17 起有定义；数据竞争会让整个程序 UB。
+    - 不做任何可观察操作的循环可以被编译器假定会终止，`while (true);` 这样的平凡无限循环在 C++26 中例外。
 
-每个条目的格式：标题是附录给的 stable name（`[ub:…]`），随后是中文要点、**正文出处**（附录条目只是摘要，判定要落到正文段落上），一段改写过、能独立编译的例子，以及 Clang 23.1.3（arm64 macOS）上的实测。实测统一用：
+本页是 [[ub]] 的第一部分，对应 Annex F.2。附录把第 6 章 [basic] 和第 4 章中执行模型相关小节（[[intro.object]]、[[intro.execution]]、[[intro.races]]、[[intro.progress]]）里的显式 UB 都归在 Clause [basic] 名下，本页沿用它的编号和分组。
+
+每个条目的标题下先给出附录的 stable name 和正文出处。附录条目只是摘要，判定要落到正文段落上。例子改写成了能独立编译的形式，实测环境是 Clang 23.1.3（arm64 macOS），运行时检测统一用下面的命令：
 
 ```text
 clang++ -std=c++2c -O0 -g -fsanitize=address,undefined x.cpp && ./a.out
 ```
 
-"常量求值"指把同样的操作放进 `constexpr` 变量的初始化里，看编译器是否按 [[expr.const.core#2]] 的要求拒绝它。总说明与全表见 [[ub]]。
+常量求值指把同样的操作放进 `constexpr` 变量的初始化，看编译器是否按 [[expr.const.core#2]] 的要求拒绝它。
 
 ## 对象模型与对齐
 
-### F.2.1 [ub:intro.object.implicit.create] {#intro.object.implicit.create}
+### F.2.1 隐式创建对象无解 {#intro.object.implicit.create}
 
-**隐式创建无解** · 正文 [[intro.object#13]]
-
-`malloc`、`memcpy`、`std::start_lifetime_as` 等操作会**隐式创建对象**（[[g:implicitly-create-objects]]）：标准允许实现"倒推"——只要存在一组隐式生命周期类型的对象，能让程序有定义，就当作这组对象被创建了。反过来，如果**无论怎么选都不能**让后续操作有定义，程序就是 UB。
+`[ub:intro.object.implicit.create]` · 正文 [[intro.object#13]]
 
 ```cpp ub
 #include <cstdlib>
@@ -36,15 +42,15 @@ void f() {
 }
 ```
 
-注意这里的"无解"是对**整段后续执行**而言的：`malloc` 只创建一次对象。第一句写 `int` 要求那里有 `int`，第二句写 `float` 要求那里有 `float`，两者占用同一地址又都没有被重新创建（赋值不创建对象），所以找不到可行解。如果中间用 placement new 或 `std::start_lifetime_as<float>(p)` 显式换一个对象，就合法了。
+`malloc`、`memcpy`、`std::start_lifetime_as` 等操作会**隐式创建对象**（[[g:implicitly-create-objects]]）。标准不指定创建了哪些对象，而是倒推：只要存在一组隐式生命周期类型的对象能让程序有定义，就当作创建了这组对象。如果无论怎么选都不能让后续操作有定义，程序就是 UB。
 
-**实测**：ASan/UBSan 无报告。这类 UB 完全是"对象模型层面"的，运行时没有任何可检测的痕迹，只在别名分析（TBAA）把两次写重排时才会显形。
+上例中 `malloc` 只创建一次对象。第一次写入要求那里有一个 `int`，第二次写入要求同一地址有一个 `float`，而赋值不会创建新对象，所以找不到可行的一组对象。在两次写入之间用 placement new 或 `std::start_lifetime_as<float>(p)` 显式换一个对象，程序就合法了。
 
-### F.2.2 [ub:intro.object.implicit.pointer] {#intro.object.implicit.pointer}
+本机实测，ASan 和 UBSan 都没有报告。这类 UB 只存在于对象模型层面，运行时没有痕迹，只有当基于类型的别名分析把两次写入重排时才会显现。
 
-**找不到合适的被创建对象** · 正文 [[intro.object#14]]
+### F.2.2 找不到合适的被创建对象 {#intro.object.implicit.pointer}
 
-在隐式创建之后，有些操作（如 `malloc` 的返回值）还被规定为"产生指向**合适的被创建对象**的指针"。同样是倒推：若没有任何指针值能让程序有定义，则 UB。附录给了两种情况：类型根本不是隐式生命周期类型（例如析构函数被删除），或者指针随后被当作另一个不相似的类型使用。
+`[ub:intro.object.implicit.pointer]` · 正文 [[intro.object#14]]
 
 ```cpp ub
 #include <cstdlib>
@@ -72,13 +78,13 @@ B* make_b() {
 }
 ```
 
-**实测**：两段都没有任何 sanitizer 报告。第二段是典型的"标准说 UB、机器上看不出来"——A 和 B 布局完全相同。
+`malloc` 这类操作还被规定为返回指向合适的被创建对象的指针。这同样是倒推：如果没有任何指针值能让程序有定义，就是 UB。附录给了两种情况：类型根本不是隐式生命周期类型，比如析构函数被删除；或者指针随后被当作另一个不相似的类型使用。
 
-### F.2.3 [ub:basic.align.object.alignment] {#basic.align.object.alignment}
+本机实测，两段都没有 sanitizer 报告。第二段中 `A` 和 `B` 的布局完全相同，机器上看不出任何问题，但标准说它是 UB。
 
-**在未对齐的存储里创建对象** · 正文 [[basic.align#1]]
+### F.2.3 在未对齐的存储里创建对象 {#basic.align.object.alignment}
 
-每个对象类型都有对齐要求；对象必须被创建在满足该对齐的地址上。placement new 是最容易违反它的地方，因为它对传入的地址一无所知。
+`[ub:basic.align.object.alignment]` · 正文 [[basic.align#1]]
 
 ```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <new>
@@ -92,17 +98,17 @@ int main() {
 }
 ```
 
-**实测**：UBSan 的 `alignment` 检查命中：`runtime error: constructor call on misaligned address 0x…601 for type 'S *', which requires 4 byte alignment`。（附录原例写的是 `new (&s+1) S()`，`&s + 1` 是"整个数组之后"的地址，跨出了 `s` 的存储；这里改为 `s + 1`，表达的才是附录注释里说的"差 1 字节"。）
+每个对象类型都有对齐要求，对象必须创建在满足这个要求的地址上。placement new 对传入的地址一无所知，是最容易违反这条规则的地方。
 
-## 生命周期之外的指针（[basic.life] ¶7）
+UBSan 的 alignment 检查报告 `constructor call on misaligned address ... which requires 4 byte alignment`。附录原例写的是 `new (&s+1) S()`。`&s + 1` 指向整个数组之后，越出了 `s` 的存储，与注释所说的差 1 字节不符，所以这里改成了 `s + 1`。
 
-[[basic.life#7]] 描述的是这样一个窗口：存储已经分配但对象还没开始生命周期，或者对象生命周期已结束但存储尚未被复用或释放。这时指向那块存储的指针"可以用，但只能有限地用"——当 `void*` 用没问题，下面四种用法是 UB。
+## 生命周期之外的指针
 
-### F.2.4 [ub:lifetime.outside.pointer.delete] {#lifetime.outside.pointer.delete}
+[[basic.life#7]] 描述了这样一段时间：存储已经分配，但对象的生命周期还没有开始；或者对象的生命周期已经结束，但存储还没有被复用或释放。这段时间里，指向这块存储的指针可以当作 `void*` 使用，下面四种用法是 UB。
 
-**对已结束生命周期的对象做 delete** · 正文 [[basic.life#7.1]]
+### F.2.4 对生命周期之外的对象做 delete {#lifetime.outside.pointer.delete}
 
-对象将是或曾是**带非平凡析构函数**的类类型时，把这样的指针交给 *delete-expression* 是 UB。（析构函数平凡时这一款不适用；但 delete 还会再"析构"一次，对 trivially destructible 类型这是无操作的。）
+`[ub:lifetime.outside.pointer.delete]` · 正文 [[basic.life#7.1]]
 
 ```cpp ub
 struct S {
@@ -113,15 +119,17 @@ struct S {
 void f() {
   S* p = new S;
   p->~S();
-  delete p;   // UB：生命周期已结束，且 S 有非平凡析构函数
+  delete p;   // UB：S 的生命周期已结束
 }
 ```
 
-**实测**：ASan/UBSan 无报告——内存只释放了一次，析构函数是空的，运行时什么也看不出。析构函数一旦释放资源，它就成了 double free。
+把这样的指针交给 *delete-expression* 是 UB。附录的摘要只针对带非平凡析构函数的类类型，那是旧的措辞；当前正文 ¶7.1 已经没有这个限定，不论析构函数是否平凡都是 UB。
 
-### F.2.5 [ub:lifetime.outside.pointer.member] {#lifetime.outside.pointer.member}
+本机实测，ASan 和 UBSan 都没有报告：内存只释放了一次，析构函数是空的。析构函数一旦释放资源，这里就成了重复释放。
 
-**通过这种指针访问非静态成员或调用非静态成员函数** · 正文 [[basic.life#7.2]]
+### F.2.5 经由它访问成员 {#lifetime.outside.pointer.member}
+
+`[ub:lifetime.outside.pointer.member]` · 正文 [[basic.life#7.2]]
 
 ```cpp ub
 struct S { float f = 0; };
@@ -134,13 +142,11 @@ float f() {
 }
 ```
 
-**实测**：运行时无报告（`s` 的栈内存还在）。**常量求值**下 Clang 拒绝：`read of object outside its lifetime is not allowed in a constant expression`。
+经由这样的指针访问非静态数据成员或调用非静态成员函数是 UB。运行时没有报告，`s` 的栈内存还在。常量求值中 Clang 拒绝它：`read of object outside its lifetime is not allowed in a constant expression`。
 
-### F.2.6 [ub:lifetime.outside.pointer.virtual] {#lifetime.outside.pointer.virtual}
+### F.2.6 把它转换为虚基类指针 {#lifetime.outside.pointer.virtual}
 
-**把这种指针转换为指向虚基类的指针** · 正文 [[basic.life#7.3]]
-
-到非虚基类的转换只是加一个编译期已知的偏移；到**虚基类**的转换则要在运行时读对象里的 vptr/vbase offset——而对象已经不在了。所以前者允许、后者 UB。
+`[ub:lifetime.outside.pointer.virtual]` · 正文 [[basic.life#7.3]]
 
 ```cpp ub
 struct B {};
@@ -154,11 +160,11 @@ void f() {
 }
 ```
 
-**实测**：ASan/UBSan（含显式加上的 `-fsanitize=vptr`）均无报告。
+转换到非虚基类只是加上一个编译期已知的偏移。转换到虚基类则要在运行时从对象中读取虚基类的偏移，而对象已经不在了。所以前者允许，后者是 UB。本机实测，ASan、UBSan 和显式加上的 `-fsanitize=vptr` 都没有报告。
 
-### F.2.7 [ub:lifetime.outside.pointer.dynamic.cast] {#lifetime.outside.pointer.dynamic.cast}
+### F.2.7 把它用作 dynamic_cast 的操作数 {#lifetime.outside.pointer.dynamic.cast}
 
-**把这种指针作为 dynamic_cast 的操作数** · 正文 [[basic.life#7.4]]
+`[ub:lifetime.outside.pointer.dynamic.cast]` · 正文 [[basic.life#7.4]]
 
 ```cpp ub
 struct B { virtual ~B() = default; };
@@ -172,17 +178,15 @@ void f() {
 }
 ```
 
-**实测**：无报告。在本机 `-O0` 下 `dynamic_cast` 甚至返回了非空——析构过程中 vptr 被改写成什么样，完全取决于实现。
+`dynamic_cast` 要读取对象的动态类型信息。本机实测没有报告，`-O0` 下 `dynamic_cast` 甚至返回了非空指针：析构之后对象的虚表指针变成什么样，完全取决于实现。
 
-## 生命周期之外的 glvalue（[basic.life] ¶8）
+## 生命周期之外的 glvalue
 
-[[basic.life#8]] 是 ¶7 的引用版：一个指代已死（或未生）对象的 glvalue，同样只能有限地使用。
+[[basic.life#8]] 是第 7 段的引用版本。**glvalue** 是指代一个对象或函数的表达式，例如变量名和引用。指代生命周期之外的对象的 glvalue，同样只能有限地使用。
 
-### F.2.8 [ub:lifetime.outside.glvalue.access] {#lifetime.outside.glvalue.access}
+### F.2.8 经由它访问对象 {#lifetime.outside.glvalue.access}
 
-**用这种 glvalue 访问对象** · 正文 [[basic.life#8.1]]
-
-这里的"访问"是 [[defns.access]] 意义上的读或写对象的值。
+`[ub:lifetime.outside.glvalue.access]` · 正文 [[basic.life#8.1]]
 
 ```cpp ub
 void f() {
@@ -193,11 +197,13 @@ void f() {
 }
 ```
 
-**实测**：运行时无报告（读到的仍是 10）。**常量求值**下被拒：`read of object outside its lifetime is not allowed in a constant expression`。这条例子同时提醒：伪析构调用（*pseudo-destructor call*）不再是无操作——C++20 起它对标量也会结束生命周期，见 [[expr.prim.id.dtor]]。
+这里的访问指读或写对象的值（[[defns.access]]）。运行时没有报告，读到的仍是 10；常量求值中 Clang 拒绝它，诊断同 F.2.5。
 
-### F.2.9 [ub:lifetime.outside.glvalue.member] {#lifetime.outside.glvalue.member}
+这个例子还说明，对标量类型的**伪析构调用**（pseudo-destructor call）不是空操作，它会结束对象的生命周期，见 [[expr.prim.id.dtor]]。
 
-**用这种 glvalue 调用非静态成员函数** · 正文 [[basic.life#8.2]]
+### F.2.9 经由它调用成员函数 {#lifetime.outside.glvalue.member}
+
+`[ub:lifetime.outside.glvalue.member]` · 正文 [[basic.life#8.2]]
 
 ```cpp ub
 struct A {
@@ -211,13 +217,11 @@ void g() {
 }
 ```
 
-**实测**：无报告。
+即使成员函数什么也不做，调用本身就是 UB。本机实测没有报告。
 
-### F.2.10 [ub:lifetime.outside.glvalue.virtual] {#lifetime.outside.glvalue.virtual}
+### F.2.10 把它绑定到虚基类的引用 {#lifetime.outside.glvalue.virtual}
 
-**把这种 glvalue 绑定到虚基类的引用** · 正文 [[basic.life#8.3]]
-
-与 F.2.6 同理：绑定到虚基类引用需要运行时查虚基类偏移。
+`[ub:lifetime.outside.glvalue.virtual]` · 正文 [[basic.life#8.3]]
 
 ```cpp ub
 struct B {};
@@ -230,11 +234,11 @@ void f() {
 }
 ```
 
-**实测**：无报告。
+理由与 F.2.6 相同：绑定到虚基类的引用需要在运行时读取虚基类偏移。本机实测没有报告。
 
-### F.2.11 [ub:lifetime.outside.glvalue.dynamic.cast] {#lifetime.outside.glvalue.dynamic.cast}
+### F.2.11 把它用作 dynamic_cast 或 typeid 的操作数 {#lifetime.outside.glvalue.dynamic.cast}
 
-**把这种 glvalue 用作 dynamic_cast 或 typeid 的操作数** · 正文 [[basic.life#8.4]]
+`[ub:lifetime.outside.glvalue.dynamic.cast]` · 正文 [[basic.life#8.4]]
 
 ```cpp ub
 struct B { virtual ~B() = default; };
@@ -248,15 +252,13 @@ void f() {
 }
 ```
 
-**实测**：无报告。
+本机实测没有报告。
 
-## 替换存储里的对象
+## 复用对象的存储
 
-### F.2.12 [ub:original.type.implicit.destructor] {#original.type.implicit.destructor}
+### F.2.12 隐式析构时存储里已是别的类型 {#original.type.implicit.destructor}
 
-**隐式析构时，那块存储里已不是原类型的对象** · 正文 [[basic.life#11]]
-
-自动、静态、线程存储期的对象，在作用域结束（或程序/线程结束）时会被**隐式**调用析构函数。如果此前你用 placement new 在它的存储里放了别的类型的对象，而原类型的析构函数又是非平凡的，那次隐式析构就是 UB。即使是因异常离开作用域也一样。
+`[ub:original.type.implicit.destructor]` · 正文 [[basic.life#11]]
 
 ```cpp ub
 #include <new>
@@ -270,13 +272,13 @@ void h() {
 }               // UB：此处隐式调用 B::~B()，但存储里是 T
 ```
 
-**实测**：无报告；`~B()` 照常在那块内存上执行。修复办法是在作用域结束前再 `new (&b) B` 放回一个 B。
+自动、静态和线程存储期的对象在作用域结束时，或者在程序、线程结束时，会被隐式地调用析构函数。如果在这之前用 placement new 在它的存储里放了别的类型的对象，而原类型的析构函数是非平凡的，这次隐式析构就是 UB。因异常离开作用域时也一样。
 
-### F.2.13 [ub:creating.within.const.complete.obj] {#creating.within.const.complete.obj}
+本机实测没有报告，`~B()` 照常在那块内存上执行。修正的办法是在作用域结束前用 `new (&b) B` 放回一个 `B`。
 
-**在 const 完整对象的存储里创建新对象** · 正文 [[basic.life#12]]
+### F.2.13 在 const 完整对象的存储里创建对象 {#creating.within.const.complete.obj}
 
-对静态、线程、自动存储期的 **const 完整对象**，在它占据（或曾占据）的存储里创建新对象是 UB。理由是编译器可以把 const 对象放进只读段，或者把它的值当常量传播。动态分配的 const 对象不在此列（那是 F.5.1 的修改问题）。
+`[ub:creating.within.const.complete.obj]` · 正文 [[basic.life#12]]
 
 ```cpp ub
 #include <new>
@@ -294,15 +296,15 @@ void h() {
 }
 ```
 
-**实测**：未运行（例子依赖外部定义）。同类问题见 F.5.1：本机把 `const int g = 3;` 通过 `const_cast` 写入，ASan 直接报 `BUS on unknown address`——`g` 被放进了只读页。
+对静态、线程或自动存储期的 const 完整对象，在它占据或曾经占据的存储里创建新对象是 UB。编译器可以把这样的 const 对象放进只读段，或者把它的值当作常量传播。动态分配的 const 对象不受这一条约束，修改它们的问题见 [[ub.dcl#dcl.type.cv.modify.const.obj|F.5.1]]。
+
+这个例子依赖外部定义，没有运行。相关的实测见 F.5.1：通过 `const_cast` 写入 `const int g = 3;`，ASan 报告 `BUS on unknown address`，因为 `g` 被放进了只读页。
 
 ## 值与指针
 
-### F.2.14 [ub:basic.indet.value] {#basic.indet.value}
+### F.2.14 求值产生不确定值 {#basic.indet.value}
 
-**求值产生不确定值** · 正文 [[basic.indet#2]]
-
-C++26 把"未初始化的自动变量"一分为二（[[P2795]]）：默认情况下它持有**错误值**（*erroneous value*），读取它是**错误行为**（EB，有定义但"是错的"）；只有用 `[[indeterminate]]` 显式选择退出时，它才持有**不确定值**，读取它才是 UB。附录强调"不确定值（而不只是错误值）"正是这个区别。`unsigned char`/`std::byte` 有若干例外（¶2.1–¶2.3）。
+`[ub:basic.indet.value]` · 正文 [[basic.indet#2]]
 
 ```cpp ub
 void g() {
@@ -316,13 +318,13 @@ void h() {
 }
 ```
 
-**实测**：Clang 23 尚未实现 `[[indeterminate]]`（`warning: unknown attribute 'indeterminate' ignored`）；在 `-O0` 下两种写法表现相同，都读出了栈上的残留值。ASan/UBSan 不检查未初始化读取（那是 MSan 的工作，而 MSan 不支持 macOS）。**常量求值**下两者都被拒：`read of uninitialized object is not allowed in a constant expression`——[[expr.const.core#2.8]] 同时排除了 UB 和 EB。
+C++26 把未初始化的自动变量分成两种（[[P2795R5]]）。默认情况下，它持有一个**错误值**（erroneous value），读取它是错误行为：结果确定，但标准认定它是错误。用 `[[indeterminate]]` 显式选择不初始化时，它持有**不确定值**，读取才是 UB。附录特别写明不确定值而不只是错误值，指的就是这个区别。`unsigned char` 和 `std::byte` 另有几条例外（¶2.1–¶2.3）。
 
-### F.2.15 [ub:basic.stc.alloc.dealloc.constraint] {#basic.stc.alloc.dealloc.constraint}
+Clang 23 尚未实现 `[[indeterminate]]`，给出 `unknown attribute 'indeterminate' ignored` 警告；`-O0` 下两个函数的表现相同，都读出栈上的残留值。ASan 和 UBSan 不检查未初始化读取，那是 MSan 的工作，而 MSan 不支持 macOS。常量求值中两者都被拒绝（`read of uninitialized object is not allowed in a constant expression`），因为 [[expr.const.core#2.8]] 同时排除了 UB 和 EB。
 
-**分配/释放函数不满足语义约束** · 正文 [[basic.stc.dynamic.general#3]]
+### F.2.15 分配或释放函数违反约定 {#basic.stc.alloc.dealloc.constraint}
 
-用户可以替换全局 `operator new`/`operator delete`，但替换品必须满足 [[basic.stc.dynamic.allocation]] 与 [[basic.stc.dynamic.deallocation]] 的契约：成功时返回至少 `size` 字节、适当对齐的非空指针；`operator delete` 不得以异常退出……违反契约则整个程序 UB——标准库和编译器都依赖这些契约。
+`[ub:basic.stc.alloc.dealloc.constraint]` · 正文 [[basic.stc.dynamic.general#3]]
 
 ```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <new>
@@ -340,13 +342,13 @@ int main() {
 }
 ```
 
-**实测**：ASan 报 `heap-buffer-overflow`——不是因为它理解了契约，而是越界写正好落在它的红区上。附录的另外两种违例（`sz == 0` 时返回 `nullptr`、`operator delete` 抛异常）运行时都没有专门检查。
+程序可以替换全局的 `operator new` 和 `operator delete`，但替换函数必须遵守 [[basic.stc.dynamic.allocation]] 和 [[basic.stc.dynamic.deallocation]] 的约定，例如成功时返回至少 `size` 字节、适当对齐的非空指针。违反约定时整个程序是 UB，因为标准库和编译器都依赖这些约定。
 
-### F.2.16 [ub:basic.stc.alloc.zero.dereference] {#basic.stc.alloc.zero.dereference}
+ASan 报告 `heap-buffer-overflow`。它并不理解约定，只是越界写入正好落在了它设置的保护区上。附录列出的另外两种违例，即请求 0 字节时返回空指针和 `operator delete` 抛出异常，运行时都没有专门的检查。
 
-**解引用零字节分配返回的指针** · 正文 [[basic.stc.dynamic.allocation#2]]
+### F.2.16 解引用零字节分配的结果 {#basic.stc.alloc.zero.dereference}
 
-`operator new(0)` 必须返回一个非空、彼此不同的指针，但这个指针**不能解引用**——那里没有可用的字节。
+`[ub:basic.stc.alloc.zero.dereference]` · 正文 [[basic.stc.dynamic.allocation#2]]
 
 ```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <new>
@@ -358,13 +360,11 @@ int main() {
 }
 ```
 
-**实测**：ASan 报 `heap-buffer-overflow`（它把零字节分配也包上红区）。附录原例用了 `0z` 字面量（[[lex.icon]] 的 `z` 后缀，C++23 起）。
+`operator new(0)` 必须返回一个非空的、与其他分配都不同的指针，但这个指针不能解引用，那里没有可用的字节。ASan 报告 `heap-buffer-overflow`，零字节的分配也有它的保护区。
 
-### F.2.17 [ub:basic.compound.invalid.pointer] {#basic.compound.invalid.pointer}
+### F.2.17 间接访问失效的指针 {#basic.compound.invalid.pointer}
 
-**用失效指针做间接或释放** · 正文 [[basic.compound#6.1]]
-
-存储被释放后，指向它的指针值变成**在当前求值中无效**（[[g:valid-in-the-context-of]]）。对它做间接（`*p`、`p->`）或再交给释放函数是 UB；而做相等比较、`+`、转 `bool` 等是**实现定义**的（¶6.2）——这一点常被误记为"use-after-free 的指针碰都不能碰"。
+`[ub:basic.compound.invalid.pointer]` · 正文 [[basic.compound#6.1]]
 
 ```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 int main() {
@@ -376,15 +376,17 @@ int main() {
 }
 ```
 
-**实测**：ASan 在第一处就停下：`heap-use-after-free`。**常量求值**下 Clang 分别给出 `read of heap allocated object that has been deleted` 与 `delete of pointer that has already been deleted`。
+存储被释放后，指向它的指针值在之后的求值中都是无效的（[[g:valid-in-the-context-of]]）。第 6.1 段规定，对无效指针做间接（`*p`、`p->m`）是 UB；第 6.2 段规定，把它转换为 `bool`、用于加减法或比较是实现定义的。常有人以为释放后的指针碰都不能碰，那并不准确。
+
+附录的摘要把调用释放函数也列在这一条下，那是旧的措辞，正文这一段已经不再提释放。例子中的重复 `delete` 仍然是 UB，依据是 `operator delete` 的前置条件（[[new.delete.single]]）：传入的指针不能已被先前的释放调用作废。
+
+ASan 在第一处就停下，报告 `heap-use-after-free`。常量求值中 Clang 分别给出 `read of heap allocated object that has been deleted` 和 `delete of pointer that has already been deleted`。
 
 ## 执行与并发
 
-### F.2.18 [ub:intro.execution.unsequenced.modification] {#intro.execution.unsequenced.modification}
+### F.2.18 无序的副作用 {#intro.execution.unsequenced.modification}
 
-**无序的副作用** · 正文 [[intro.execution#10]]
-
-对同一内存位置的一个副作用，若与另一个副作用、或与对同一位置值的计算**无序**（*unsequenced*），且两者并非潜在并发，则 UB。C++17 给 `=`、`<<`、`[]`、函数调用等补上了大量顺序规则，所以 `i = i++ + 1` 如今是有定义的，但 `+` 的两个操作数之间仍然无序。
+`[ub:intro.execution.unsequenced.modification]` · 正文 [[intro.execution#10]]
 
 ```cpp ub
 void g(int i) {
@@ -395,13 +397,13 @@ void g(int i) {
 }
 ```
 
-**实测**：`-Wall` 下 Clang 给出 `warning: unsequenced modification and access to 'i' [-Wunsequenced]`；运行时 sanitizer 不检查。值得注意的是**常量求值**：按 [[expr.const.core#2.8]]，`constexpr int f(int i) { i = i++ + i; return i; }` 的调用不应是常量表达式，但 Clang 23 只发了上面那条警告就把 `f(1)` 当常量算了出来——这是实现的缺口，不能把"constexpr 能过"当作"没有 UB"的证明。
+如果对一个内存位置的副作用，与对同一位置的另一个副作用或值计算之间**无序**（unsequenced，两者之间没有任何先后规定），并且两者不是潜在并发的，行为就是未定义的。C++17 给赋值、`<<`、下标、函数调用等补充了求值顺序，所以 `i = i++ + 1` 如今有定义；但 `+` 的两个操作数之间仍然无序。
 
-### F.2.19 [ub:intro.races.data] {#intro.races.data}
+`-Wall` 下 Clang 给出 `unsequenced modification and access to 'i'` 警告（`-Wunsequenced`），运行时 sanitizer 不检查这一类。按 [[expr.const.core#2.8]]，`constexpr int f(int i) { i = i++ + i; return i; }` 的调用不应是常量表达式，但 Clang 23 只发出上面那条警告，就把 `f(1)` 当作常量算了出来。这是实现的遗漏。
 
-**数据竞争** · 正文 [[intro.races#17]]
+### F.2.19 数据竞争 {#intro.races.data}
 
-两个**潜在并发**的冲突动作（至少一个是写），至少一个不是原子的，且互不 *happens before*，构成数据竞争（[[g:data-race]]），整个程序 UB。信号处理函数有专门的例外。
+`[ub:intro.races.data]` · 正文 [[intro.races#17]]
 
 ```cpp ub run flags="-std=c++2c -O1 -g -fsanitize=thread" cc=clang_trunk
 #include <thread>
@@ -417,13 +419,13 @@ int main() {
 }
 ```
 
-**实测**：TSan（`-fsanitize=thread`，不能与 ASan 同时用）报 `WARNING: ThreadSanitizer: data race`；程序打印的数小于 300000（本次是 106896）。
+两个潜在并发的动作访问同一内存位置，至少一个是写，至少一个不是原子操作，并且谁也不先发生于（happens before）另一个，就构成**数据竞争**（[[g:data-race]]），整个程序是 UB。信号处理函数有专门的例外。
 
-### F.2.20 [ub:intro.progress.stops] {#intro.progress.stops}
+TSan（`-fsanitize=thread`，不能和 ASan 同时使用）报告 `WARNING: ThreadSanitizer: data race`，程序打印的数小于 300000。
 
-**线程不再前进** · 正文 [[intro.progress#1]]
+### F.2.20 线程不再前进 {#intro.progress.stops}
 
-实现可以假定每个线程最终会做以下之一：终止、调用 `yield`、做库 I/O、volatile 访问、原子/同步操作，或执行一个**平凡无限循环**（[[g:trivial-infinite-loop]]，C++26 起的豁免）。一个既不终止、又不做任何这些事的线程让程序 UB。这条规则的目的是允许编译器删除"证明不了会终止"的空循环。
+`[ub:intro.progress.stops]` · 正文 [[intro.progress#1]]
 
 ```cpp ub
 bool stop() { return false; }
@@ -437,15 +439,15 @@ void spin() {
 }
 ```
 
-**实测**（`-O2 -S`）：Clang 把 `busy` 整个编译成一条 `brk #0x1` 陷阱指令——它判定这条执行路径必然 UB，于是不生成循环；而 `spin` 被编译成一条跳回自身的 `b` 指令，是真正的死循环。这就是 [[stmt.iter.general]] 中"平凡无限循环"豁免的实际效果。
+实现可以假定每个线程最终会做下列事情之一：终止、调用 `std::this_thread::yield`、调用库的 I/O 函数、执行 volatile 访问、执行原子或同步操作，或者执行一个**平凡无限循环**（[[g:trivial-infinite-loop]]，C++26 新增的例外，大致是条件为常量表达式 `true` 的空循环）。一个线程如果既不终止，又不做其中任何一件事，程序就是 UB。这条规则允许编译器删除无法证明会终止的空循环。
+
+用 `-O2 -S` 查看汇编，Clang 把 `busy` 整个编译成一条陷阱指令 `brk #0x1`：它判定这条执行路径必然导致 UB，于是不生成循环。`spin` 则被编译成跳回自身的 `b` 指令，是真正的死循环。这就是 [[stmt.iter.general]] 中平凡无限循环例外的实际效果。
 
 ## 程序终止
 
-### F.2.21 [ub:basic.start.main.exit.during.destruction] {#basic.start.main.exit.during.destruction}
+### F.2.21 静态对象析构期间调用 std::exit {#basic.start.main.exit.during.destruction}
 
-**在静态/线程存储期对象析构期间调用 std::exit** · 正文 [[basic.start.main#4]]
-
-`std::exit` 会开始销毁静态对象；如果当时已经在这个销毁过程里，就形成重入。
+`[ub:basic.start.main.exit.during.destruction]` · 正文 [[basic.start.main#4]]
 
 ```cpp ub
 #include <cstdlib>
@@ -460,13 +462,11 @@ int main() {}
 // UB：main 返回后析构 ex，其析构函数又调用 std::exit
 ```
 
-**实测**：无报告，本机上程序打印析构函数里的输出后以 0 退出。这只是一次观察结果，标准对此不作任何保证。
+`std::exit` 会开始销毁静态存储期和线程存储期的对象。如果调用时已经处在这个销毁过程中，就形成了重入。本机实测没有报告，程序以 0 退出；这只是一次观察结果，标准对此不作任何保证。
 
-### F.2.22 [ub:basic.start.term.use.after.destruction] {#basic.start.term.use.after.destruction}
+### F.2.22 使用已销毁的块作用域静态变量 {#basic.start.term.use.after.destruction}
 
-**使用已销毁的块作用域静态变量** · 正文 [[basic.start.term#5]]
-
-静态对象按构造完成的**逆序**销毁。如果一个函数里的块作用域静态变量已经被销毁，而某个更晚销毁的静态对象的析构函数又调用了这个函数、控制流经过那个变量的定义，就是 UB（变量不会被"重新初始化"）。通过指针间接使用已销毁的块变量同样是 UB（这一句在正文里是注）。
+`[ub:basic.start.term.use.after.destruction]` · 正文 [[basic.start.term#5]]
 
 ```cpp ub run flags="-std=c++2c -O0 -g -fsanitize=address,undefined" cc=clang_trunk
 #include <cstdio>
@@ -487,4 +487,6 @@ int main() {}
 // 析构顺序：b、a、c。~C 调用 f()，控制流经过已销毁的 a 的定义：UB
 ```
 
-**实测**：先打印 `~A`，再打印 `f() = -1`——`a` 已经被析构，`f()` 读到了析构函数写进去的"墓碑值"；ASan/UBSan 无报告（`a` 的存储是静态的，从未被释放）。这就是常说的"静态析构顺序灾难"（*static destruction order fiasco*）。
+静态对象按构造完成的逆序销毁。一个函数中的块作用域静态变量已经被销毁之后，如果某个更晚销毁的静态对象的析构函数调用了这个函数，并且控制流经过那个变量的定义，就是 UB。变量不会被重新初始化。注 2 补充，在销毁之后经由指针等方式间接使用这个变量，同样是 UB。
+
+程序先打印 `~A`，再打印 `f() = -1`：`a` 已经析构，`f()` 读到的是析构函数写入的值。ASan 和 UBSan 都没有报告，因为 `a` 的存储是静态的，从未被释放。这就是常说的静态析构顺序问题（static destruction order fiasco）。
