@@ -1,50 +1,22 @@
 ---
 title: monotonic_buffer_resource
-summary: 只增不减的 bump 分配器——deallocate 是空操作，内存只在 release() 或析构时一次性还给上游；可以从用户提供的初始缓冲区（如栈数组）开始，按几何级数向上游要新块
+summary: 标准库的区域分配器：分配只是在缓冲区里移动指针，释放什么也不做，内存在 release() 或析构时一次性还给上游资源。
 status: done
 covers: *
 related: mem.res, mem.res.class, mem.res.pool, ptr.align, mem.poly.allocator.class
 tags: 标准库, pmr, arena, monotonic_buffer_resource
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-`monotonic_buffer_resource` 是"区域分配器"（arena / bump allocator）的标准版本。¶1（[mem.res.monotonic.buffer.general]）：它是为**极快的分配**设计的特殊用途资源，适用于"用内存构建少量对象、然后在资源对象销毁时一次性全部释放"的场景。典型用途：处理一个请求、解析一份文档、一帧渲染——期间产生大量小对象，结束时整体丢弃。
+!!! tldr
+    - `monotonic_buffer_resource` 的分配是在当前缓冲区里把指针往前移，`deallocate` 什么也不做。
+    - 缓冲区用完时，它向上游资源要一块更大的新缓冲区，大小按实现定义的倍数增长。
+    - 内存只在 `release()` 或析构时整体还给上游；`release()` 之后又从构造时的初始缓冲区开始。
+    - 它适合处理一个请求、一帧画面这类先建一批对象、再整体丢弃的场景，不适合反复增删的长寿容器。
 
-## 模型
+## 用法：一帧一清的分配器
 
-说明用的数据成员揭示了全部机制：
-
-```cpp
-memory_resource* upstream_rsrc;   // 上游：缓冲区用完时向它要新块
-void*            current_buffer;  // 当前正在切分的缓冲区
-size_t           next_buffer_size;// 下次向上游要多大
-```
-
-分配就是在 `current_buffer` 里**移动指针**（加上对齐调整，参见 [[ptr.align]] 的 `std::align`）；放不下时向上游要一块更大的新缓冲区。释放什么都不做。
-
-## 构造与析构（[mem.res.monotonic.buffer.ctor]）
-
-三个"主"构造函数（其余委托给它们，以 `get_default_resource()` 作为上游）：
-
-- `explicit monotonic_buffer_resource(memory_resource* upstream)` 与 `(size_t initial_size, memory_resource* upstream)`（¶1–¶2）：*Preconditions* `upstream` 是有效资源的地址，`initial_size`（若给出）大于零。效果：`current_buffer = nullptr`；`next_buffer_size` 至少为 `initial_size`，未给出时为**由实现定义**的大小。注意构造时**不分配**——第一次 `allocate` 才向上游要内存。
-- `(void* buffer, size_t buffer_size, memory_resource* upstream)`（¶3–¶4）：*Preconditions* `buffer_size` 不大于 `buffer` 中的字节数。效果：`current_buffer = buffer`，`next_buffer_size = buffer_size`（但不小于 1），然后乘以一个**由实现定义的增长因子**（不必是整数）。这是"从栈数组开始"的用法。
-- 析构（¶5）：调用 `release()`。
-
-复制构造与复制赋值都被弃置——资源有身份，不可复制。
-
-## 成员（[mem.res.monotonic.buffer.mem]）
-
-- `release()`（¶1–¶2）：根据需要调用 `upstream_rsrc->deallocate()` 释放所有已分配内存；把 `current_buffer` 与 `next_buffer_size` **重置为构造时的初值**。注 1：即使从 `*this` 分配的某些块尚未被释放，内存也会还给上游。
-- `upstream_resource()`（¶3）。
-- `do_allocate(bytes, alignment)`（¶4–¶6）：若 `current_buffer` 中未用空间能放下一个满足大小与对齐的块，就从中分配；否则令 `current_buffer = upstream_rsrc->allocate(n, m)`，其中 `n` 不小于 `max(bytes, next_buffer_size)`、`m` 不小于 `alignment`，并把 `next_buffer_size` 乘以增长因子，再从新缓冲区分配。不抛出，除非上游抛出。
-- `do_deallocate`（¶7–¶9）：**无效果**；不抛出。¶9：此资源使用的内存单调增长，直到销毁。
-- `do_is_equal`（¶10）：`this == &other`。
-
-### `release()` 之后初始缓冲区可以复用
-
-`release()` 把状态重置为"构造时的初值"——如果构造时给了用户缓冲区，`current_buffer` 又指回它。所以在循环里反复 `release()` 一个以栈数组起步的资源，可以做到稳态零堆分配：
-
-```cpp title="monotonic-loop.cpp" ok
+```cpp title="monotonic-loop.cpp" run ok
 #include <memory_resource>
 #include <vector>
 #include <string>
@@ -52,11 +24,13 @@ size_t           next_buffer_size;// 下次向上游要多大
 
 int main() {
     std::byte buf[4096];
-    std::pmr::monotonic_buffer_resource arena(buf, sizeof buf, std::pmr::null_memory_resource());
+    std::pmr::monotonic_buffer_resource arena(
+        buf, sizeof buf, std::pmr::null_memory_resource());
     for (int frame = 0; frame < 3; ++frame) {
         {
             std::pmr::vector<std::pmr::string> names(&arena);
-            for (int i = 0; i < 5; ++i) names.emplace_back("some name that is not short at all");
+            for (int i = 0; i < 5; ++i)
+                names.emplace_back("some name that is not short at all");
         }                       // names 先析构（deallocate 都是空操作）
         arena.release();        // 再整体复位：下一帧重新从 buf 开头分配
         std::printf("frame %d ok\n", frame);
@@ -64,23 +38,83 @@ int main() {
 }
 ```
 
-上游是 `null_memory_resource()`：若某一帧超过 4096 字节就会抛 `bad_alloc`，而不是悄悄落到堆上。注意顺序：必须先让所有使用者析构，再 `release()`——否则使用者持有的指针会指向被"回收"后再次分配出去的内存。
+每一帧里，`vector` 和各个 `string` 都从栈上的 `buf` 切出内存，整个循环不碰堆。上游是 `null_memory_resource()`（任何分配都抛 `bad_alloc` 的资源），所以一旦某一帧超过 4096 字节，程序会抛异常，而不是悄悄落到堆上。
 
-## 何时**不**该用它
+顺序很重要：必须先让所有使用者析构，再调用 `release()`。否则使用者手里的指针会指向已经被收回、随后又分给别人的内存。
 
-单调资源的 `deallocate` 什么都不做，这对"不断增删"的数据结构是灾难：
+这类分配器通常叫**区域分配器**（arena allocator）或 bump allocator。[mem.res.monotonic.buffer.general] ¶1 说明了它的定位：一种为极快分配设计的特殊用途资源，用在先用内存建起少量对象、资源对象销毁时再一次性全部释放的场合。
 
-- `vector` 扩容时旧缓冲区不会被回收，`push_back` N 次累计占用约 2N 个元素的空间（按 2 倍增长）；
-- 长生命周期、频繁插入删除的 `map` 或 `list` 会无限增长。
+## 内部模型
 
-这类场景应当用池资源（[[mem.res.pool]]），或者在单调资源之上叠一个池资源：`unsynchronized_pool_resource pool(&monotonic);`——池负责复用，单调资源负责快速批量获取上游内存。
+标准用三个说明用的数据成员描述它的状态：
 
-!!! impl "libc++"
-    libc++ 的默认初始大小是 1024 字节；每次向上游要的块末尾放一个 `__chunk_footer`（记录链表指针、起始地址、当前位置、对齐），`release()` 沿链表逐块归还；块内分配是**从高地址向低地址**切分的。以 256 字节的用户缓冲区起步时，本机观察到第一次向上游请求 544 字节（512 字节的下一块加上块尾簿记结构，见 [[mem.res.class]] 中的跟踪示例），即增长因子为 2。
+```cpp
+memory_resource* upstream_rsrc;    // 上游：缓冲区用完时向它要新块
+void*            current_buffer;   // 当前正在切分的缓冲区
+size_t           next_buffer_size; // 下次向上游要多大
+```
+
+分配就是在 `current_buffer` 的剩余空间里按对齐要求找一块，再把指针前移（对齐调整的做法见 [[ptr.align]] 的 `std::align`）。放不下时向上游要一块新缓冲区。释放什么也不做。
+
+## 构造与析构 [mem.res.monotonic.buffer.ctor]
+
+除了三个主构造函数，类里还有三个省略 `upstream` 的版本，它们以 `get_default_resource()` 作为上游。复制构造和复制赋值都是弃置的，资源对象有身份，不能复制。
+
+¶1 第一组构造函数是 `(upstream)` 和 `(initial_size, upstream)`。前置条件是 `upstream` 指向一个有效的资源，给出的 `initial_size` 大于零。
+
+¶2 它们把 `current_buffer` 设为空，把 `next_buffer_size` 设为至少 `initial_size`；没有给出时用一个实现定义的大小。构造时不分配内存，第一次 `allocate` 才向上游要。
+
+¶3 第二组是 `(buffer, buffer_size, upstream)`，用调用者提供的内存起步。前置条件要求 `buffer_size` 不超过 `buffer` 实际的字节数。
+
+¶4 它把 `current_buffer` 设为 `buffer`，把 `next_buffer_size` 设为 `buffer_size`（至少为 1），然后乘以一个实现定义的**增长因子**，这个因子不必是整数。所以第一次向上游要的块已经比初始缓冲区大。
+
+¶5 析构函数调用 `release()`。
+
+## 成员 [mem.res.monotonic.buffer.mem]
+
+### 分配（¶4–¶6）
+
+¶4 如果 `current_buffer` 的剩余空间放得下所需的大小和对齐，就从中分配。否则令 `current_buffer = upstream_rsrc->allocate(n, m)`，其中 `n` 不小于 `max(bytes, next_buffer_size)`，`m` 不小于 `alignment`；再把 `next_buffer_size` 乘以增长因子，然后从新缓冲区分配。
+
+旧缓冲区里剩下的空间就此作废，不会回头再用。
+
+¶5 返回的存储满足 [[mem.res.class]] 对所有派生资源的大小和对齐要求。¶6 只有上游的 `allocate` 抛出时，它才抛出。
+
+### 释放（¶7–¶9）
+
+¶7–¶8 `do_deallocate` 没有效果，也不抛出。¶9 因此这个资源占用的内存只增不减，直到它被销毁，这就是名字里 monotonic 的含义。
+
+### `release()`（¶1–¶2）
+
+¶1 `release()` 按需调用 `upstream_rsrc->deallocate()`，把向上游要来的所有内存还回去，并把 `current_buffer` 和 `next_buffer_size` 重置为构造时的初值。
+
+如果构造时给了用户缓冲区，`current_buffer` 又指回它。开头的例子正是靠这一点做到每帧零堆分配。
+
+¶2 注 1 强调，即使从 `*this` 分配出去的块还没有被归还，`release()` 也照样把内存还给上游。资源不跟踪哪些块还在用，这是调用者的责任。
+
+### 其他（¶3、¶10）
+
+¶3 `upstream_resource()` 返回 `upstream_rsrc`。¶10 `do_is_equal` 只在两者是同一个对象时返回真，所以从一个单调资源分配的内存不能交给另一个单调资源释放。
+
+## 什么时候不该用它
+
+`deallocate` 什么也不做，对不断增删的数据结构是个问题：
+
+- `vector` 扩容时旧缓冲区不会被回收。按 2 倍增长，`push_back` N 次累计占用约 2N 个元素的空间。
+- 长期存在、频繁插入删除的 `map` 或 `list` 会无限增长。
+
+这类场景应当用池资源（[[mem.res.pool]]），或者在单调资源之上叠一个池资源，例如 `unsynchronized_pool_resource pool(&arena);`。池负责复用释放掉的块，单调资源负责快速地成批获取内存。
+
+!!! impl "libc++ 的做法"
+    本机 Clang 23 + libc++ 中，增长因子是 2。每块向上游要来的内存末尾放一个 32 字节的簿记结构，记录链表指针等信息，`release()` 沿链表逐块归还。
+
+    用一个打印请求的上游资源观察到：以 256 字节的用户缓冲区起步，前两次向上游请求 544 和 1056 字节（512、1024 加上簿记结构）；默认构造的资源把初始大小当作 1024，第一次请求 2080 字节。`release()` 之后的下一次小分配又回到了用户缓冲区，没有向上游请求。
 
 ## 小结
 
-- 分配 = 指针前移；释放 = 空操作；内存只在 `release()`/析构时整体归还。
-- 可以从用户缓冲区（栈数组）起步；`release()` 后回到初始缓冲区，可循环复用。
-- 下一块大小按由实现定义的增长因子几何增长。
-- 不适合频繁增删的长寿数据结构；需要复用时在其上叠池资源。
+| 操作 | 行为 |
+|---|---|
+| 分配 | 在当前缓冲区里前移指针；放不下就向上游要更大的一块 |
+| 释放 | 什么也不做 |
+| `release()` / 析构 | 把上游给的内存全部还回去，状态回到构造时 |
+| 初始缓冲区 | 可以由调用者提供（如栈数组），`release()` 后再次使用 |
