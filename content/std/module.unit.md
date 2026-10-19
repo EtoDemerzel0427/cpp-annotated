@@ -1,127 +1,42 @@
 ---
 title: 模块单元与模块范围
-summary: 什么是模块单元、具名模块、接口单元与实现单元、模块分区；模块名的保留规则；模块单元的管辖范围（purview）与全局模块；一个声明附属于哪个模块。
+summary: 一个模块由哪些翻译单元组成（接口单元、实现单元、分区），模块名有哪些限制，以及每个声明附属于哪个模块。
 status: done
 since: c++20
 papers: P1103R3
-related: module, module.interface, module.import, module.global.frag, basic.link, cpp.module, toolchain/modules-in-practice
+related: module, module.interface, module.import, module.global.frag, basic.link, cpp.module, history/modules, toolchain/modules-in-practice
 tags: 模块, 附属, 分区
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-本节给出整个模块章节的基本定义：一个翻译单元如何宣布自己属于某个模块（*module-declaration*），一个模块由哪些单元组成、各自扮演什么角色，以及其中最关键的一点：**每个声明附属于哪个模块**（attachment）。[[basic.link]] 判定两个声明是否声明同一实体时要用到附属关系，编译器决定符号修饰名时也以它为依据。
+!!! tldr
+    - 以 `module` 声明开头的翻译单元是模块单元；同名的模块单元合起来就是一个具名模块，模块名里的点没有层次含义。
+    - 带 `export` 的是接口单元，不带的是实现单元；带 `:名字` 的是分区。每个模块恰好有一个不带分区名的接口单元，即主接口单元。
+    - 只有普通实现单元 `module M;` 会隐式导入主接口单元，分区不会，否则会形成导入环。
+    - 每个声明都附属于一个模块：默认是它所在的模块，命名空间、别名和 `extern "C++"`/`extern "C"` 中的声明附属于全局模块。
+    - 附属决定了两个声明是不是同一实体，也决定了符号修饰名。导出只改变链接，不改变附属。
 
-阅读前需要：[[lex.phases]]（翻译单元）、[[basic.link]]（链接、同一实体）。整章导读见 [[module]]。
+## 一个模块由哪些文件组成
 
-## 模块声明的语法
-
-```text
-module-declaration:
-    export-keyword(opt) module-keyword module-name module-partition(opt) attribute-specifier-seq(opt) ;
-module-name:
-    module-name-qualifier(opt) identifier
-module-partition:
-    : module-name-qualifier(opt) identifier
-module-name-qualifier:
-    identifier .
-    module-name-qualifier identifier .
-```
-
-几个要点：
-
-- `export-keyword`、`module-keyword` 不是普通的 `export`/`module` 关键字，而是预处理器识别出模块指令后替换出来的特殊记号（[[cpp.module#2]]）。所以 `module` 必须位于行首、作为预处理指令出现；`module` 本身仍是具有特殊含义的标识符，不是关键字，`int module = 0;` 是合法的。
-- 模块名中的 `.` 没有语义。`export module a.b;` 中的 `a.b` 只是一个带点的名字，与模块 `a` 没有任何父子关系，导入 `a` 不会导入 `a.b`。用点号表示层次只是一种命名习惯。
-- 分区名 `:part` 也可以带点（`:detail.io`），同样没有层次语义。
-- 模块名和分区名中的标识符不能是宏（[[cpp.module#1]]）：模块名必须能被构建系统不做完整预处理地扫描出来。
-
-## 模块单元、具名模块与模块名（¶1）
-
-¶1 含有 *module-declaration* 的 TU 是[[g:module-unit|模块单元]]（module unit）。具有相同 *module-name* 的所有模块单元组成一个**具名模块**（named module）。
-
-注意这个定义的方向：标准里没有一个能独立存在的模块对象，模块就是同名模块单元的集合。哪些文件一起编译、链接，决定了一个模块的边界，这由构建系统负责；标准只通过 IFNDR 规则约束这个集合，例如 ¶2 要求恰好有一个主接口单元。
-
-接下来是对模块名的限制：
-
-- 标识符 `module` 和 `import` 不得出现在 *module-name* 或 *module-partition* 中。这是为了避免解析歧义：以 `import` 开头的行会被识别为导入指令，名字里含有这两个词会让扫描器无法正确判断。这条规则是可诊断的。
-- 以 `std` 后跟零个或多个数字的标识符开头的模块名（`std`、`std.core`、`std2`、`std23.x`），以及包含保留标识符（[[lex.name]]，如 `__foo`、`_Foo`）的模块名，都是保留的，不得出现在 *module-declaration* 中；{{ifndr}}。
-    - 若保留模块名中有标识符是保留标识符，则该名字保留给实现使用（如编译器内部的 `__builtin_mod`）；
-    - 否则保留给未来标准化（标准库就是这样占用 `std`、`std.compat` 的，见 [[std.modules]]）。
-- 可选的 *attribute-specifier-seq* 属于该 *module-declaration*（标准没有定义任何可用于此处的属性，留给实现）。
-
-```cpp title="reserved.cppm" ifndr
-export module std2.util;   // 保留名（std 后跟数字开头），IFNDR
-```
-
-```cpp title="bad-name.cppm" error
-export module my.import;   // error: import 不能出现在模块名中
-```
-
-!!! impl "Clang 的行为"
-    本机 Clang 23 对 `export module std;`、`export module std2.util;`、`export module __impl;` 都只给出 `-Wreserved-module-identifier` 警告（IFNDR 本不要求诊断，给出警告已经超出要求）；`export module my.import;` 是错误。libc++ 自己的 `std.cppm` 需要以 `-Wno-reserved-module-identifier` 编译。注意 `export module stdx;` 不是保留名，因为 `stdx` 不是 `std` 后跟零个或多个数字。
-
-!!! lawyer "为什么是 IFNDR 而不是可诊断？"
-    标准库的模块 `std` 本身就是用 `export module std;` 写成的（libc++ 的 `std.cppm`、MSVC 的 `std.ixx`）。如果规定必须诊断，实现就得区分这段代码是用户写的还是自己提供的，而这种区分超出了语言本身。规定为 IFNDR 后，实现可以根据编译选项或文件位置决定是否放行。
-
-## 接口单元与实现单元（¶2）
-
-¶2 *module-declaration* 以 `export` 开头的模块单元是**模块接口单元**（module interface unit）；其他模块单元是**模块实现单元**（module implementation unit）。
-
-一个具名模块必须恰好有一个不带分区名的接口单元，称为[[g:primary-module-interface-unit|主模块接口单元]]（primary module interface unit）；{{ifndr}}。
-
-为什么是 IFNDR？编译器每次只看一个 TU，它无法知道别处是否还有第二个 `export module M;`，也无法知道是否根本没有。这类涉及模块整体的错误只有构建系统或链接器能发现，而且未必能发现：两个主接口单元各自产出 BMI，导入者拿到哪个取决于构建配置。
-
-主接口单元有以下特殊地位：
-
-- `import M;` 导入的是 M 的所有接口单元（[[module.import#3]]），但其他接口单元（接口分区）必须由主接口单元直接或间接导出（¶3），所以实际上导入主接口单元就带入了全部接口。
-- 普通实现单元（`module M;`）隐式导入主接口单元（¶8）。
-- 私有模块片段只能出现在主接口单元中（[[module.private.frag]]）。
-- [[module.context#3]] 把主模块接口单元的末尾作为一个特殊的实例化语境点。
-
-## 模块分区（¶3–¶4）
-
-¶3 *module-declaration* 含有 *module-partition* 的模块单元是[[g:module-partition|模块分区]]（module partition）。分区受以下约束：
-
-- 一个具名模块不得包含两个同名分区；
-- 模块的所有接口分区（即 `export module M:P;` 形式的单元）必须由主模块接口单元直接或间接导出（`export import :P;`）。
-
-两条都是 {{ifndr}}，理由同上：编译器看不见整个模块。
-
-Note 1：分区只能由同一模块的其他模块单元导入（`import :P;` 只允许出现在模块单元中，且分区名隐含当前模块，见 [[module.import#4]]）。模块划分成哪些单元，对模块外部**不可见**。导入者看到的只是模块 M，无从得知 `M:Foo` 的存在。在实现上，分区里声明的实体，其修饰名只含模块名，不含分区名（见下方"实现视角"）。
-
-为什么需要分区？没有分区时，一个模块的接口只能写在一个文件（主接口单元）里，大模块会很臃肿；实现单元又不能被导入，模块内部无法共享类似内部头文件的声明。分区同时解决了这两个问题：
-
-| | 接口分区 `export module M:P;` | 实现分区 `module M:P;` |
-|---|---|---|
-| 是否接口单元 | 是 | 否 |
-| 能否包含 `export` 声明 | 能 | 不能（[[module.interface#1]]） |
-| 是否必须被主接口导出 | 必须（¶3，IFNDR） | 不能被导出（[[module.import#8]]） |
-| 典型用途 | 把大模块的接口拆成多个文件 | 模块内部共享的声明（取代内部头文件） |
-| 能否被模块外导入 | 不能（间接通过 `import M;` 带入） | 不能 |
-| 是否隐式导入主接口 | 否（¶8） | 否（¶8） |
-
-### 例子：一个四单元的模块（¶4）
-
-¶4 Example 1（标准例子，加注）：
-
-```cpp title="TU #1：A.cppm（主模块接口单元）"
+```cpp title="A.cppm（主接口单元）"
 export module A;
-export import :Foo;   // 接口分区 A:Foo 必须被导出（¶3）
+export import :Foo;   // 主接口必须导出接口分区 A:Foo
 export int baz();
 ```
 
-```cpp title="TU #2：A-Foo.cppm（接口分区）"
+```cpp title="A-Foo.cppm（接口分区）"
 export module A:Foo;
 import :Internals;    // 导入本模块的实现分区
 export int foo() { return 2 * (bar() + 1); }
 ```
 
-```cpp title="TU #3：A-Internals.cppm（实现分区）"
+```cpp title="A-Internals.cppm（实现分区）"
 module A:Internals;
-int bar();            // 模块链接：只能在模块 A 内部使用
+int bar();            // 没有导出：只能在模块 A 内部使用
 ```
 
-```cpp title="TU #4：A.cpp（实现单元）"
-module A;             // 隐式 import A;（¶8），所以 baz 可见
+```cpp title="A.cpp（实现单元）"
+module A;             // 隐式导入主接口，所以 baz 可见
 import :Internals;
 int bar() { return baz() - 10; }
 int baz() { return 30; }
@@ -132,217 +47,270 @@ import A;
 int main() { return foo() + baz(); }   // 2*(20+1) + 30 = 72
 ```
 
-模块 A 包含四个 TU：
+这是标准 ¶4 的例子加上一个使用者。本机 Clang 23 按 `A-Internals → A-Foo → A → (A.cpp, main.cpp)` 的顺序编译、链接后，程序返回 72。在 `main.cpp` 里调用 `bar()` 会报 "use of undeclared identifier"：`bar` 没有导出，`main.cpp` 也不属于模块 A。
 
-- **¶4.1** 主模块接口单元；
-- **¶4.2** 模块分区 `A:Foo`，是模块接口单元，构成 A 的接口的一部分；
-- **¶4.3** 模块分区 `A:Internals`，对 A 的外部接口没有贡献；
-- **¶4.4** 提供 `bar` 和 `baz` 定义的模块实现单元，它没有分区名，所以不能被导入。
+每个文件开头的那一行叫**模块声明**（*module-declaration*）：
 
-`main.cpp` 中的 `bar` 不可见：它没有被导出，且 `main.cpp` 不属于模块 A。
+```text
+module-declaration:
+    export-keyword(opt) module-keyword module-name module-partition(opt) attribute-specifier-seq(opt) ;
+```
 
-!!! impl "本机验证"
-    这个例子在 Clang 23 上按 `A-Internals → A-Foo → A → (A.cpp, main.cpp)` 的顺序编译、链接后返回 72。Clang 对 TU #2 的 `import :Internals;` 给出警告 `-Wimport-implementation-partition-unit-in-interface-unit`："Names from A:Internals may not be reachable"。标准并不要求这个警告，它是 Clang 对一个可移植性风险的提醒：实现分区不一定可达（[[module.reach#1]]），导入者能否看到其中的定义是未指明的。
+¶1 含有模块声明的翻译单元（TU，单独编译的一个源文件连同它包含的头文件，见 [[lex.phases]]）是[[g:module-unit|模块单元]]（module unit）。模块名相同的所有模块单元合起来叫**具名模块**（named module）。
 
-## 管辖范围（¶5）
+标准里没有一个独立的模块对象，模块就是同名模块单元的集合。哪些文件一起编译、链接，由构建系统决定；标准只用几条不要求诊断的规则约束这个集合（见下文）。
 
-¶5 [[g:purview|模块单元管辖范围]]（module unit purview）是从 *module-declaration* 开始、到 TU 末尾为止的记号序列。具名模块 M 的**管辖范围**是 M 的所有模块单元的管辖范围的集合。
+¶2 模块声明以 `export` 开头的是**模块接口单元**（module interface unit），其余的是**模块实现单元**（module implementation unit）。¶3 模块声明带有 `:名字` 的是[[g:module-partition|模块分区]]（module partition）。两个维度组合出四种单元：
 
-由此可以得出几点：
+| 模块声明 | 种类 | 例子中的文件 | 能否被导入 |
+|---|---|---|---|
+| `export module A;` | 主模块接口单元 | `A.cppm` | 能：`import A;` |
+| `export module A:Foo;` | 接口分区 | `A-Foo.cppm` | 只能在模块内：`import :Foo;` |
+| `module A:Internals;` | 实现分区 | `A-Internals.cppm` | 只能在模块内：`import :Internals;` |
+| `module A;` | 实现单元 | `A.cpp` | 不能（没有名字可导入） |
 
-- 管辖范围从 *module-declaration* 开始，所以全局模块片段（`module;` 到 `export module M;` 之间）不在 M 的管辖范围内，它属于全局模块（¶6）。
-- 私有模块片段在 *module-declaration* 之后，因此在管辖范围内。私有片段中的声明仍然附属于 M。
-- 许多规则以是否位于管辖范围中为条件：附属（¶7.3）、`export` 只能出现在接口单元的管辖范围中（[[module.interface#1]]）、模块接口中 `const` 变量不再默认具有内部链接（[[basic.link#3]] 的 ¶3.2.1）。
+¶4 标准对这个例子的说明是：`A:Foo` 构成模块 A 接口的一部分，`A:Internals` 对 A 的外部接口没有贡献，`A.cpp` 没有分区名所以不能被导入。
 
-## 全局模块（¶6）
+!!! impl "实现分区的警告"
+    Clang 23 对 `A-Foo.cppm` 里的 `import :Internals;` 给出警告 `-Wimport-implementation-partition-unit-in-interface-unit`："Names from A:Internals may not be reachable"。标准不要求这个警告。它提醒的是，导入者对实现分区的可达性是未指明的（[[module.reach#2]]），依赖其中的定义不可移植。
 
-¶6 [[g:global-module|全局模块]]（global module）是所有全局模块片段和所有非模块单元的 TU 的集合。出现在这些地方的声明称为在全局模块的管辖范围中。
+## 模块名
 
-Note 2：全局模块没有名字、没有模块接口单元，也不由任何 *module-declaration* 引入。
+`module` 和 `import` 不是关键字。预处理器在行首识别出模块指令后，把 `export`、`module` 换成特殊记号 *export-keyword*、*module-keyword*（[[cpp.module#2]]），所以模块声明必须单独占据一行的开头，`int module = 0;` 仍然合法。
 
-这一定义让 C++20 之前的全部代码都有了一个模块归属：你写的每一个传统 `.cpp` 文件、每一个被 `#include` 的头文件（只要它被包含进非模块 TU 或全局模块片段），其中的声明都附属于全局模块。头文件单元（[[module.import#5]]）不是模块单元，所以它们也属于全局模块。
+模块名中的点没有语义。`a.b` 只是一个带点的名字，与模块 `a` 没有父子关系：`import a;` 不会导入 `a.b`，`a.b` 也看不到 `a` 中未导出的东西。分区名同样可以带点（`:detail.io`），也没有层次。
 
-全局模块与具名模块的关键区别是：全局模块中的实体在所有 TU 中共享。两个不相关的 TU 都写了 `int f();`，它们声明的是同一个 `f`，因为二者附属于同一个模块，即全局模块。向后兼容需要的正是这一点。
+模块名不能来自宏。名字中的标识符在预处理时不得是对象式宏，也不得后跟 `(`（[[cpp.module#1]]）。这样构建系统不必完整地复现所有宏定义，就能扫描出一个文件属于哪个模块。
 
-## 附属（¶7）
+¶1 对名字本身还有两条限制：
 
-¶7 模块是具名模块或全局模块。声明按如下规则**附属于**（attached to）某个模块：
+<div class="compare" markdown="1">
 
-- **¶7.1** 若声明是非依赖的友元声明，并且
-    - 指名一个函数，其 *declarator-id* 是 *qualified-id* 或 *template-id*；或
-    - 指名一个类，且不是用既无 *nested-name-specifier* 也无 *simple-template-id* 的 *elaborated-type-specifier* 来指名的，
+```cpp title="bad.cppm" error
+export module my.import;
+// error: import 不能
+// 出现在模块名中
+```
 
-  则它附属于被指名的友元实体所附属的模块（[[basic.link]]）。
-- **¶7.2** 否则，若声明
-    - **¶7.2.1** 声明具有外部链接的命名空间，
-    - **¶7.2.2** 声明类型别名，
-    - **¶7.2.3** 声明命名空间别名，或
-    - **¶7.2.4** 出现在语言链接规范（*linkage-specification*，即 `extern "C"`/`extern "C++"`）之内，
+```cpp title="reserved.cppm" ifndr
+export module std2.util;
+// 保留名：std 后跟数字开头
+// 不要求诊断
+```
 
-  则它附属于全局模块。
-- **¶7.3** 否则，声明附属于它所在管辖范围对应的模块。
+</div>
 
-### ¶7.3：默认规则
+- `module` 和 `import` 不得作为模块名或分区名的组成部分，违反时必须诊断。以 `import` 开头的行会被当作导入指令，名字里出现这两个词会干扰扫描。
+- 以 `std` 后跟零个或多个数字开头的名字（`std`、`std.core`、`std23.x`），以及含有保留标识符（[[lex.name]]，如 `__foo`、`_Foo`）的名字，都是保留的，不得用在模块声明中，不要求诊断。含保留标识符的名字留给实现，其余留给未来的标准（标准库已经占用了 `std` 和 `std.compat`，见 [[std.modules]]）。
 
-绝大多数声明落入 ¶7.3：在 `export module M;` 之后写的函数、类、变量、模板都附属于 M，无论是否导出。在全局模块片段或普通 TU 中写的，附属于全局模块。
+`stdx` 不是保留名，因为 `x` 不是数字。
 
-**导出与否不影响附属。** `export int f();` 和 `int g();` 都附属于 M，区别只在链接：`f` 具有外部链接，`g` 具有模块链接（[[basic.link#4]]）。常见的误解是以为导出的东西属于全局。
+为什么保留名只是不要求诊断？标准库自己的 `std` 模块就是用 `export module std;` 写成的（libc++ 的 `std.cppm`、MSVC 的 `std.ixx`）。如果要求诊断，实现就得区分这一行是用户写的还是自己提供的，这超出了语言本身。
 
-### ¶7.2：为什么命名空间、别名、语言链接块附属于全局模块
+!!! impl "本机诊断"
+    Clang 23 对 `std`、`std2.util`、`__impl` 只给出 `-Wreserved-module-identifier` 警告，对 `stdx` 不给任何诊断；对 `my.import`、`a.module` 报错 "is an invalid name for a module"。libc++ 的 `std.cppm` 因此需要加 `-Wno-reserved-module-identifier` 编译。
 
-- **命名空间（¶7.2.1）**：命名空间是开放的，许多模块和普通代码都会向 `namespace std`、`namespace boost` 中添加成员。如果命名空间本身附属于某个模块，两个模块的 `namespace util` 就成了两个不同的命名空间实体，无法共同扩展，也会与全局模块中的同名命名空间冲突（[[basic.link#10]] Note 5）。所以命名空间本身附属于全局模块，命名空间的成员则按各自的规则附属。具有内部链接的命名空间（无名命名空间）不在此列，它只存在于一个 TU 中，按 ¶7.3 附属于当前模块。
-- **类型别名、命名空间别名（¶7.2.2–¶7.2.3）**：别名不引入新实体，只是另一个名字。让它附属于全局模块，不同模块为同一类型声明的同名别名（例如两个模块都写了 `using size_type = std::size_t;`）就不会冲突。[[basic.link#8]] 的 ¶8.2 也规定，声明同一底层实体的别名是同一实体。
-- **语言链接规范（¶7.2.4）**：在模块代码中，这是显式选择附属于全局模块的唯一手段。`extern "C"` 的理由很直接：C 函数没有模块概念，必须与其他 TU 中的同名 C 函数是同一个。`extern "C++"` 则是 C++20 为模块特意赋予的新含义，它让你在模块管辖范围中声明一个附属于全局模块的 C++ 实体，用于：
-    - 与头文件中声明的实体对接（表明这里声明的就是那个头文件里的 `::g`）；
-    - 在模块中定义一个供非模块代码通过头文件声明来调用的函数；
-    - 把一个代码库渐进迁移到模块时保持 ABI 不变（修饰名不含模块名）。
+模块声明末尾可以带属性，它属于这个模块声明。标准没有定义可以用在这里的属性。
+
+## 主接口单元与分区的约束（¶2–¶3）
+
+¶2 一个具名模块必须恰好有一个不带分区名的接口单元，叫做[[g:primary-module-interface-unit|主模块接口单元]]（primary module interface unit）。¶3 同一模块不能有两个同名分区，所有接口分区都必须由主接口单元直接或间接地导出（`export import :Foo;`）。
+
+这三条都是不要求诊断的（{{ifndr}}），因为编译器一次只看一个 TU，无法知道别处是否还有第二个 `export module M;`，也无法知道某个分区有没有被导出。这类错误只有构建系统有机会发现。
+
+!!! impl "两个主接口单元"
+    本机用 CMake 3.29 + Ninja 构建两个都写了 `export module M;` 的文件，Ninja 报告 `multiple rules generate CMakeFiles/dup.dir/M.pcm` 并停止。单独编译任何一个文件，Clang 都不会报错。
+
+注 1 指出，分区只能被同一模块的其他单元导入，模块划分成哪些单元对模块外部不可见。`import :P;` 中的分区名总是相对于当前模块，没有语法能导入别的模块的分区。导入者只看到模块 A，不知道 `A:Foo` 的存在。
+
+分区解决了两个问题：大模块的接口可以拆成多个文件；模块内部可以共享声明，而不必退回到内部头文件。两种分区的区别：
+
+| | 接口分区 `export module M:P;` | 实现分区 `module M:P;` |
+|---|---|---|
+| 能否含 `export` 声明 | 能 | 不能（[[module.interface#1]]） |
+| 主接口是否必须导出它 | 必须（¶3） | 不能导出（[[module.import#8]]） |
+| 典型用途 | 把接口拆成多个文件 | 模块内部共享的声明 |
+| 是否隐式导入主接口 | 否（¶8） | 否（¶8） |
+
+主接口单元还有几处特殊地位：私有模块片段只能出现在它里面（[[module.private.frag]]）；它的末尾是模板实例化语境中的一个特殊点（[[module.context#3]]）。
+
+## 实现单元隐式导入主接口（¶8）
+
+¶8 既不带 `export` 也不带分区名的模块声明，也就是 `module M;`，隐式导入主模块接口单元，如同写了 `import M;`。
+
+分区不这样做，因为主接口通常要导入分区。如果分区反过来隐式导入主接口，就形成了导入环，而导入环是禁止的（[[module.import#10]]）。标准的例 2：
+
+```cpp title="B-Y.cppm"
+module B:Y;               // 不隐式导入 B
+int y();
+```
+
+```cpp title="B.cppm"
+export module B;
+import :Y;                // OK：没有形成环
+int n = y();
+```
+
+```cpp title="B-X1.cppm" error
+module B:X1;              // 不隐式导入 B
+int &a = n;               // error: n 在这里不可见
+```
+
+```cpp title="B-X2.cppm" ok
+module B:X2;
+import B;                 // 分区可以显式导入主接口，只要 B 没有导入 B:X2
+int &b = n;               // OK
+```
+
+```cpp title="B.cpp" ok
+module B;                 // 隐式导入 B
+int &c = n;               // OK
+```
+
+`n` 没有导出，`B:X2` 和 `B.cpp` 却能使用它：它们与 `B.cppm` 属于同一个模块，同一模块内未导出的名字在导入后也可见（[[basic.lookup#2]]）。本机 Clang 23 对这五个单元的判定与注释一致。
+
+## 管辖范围与全局模块（¶5–¶6）
+
+¶5 从模块声明开始到 TU 末尾的这段记号叫**模块单元管辖范围**（module unit purview）。模块 M 所有单元的管辖范围合起来，就是 M 的[[g:purview|管辖范围]]。
+
+```cpp
+module;                   // 全局模块片段：不在 M 的管辖范围中
+#include <cstdio>
+export module M;          // M 的管辖范围从这里开始
+int f();
+module :private;          // 私有模块片段：仍在管辖范围中
+```
+
+模块声明之前的全局模块片段（[[module.global.frag]]）不在 M 的管辖范围中；之后的私有模块片段在。很多规则以管辖范围为条件，例如 `export` 只能出现在接口单元的管辖范围中（[[module.interface#1]]），接口单元管辖范围中的 `const` 变量不再默认具有内部链接（[[basic.link#3]]）。
+
+¶6 所有全局模块片段，加上所有不是模块单元的 TU，构成[[g:global-module|全局模块]]（global module）。这些地方的声明在全局模块的管辖范围中。注 2 补充，全局模块没有名字，没有接口单元，也不由任何模块声明引入。
+
+这条定义让 C++20 之前的全部代码都有了归属：传统 `.cpp` 文件和它包含的头文件里的声明，都在全局模块中。头文件单元（[[module.import#5]]）不是模块单元，也属于全局模块。两个不相关的 TU 都写了 `int f();`，声明的是同一个 `f`，因为它们在同一个模块（全局模块）中，这正是向后兼容所需要的。
+
+## 声明附属于哪个模块（¶7）
+
+¶7 **模块**指具名模块或全局模块。每个声明都**附属于**（attached to）一个模块。附属决定了两个声明是否声明同一实体：两个具有外部链接或模块链接的声明，只有附属于同一模块时才可能是同一实体（[[basic.link#8]]）。
 
 ```cpp title="M.cppm" ok
 export module M;
 int f1() { return 1; }                 // 附属于 M，模块链接
 export int f2() { return 2; }          // 附属于 M，外部链接
-extern "C++" int f3() { return 3; }    // 附属于全局模块（¶7.2.4），外部链接
-extern "C++" { export int f4() { return 4; } }   // 同上，且被导出
+extern "C++" int f3() { return 3; }    // 附属于全局模块
+extern "C++" { export int f4() { return 4; } }   // 附属于全局模块，且被导出
 extern "C" int f5() { return 5; }      // 附属于全局模块，C 语言链接
-namespace N { int g() { return 6; } }  // 命名空间 N 附属于全局模块；N::g 附属于 M
-export struct S { friend int h(S) { return 7; } };   // h 附属于 M（¶7.3）
+namespace N { int g() { return 6; } }  // N 附属于全局模块，N::g 附属于 M
+export struct S { friend int h(S) { return 7; } };   // h 附属于 M
 export int use() { return f1() + N::g() + h(S{}); }
 ```
 
-用 `nm` 查看这个模块接口单元生成的目标文件（Clang 23，Mach-O，经 `llvm-cxxfilt` 解码）：
+本机 Clang 23 编译这个接口单元，用 `nm` 查看目标文件（Mach-O，经 `llvm-cxxfilt` 解码）：
 
-| 声明 | 原始符号 | 解码后 |
+| 声明 | 符号 | 解码后 |
 |---|---|---|
 | `f1`（未导出） | `__ZW1M2f1v` | `f1@M()` |
 | `f2`（导出） | `__ZW1M2f2v` | `f2@M()` |
 | `f3`（`extern "C++"`） | `__Z2f3v` | `f3()` |
-| `f4`（`extern "C++"` + 导出） | `__Z2f4v` | `f4()` |
-| `f5`（`extern "C"`） | `_f5` | — |
+| `f4`（`extern "C++"`，导出） | `__Z2f4v` | `f4()` |
+| `f5`（`extern "C"`） | `_f5` | |
 | `N::g` | `__ZN1NW1M1gEv` | `N::g@M()` |
 | 友元 `h` | `__ZW1M1hS_1S` | `h@M(S@M)` |
 
-从表中可以看到，导出与否不改变符号（`f1` 和 `f2` 都带 `W1M`），修饰名反映的是附属而不是链接；`extern "C++"` 去掉了模块标记；命名空间 `N` 本身附属于全局模块，没有模块标记，而成员 `g` 有。
+`f1` 和 `f2` 的符号都带 `W1M`：修饰名反映附属，不反映是否导出。`extern "C++"` 去掉了模块标记。命名空间 `N` 本身没有模块标记，它的成员 `g` 有。下面分三种情况说明这些结果。
 
-### 附属冲突
+### 默认：附属于所在的模块（¶7.3）
 
-同一实体的各个声明必须附属于同一模块（[[basic.link#8]] 的 ¶8.3），因此在模块中重声明一个全局模块实体时，必须让这个声明也附属于全局模块：
+¶7.3 不属于下面两种特殊情况的声明，附属于它所在管辖范围对应的模块。`export module M;` 之后写的函数、类、变量、模板都附属于 M；全局模块片段和普通 TU 里写的，附属于全局模块。
 
-```cpp title="decls.h"
-int f();
-int g();
-```
+导出与否不影响附属。`export int f2();` 和 `int f1();` 都附属于 M，区别只在链接：前者是外部链接，后者是模块链接（[[basic.link#4]]）。以为导出的东西属于全局，是常见的误解。
 
-```cpp title="M.cppm" error
-module;
-#include "decls.h"
-export module M;
-export using ::f;      // OK：using 声明不声明实体，导出的是 decls.h 中的 f
-int g();               // error: 与 decls.h 的 g 对应，但附属于 M（[basic.link]/10）
-```
+### 命名空间、别名与语言链接块附属于全局模块（¶7.2）
 
-把最后一行改成 `extern "C++" int g();` 就合法了：它附属于全局模块，是 `decls.h` 中 `g` 的重声明。
+¶7.2 下面四种声明附属于全局模块：
 
-### ¶7.1：友元的附属
+- ¶7.2.1 声明具有外部链接的命名空间。命名空间是开放的，许多模块和普通代码都会向 `namespace std`、`namespace util` 添加成员。如果命名空间附属于某个模块，两个模块的 `namespace util` 就成了两个不同的命名空间。所以命名空间本身附属于全局模块，成员各按各的规则。无名命名空间具有内部链接，不在此列。
+- ¶7.2.2、¶7.2.3 声明类型别名或命名空间别名。别名不引入新实体，两个模块为同一类型声明同名别名不应冲突（[[basic.link#8]] 的 ¶8.2）。
+- ¶7.2.4 出现在语言链接规范（*linkage-specification*，即 `extern "C"` 或 `extern "C++"`，见 [[dcl.link]]）之内。
 
-友元声明有个特殊问题：`friend void f();` 既可能是在引入一个新函数（隐藏友元），也可能是在指名一个已有函数。¶7.1 挑出了必然指名已有实体的几种形式：
+最后一种是在模块代码里显式选择全局模块的唯一手段。`extern "C"` 的理由很直接：C 函数没有模块的概念。`extern "C++"` 则是 C++20 为模块赋予的新用途，它用来声明头文件里也声明过的实体，或者在把代码库迁移到模块时保持符号名不变。
 
-- `friend void ::g();`、`friend void N::g();`（限定名）：必须找到已有声明；
-- `friend void g<>(int);`（*template-id*）：指名已有模板的特化；
-- `friend X;`、`friend class N::X;`、`friend class Y<int>;`：指名已有的类。
+### 指名已有实体的友元（¶7.1）
 
-这些形式的友元声明附属于被指名实体所附属的模块。如果没有这条规则，在模块 M 中写 `friend void ::g();`（`::g` 来自全局模块片段）会按 ¶7.3 附属于 M，与 `::g` 的附属冲突，本应合法的代码就成了非良构。
+¶7.1 非依赖的友元声明如果属于下面两种形式之一，就附属于被指名的那个实体所附属的模块：
 
-而 `friend void h(S);`（非限定名）和 `friend class X;`（既无限定也无模板实参的 *elaborated-type-specifier*）可能引入新实体，按 ¶7.3 附属于当前模块。
+- 指名函数，且声明符是限定名（`friend void ::g();`、`friend void N::g();`）或模板标识（`friend void g<>(int);`）；
+- 指名类，且不是用既无限定也无模板实参的 `class X` 这种形式（例如 `friend X;`、`friend class N::X;`、`friend class Y<int>;`）。
 
-```cpp title="gfr.h"
-void gfr();
-```
+这些形式必然指名一个已有的实体。如果没有 ¶7.1，在模块 M 里写 `friend void ::gfr();` 会按 ¶7.3 附属于 M，与 `::gfr` 原来的附属冲突，本应合法的代码就成了非良构。
 
 ```cpp title="M2.cppm" ok
 module;
-#include "gfr.h"               // 全局模块片段：gfr 附属于全局模块
+#include "gfr.h"               // void gfr();  附属于全局模块
 export module M2;
 export struct S {
-  friend void ::gfr();         // ¶7.1：限定名友元，附属于 ::gfr 所附属的全局模块
+  friend void ::gfr();         // ¶7.1：随 ::gfr 附属于全局模块
   friend void hid(S) {}        // ¶7.3：可能引入新函数，附属于 M2
 };
 ```
 
-### 附属的后果：实体附属于模块
+非限定的 `friend void hid(S);` 和 `friend class X;` 可能引入新实体，按 ¶7.3 附属于当前模块。
 
-[[basic.link#10]] 的结论是：一个实体的所有声明都附属于同一个模块，于是可以说实体附属于那个模块。由此可以推出：
+### 附属冲突
 
-- 附属于具名模块 M 的 inline 函数/变量，必须在声明它的每个定义域中给出定义（[[dcl.inline#5]]）。
-- 附属于具名模块的类，其类内定义的成员函数**不是**隐式 inline 的（[[class.mfct#1]]）。它在模块的目标文件中只有一份强定义，导入者调用它是普通的外部调用。因此修改成员函数体不会改变模块接口的 ABI。
+两个对应的声明（同一作用域中同名、签名相同）附属于不同模块，且一个在另一个之前时，程序非良构（[[basic.scope.scope]]，[[basic.link#10]] 的注 5）。所以在模块中重声明一个全局模块的实体，这个声明也必须附属于全局模块：
 
-## 隐式导入主接口单元（¶8）
+<div class="compare" markdown="1">
 
-¶8 既不含 `export` 也不含分区名的 *module-declaration*（即普通实现单元 `module M;`）**隐式导入**主模块接口单元，如同写了 `import M;`。
-
-为什么只对普通实现单元这样做？
-
-- 普通实现单元的典型用途就是实现接口中声明的东西，它总是需要主接口。
-- 分区（无论接口分区还是实现分区）不隐式导入主接口，因为主接口通常要导入分区。如果分区反过来隐式导入主接口，就形成循环接口依赖（[[module.import#10]]）。
-
-¶8 Example 2（加注）：
-
-```cpp title="TU #1：B-Y.cppm"
-module B:Y;                     // 不隐式导入 B
-int y();
+```cpp title="M.cppm" error
+module;
+#include "decls.h"  // int g();
+export module M;
+int g();
+// error: 与 decls.h 的 g 对应，
+// 但附属于 M
 ```
 
-```cpp title="TU #2：B.cppm"
-export module B;
-import :Y;                      // OK：没有形成接口依赖环
-int n = y();
+```cpp title="M.cppm" ok
+module;
+#include "decls.h"  // int g();
+export module M;
+extern "C++" int g();
+// OK：附属于全局模块，
+// 是 decls.h 中 g 的重声明
 ```
 
-```cpp title="TU #3：B-X1.cppm" error
-module B:X1;                    // 不隐式导入 B
-int &a = n;                     // error: n 在这里不可见
-```
+</div>
 
-```cpp title="TU #4：B-X2.cppm" ok
-module B:X2;                    // 不隐式导入 B
-import B;                       // 分区可以显式导入主接口（只要不成环）
-int &b = n;                     // OK
-```
+Clang 23 对左边报 "declaration of 'g' in module M follows declaration in the global module"。
 
-```cpp title="TU #5：B.cpp" ok
-module B;                       // 隐式导入 B
-int &c = n;                     // OK
-```
+由这些规则可知，一个实体的所有声明都附属于同一个模块，于是可以说这个实体附属于那个模块（[[basic.link#10]]）。附属还有两个直接后果：
 
-看 TU #4：分区 `B:X2` 显式导入了 B。只有当主接口单元 B 没有直接或间接导入 `B:X2` 时，这才合法，否则构成循环。另外，`n` 虽然没有导出，但 TU #4 和 TU #5 与 B 属于同一模块，而具有模块链接的名字在同一模块的导入者中可见（[[basic.lookup#2]] 的 ¶2.3）。
+- 附属于具名模块的 inline 函数或变量，必须在声明它的定义域中定义（[[dcl.inline#5]]）。
+- 附属于具名模块的类，类内定义的成员函数不是隐式 inline 的（[[class.mfct#1]]）。它在模块的目标文件里只有一份强定义，修改函数体不改变模块接口。
 
 ## 实现视角
 
 !!! impl "模块单元与目标文件"
-    - 每个模块单元仍然是一个独立的 TU，产出一个目标文件。接口单元（含接口分区和实现分区）还额外产出一个 BMI 供导入者使用；普通实现单元不能被导入，所以不产出 BMI。
-    - Clang 通过文件扩展名 `.cppm` 或 `-x c++-module` 识别模块接口单元；在 Clang 中，实现分区也需要作为模块单元编译以产出 BMI。各编译器的命令行细节见 [[toolchain/modules-in-practice]]。
-    - **分区不出现在实体修饰名中**。在模块 `greet` 的分区 `:fmt` 中声明的 `greet::bracket`，符号是 `__ZN5greetW5greet7bracketE...`，与在主接口中声明没有区别。这与 Note 1 所说的分区划分对外不可见一致：把一个声明从一个分区挪到另一个分区，不改变 ABI。分区名只出现在模块初始化函数的符号中（如 `__ZGIW5greetWP3fmt`）。
-    - Itanium ABI 的模块修饰用 `W <模块名>` 标记附属，带点的模块名逐段编码（本机实测 `export module a.b;` 中的 `f` 为 `__ZW1aW1b1fv`）；分区用 `WP`。这种修饰体现的是强所有权（strong ownership）模型：附属于不同模块的同名实体是不同的符号。GCC 也采用 Itanium ABI 的这套修饰，MSVC 有自己的方案。
+    - 每个模块单元仍然是一个独立的 TU，产出一个目标文件。可以被导入的单元（主接口、接口分区、实现分区）还要产出一个二进制模块接口（BMI，编译器缓存的接口信息）供导入者使用；普通实现单元不能被导入，不产出 BMI。各编译器的命令行见 [[toolchain/modules-in-practice]]。
+    - Itanium ABI 用 `W <模块名>` 标记附属，带点的模块名逐段编码：本机 `export module a.b;` 中的 `f` 是 `__ZW1aW1b1fv`。这种修饰体现了强所有权（strong ownership）：附属于不同模块的同名实体是不同的符号。GCC 用同一套修饰，MSVC 有自己的方案。
+    - 分区不出现在实体的修饰名中。在模块 `greet` 的分区 `:fmt` 里声明的 `greet::bracket`，符号与在主接口中声明时相同，所以把声明在分区之间挪动不改变 ABI。分区名只出现在模块初始化函数的符号里（如 `__ZGIW5greetWP3fmt`）。
 
 ## 历史与演进
 
-!!! history "C++20 → 现在"
-    - C++20 [[P1103R3]] 引入模块单元、分区、全局模块片段与附属的概念。Modules TS 时期并没有分区，也没有全局模块片段的显式语法（`module;`），这两者来自与 Clang 方面的提案合并。
-    - 强所有权与弱所有权之争：早期讨论中，模块中导出的实体是否应该与全局模块中的同名实体是同一个，一度存在分歧（弱所有权指导出实体的符号不含模块名）。现行标准的 [[basic.link#8]] ¶8.3 加上 ¶7 采用强所有权语义，并以 `extern "C++"` 作为显式的例外手段。
-    - C++26：模块声明中的模块名不得由宏展开得到（[[cpp.module#1]]），以便构建系统做依赖扫描。
+!!! history
+    - 模块单元、分区、全局模块与附属来自 C++20 的 [[P1103R3]]，它合并了 Modules TS 和另一份设计 ATOM（[[P0947R1]]），分区来自后者。设计上的来龙去脉见 [[history/modules]]。
+    - 早期讨论过弱所有权：导出实体的符号不含模块名，与全局模块中的同名实体是同一个。C++20 采用强所有权，以 `extern "C++"` 作为显式的例外。
+    - 模块名不能来自宏是 [[P3034R1]] 加入的，它在 2024 年作为缺陷报告通过，也适用于 C++20、C++23。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "模块名中的点不表示层次"
-    `import a;` 不会导入 `a.b`，`a.b` 也不能访问 `a` 中具有模块链接的实体，它们是两个毫不相干的模块。若想让 `a` 提供 `a.b` 的内容，需要在 `a` 中写 `export import a.b;`。
+!!! pitfall "模块名就是命名空间"
+    `export module math; export int add(int, int);` 之后，导入者写的是 `add(1, 2)`，不是 `math::add(1, 2)`。需要命名空间就自己写 `export namespace math { ... }`。
 
-!!! pitfall "模块名不是命名空间"
-    `export module math; export int add(int, int);` 之后，导入者写的是 `add(1, 2)`，不是 `math::add(1, 2)`。想要命名空间就自己写 `export namespace math { ... }`。
+!!! pitfall "实现单元可以被导入"
+    普通实现单元 `module M;` 没有可以导入的名字。想在模块内部共享辅助声明，用实现分区 `module M:helpers;`。
 
-!!! pitfall "实现单元不能被导入"
-    把公共辅助函数放进 `module M;` 的普通实现单元，再指望其他单元 `import` 它，是做不到的。普通实现单元没有可供导入的名字。要共享，就用实现分区 `module M:helpers;`。
-
-!!! pitfall "同一模块有两个主接口单元"
-    构建系统里两个文件都写了 `export module M;`（比如复制粘贴后忘了改名），这是 IFNDR，编译器不必报错。Clang 的单个 TU 视角无法发现它；依赖扫描之后构建系统才有机会发现：本机用 CMake 3.29 + Ninja 构建两个都声明 `export module M;` 的文件，Ninja 报告 `multiple rules generate CMakeFiles/dup.dir/M.pcm` 并停止。
+!!! pitfall "在 `export module M;` 之后 `#include` 头文件"
+    这样包含进来的声明全部附属于 M，与库中定义的同名实体不再是同一个实体，常见的结果是链接时找不到定义。`#include` 要放在全局模块片段里，或改用 `import`，见 [[module.global.frag]]。
 
 ## 思考题
 
@@ -365,44 +333,34 @@ int &c = n;                     // OK
 <details markdown="1">
 <summary>答案</summary>
 
-- `<cstddef>` 中的声明：附属于全局模块（全局模块片段属于全局模块，¶6）。
-- `namespace util`：命名空间有外部链接，附属于全局模块（¶7.2.1）。
-- `util::index`：类型别名，附属于全局模块（¶7.2.2）；别名名字本身没有链接。
-- `util::count`：附属于 M（¶7.3），未导出 → 模块链接。
-- `util::version`：附属于 M，导出 → 外部链接。
-- 无名命名空间：内部链接，不满足 ¶7.2.1 → 附属于 M（¶7.3）；`secret` 也附属于 M，内部链接（[[basic.link#4]] ¶4.9）。
-- `legacy`：在语言链接规范中 → 附属于全局模块（¶7.2.4），外部链接。
+- `<cstddef>` 中的声明在全局模块片段里，附属于全局模块（¶6、¶7.3）。
+- `namespace util` 具有外部链接，附属于全局模块（¶7.2.1）。
+- `util::index` 是类型别名，附属于全局模块（¶7.2.2）。
+- `util::count` 附属于 M（¶7.3），没有导出，所以是模块链接。
+- `util::version` 附属于 M，导出了，所以是外部链接。
+- 无名命名空间具有内部链接，不适用 ¶7.2.1，按 ¶7.3 附属于 M；`secret` 也附属于 M，具有内部链接（[[basic.link#4]]）。
+- `legacy` 在语言链接规范中，附属于全局模块（¶7.2.4），外部链接。
 </details>
 
 !!! question "思考题 2"
-    为什么接口分区不隐式导入主接口单元，而普通实现单元却会？如果分区 `M:P` 也隐式导入 M，会发生什么？
+    `export module M;` 中的 `struct S { void f() {} };` 与普通头文件中同样的代码相比，`f` 有什么不同？这对二进制兼容性意味着什么？
 
 <details markdown="1">
 <summary>答案</summary>
 
-主接口单元必须直接或间接地 `export import` 接口分区（¶3）。如果 `M:P` 隐式导入 M，那么 M → M:P → M 形成接口依赖环，违反 [[module.import#10]]，所有带接口分区的模块都将非良构。实现分区也常被主接口导入（用于内部实现细节），同理不能隐式导入。普通实现单元不能被任何单元导入（没有分区名就无法 `import`），所以它隐式导入主接口不会成环。
-</details>
-
-!!! question "思考题 3"
-    `export module M;` 中 `struct S { void f() {} };` 的 `f` 与普通头文件中 `struct S { void f() {} };` 的 `f` 在 inline 性质上有什么不同？这对二进制兼容性意味着什么？
-
-<details markdown="1">
-<summary>答案</summary>
-
-在具名模块中，`S` 附属于 M，类内定义的 `f` 不是隐式 inline 的（[[class.mfct#1]] 只对附属于全局模块的成员函数规定隐式 inline）。所以 `f` 只在 M 的目标文件中有一个强定义（`nm -m` 显示为 `external` 而非 `weak external`），导入者对它的调用是普通外部调用。修改 `f` 的函数体只需重新编译模块 M 的目标文件，导入者无需重编（尽管构建系统未必能利用这一点）。在头文件中则 `f` 是 inline 的，函数体是每个包含者的一部分。若确实希望 inline，在模块中显式写 `inline`。
+在具名模块中，`S` 附属于 M，类内定义的 `f` 不是隐式 inline 的，[[class.mfct#1]] 只对附属于全局模块的成员函数规定隐式 inline。本机 `nm -m` 显示它是 M 目标文件里的一个 `external` 强定义（不是 `weak external`），导入者调用它是普通的外部调用。修改 `f` 的函数体只需重新编译 M 的目标文件。在头文件中，`f` 是 inline 的，函数体是每个包含者的一部分。在模块中确实需要 inline 时，显式写 `inline`。
 </details>
 
 ## 小结
 
 | 概念 | 定义 | 段落 |
 |---|---|---|
-| 模块单元 | 含 *module-declaration* 的 TU | ¶1 |
-| 具名模块 | 同名模块单元的集合 | ¶1 |
-| 保留模块名 | `std`+数字开头、或含保留标识符；IFNDR | ¶1 |
-| 接口单元 / 实现单元 | 有无 `export` | ¶2 |
-| 主模块接口单元 | 无分区名的接口单元，恰好一个（IFNDR） | ¶2 |
-| 分区 | 有 `:P`；不得重名；接口分区必须被导出（IFNDR） | ¶3 |
-| 管辖范围 | *module-declaration* 到 TU 末尾 | ¶5 |
-| 全局模块 | 全局模块片段 + 非模块 TU | ¶6 |
-| 附属 | 指名已有实体的友元随被指名者；命名空间/别名/语言链接块 → 全局模块；其余随管辖范围 | ¶7 |
-| 隐式导入 | 仅普通实现单元隐式导入主接口 | ¶8 |
+| 模块单元、具名模块 | 含模块声明的 TU；同名模块单元的集合 | ¶1 |
+| 保留模块名 | `std` 加数字开头，或含保留标识符；不要求诊断 | ¶1 |
+| 接口单元、实现单元 | 模块声明是否以 `export` 开头 | ¶2 |
+| 主模块接口单元 | 没有分区名的接口单元，恰好一个 | ¶2 |
+| 分区 | 带 `:P`；不得重名；接口分区必须被导出 | ¶3 |
+| 管辖范围 | 模块声明到 TU 末尾 | ¶5 |
+| 全局模块 | 全局模块片段加上所有非模块 TU | ¶6 |
+| 附属 | 指名已有实体的友元随被指名者；命名空间、别名、语言链接块随全局模块；其余随所在模块 | ¶7 |
+| 隐式导入 | 只有 `module M;` 隐式导入主接口 | ¶8 |
