@@ -125,7 +125,7 @@ int main(int argc, char**) {
 | 任何类型 | 除数为零 | {{ub}}，由 [[expr.mul#4]] 单独规定 |
 
 !!! ub "有符号溢出为什么是 UB 而不是回绕"
-    C++20 起有符号整数必须用二进制补码表示（[[basic.fundamental]]），但溢出仍然是 UB，这是有意保留的。编译器可以据此假设 `i + 1 > i` 恒为真，可以把 `int` 循环变量扩展成 64 位下标而不必模拟 32 位回绕，还能做强度削减和向量化。需要回绕语义时用无符号类型；需要饱和语义时用 C++26 `<numeric>` 中的 `std::add_sat` 等函数。
+    C++20 起有符号整数必须用二进制补码表示（[[basic.fundamental]]），但溢出仍然是 UB，这是有意保留的。编译器可以据此假设 `i + 1 > i` 恒为真，可以把 `int` 循环变量扩展成 64 位下标而不必模拟 32 位回绕，还能做强度削减和向量化。需要回绕语义时用无符号类型；需要饱和语义时用 `<numeric>` 中的 `std::saturating_add` 等函数。
 
 ### IEEE 浮点与常量表达式（注 4）
 
@@ -194,7 +194,7 @@ int main() {
     `unsigned short a = 65535, b = 65535; auto c = a * b;` 中，两个操作数先经整型提升变成 `int`（[[conv.prom]]），乘积 4294836225 超出 32 位 `int` 的范围，这是有符号溢出，是 UB，尽管源码里一个有符号类型都没写。本机 UBSan 报告 "65535 * 65535 cannot be represented in type 'int'"。写成 `1u * a * b` 才安全。
 
 !!! pitfall "先加再检查是否溢出"
-    对有符号的 `x`，`if (x + 1 < x) handle_overflow();` 没有用。溢出本身就是 UB，编译器可以假设它不发生，把条件折叠为 `false`。应当先比较，例如 `if (x == INT_MAX)`，或者用 `__builtin_add_overflow`、C++26 的 `std::add_sat`。
+    对有符号的 `x`，`if (x + 1 < x) handle_overflow();` 没有用。溢出本身就是 UB，编译器可以假设它不发生，把条件折叠为 `false`。应当先比较，例如 `if (x == INT_MAX)`，或者用 `__builtin_add_overflow`、`std::saturating_add`。
 
 ## 思考题
 
