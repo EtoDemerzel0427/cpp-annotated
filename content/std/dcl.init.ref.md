@@ -1,386 +1,413 @@
 ---
 title: 引用的初始化
-summary: 引用绑定的完整算法：引用相关与引用兼容、直接绑定与经由转换函数的绑定、临时量实质化、什么时候生成临时对象，以及 C++23/26 对"绑定到临时量"的新限制
-status: draft
+summary: 初始化一个引用时，它绑定到初始化表达式本身、转换函数的结果，还是一个新建的临时对象；哪些绑定非良构；以及标准怎样逐步把必然悬垂的绑定变成编译错误。
+status: done
 covers: dcl.init.ref
-papers: P0135R1, P2255R2, P2748R5
-related: dcl.init, dcl.ref, class.temporary, conv.rval, conv.qual, over.match.ref, over.ics.ref, stmt.return, class.base.init, topics/initialization
+papers: P0135R1, P2255R2, P2748R5, P2718R0
+related: dcl.init, dcl.ref, class.temporary, conv.rval, conv.qual, over.match.ref, over.ics.ref, stmt.return, class.base.init, topics/value-categories, topics/dangling-references, topics/initialization
 tags: 初始化, 引用, 临时对象, 值类别
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-引用不是对象，初始化引用的意思是**决定它绑定到哪个对象（或函数）**。这件事看似简单，`int& r = i;` 就是绑定到 `i`；但只要初始化表达式的类型、值类别或 cv 限定与引用不完全一致，就会出现一系列问题：
+!!! tldr
+    - 引用一经初始化就固定指代一个对象或函数；对引用赋值就是对那个对象赋值。传参和 `return` 也是初始化，遵守同一套规则。
+    - 类型相同或只多了 cv 限定、或者是派生到基类时，引用直接绑定到原对象；类型不匹配时，`const T&` 和 `T&&` 可以绑定到一个转换出来的临时对象，非 const 左值引用不行。
+    - 右值引用永远不能绑定到同类（引用相关）类型的左值，但 `double&& r = i;`（`i` 是 `int`）合法：它绑定的是新建的临时 `double`。
+    - 绑定到临时对象的引用会延长它的寿命，但延长穿不过函数调用；`return` 一个绑定到临时量的引用在 C++26 中是编译错误。
 
-- 能不能绑定？（`int& r = 1;` 不能，`const int& r = 1;` 能）
-- 绑定到原对象，还是一个新创建的临时对象？（`const long& r = i;` 绑定到临时量，修改 `i` 不影响 `r`）
-- 如果要经过用户定义转换，转换函数返回的引用能不能直接用？
-- 临时对象活多久？（[[class.temporary]] 的寿命延长）
+## 绑定到谁
 
-本节 ¶5 用一个四分支的算法回答前三个问题，并定义了**直接绑定**（bind directly）这一概念，它在重载决议（[[over.ics.ref]]、[[over.ics.rank]]）中同样至关重要。本节是 [[dcl.init]] ¶15.2 的展开：只要目标类型是引用、初始化器不是花括号列表，就来到这里（花括号的情形见 [[dcl.init.list]] ¶3.9–¶3.10，最终大多也会回到这里）。
-
-> 读之前需要知道：值类别（[[basic.lval]]）、临时量实质化转换（[[conv.rval]]）、限定转换与相似类型（[[conv.qual]]）。
-
-## 引用必须被初始化，且不能重新绑定（¶1–¶3）
-
-¶1 声明为 "`T` 的引用" 类型的变量必须初始化。
-
-```cpp
-int g(int) noexcept;
-void f() {
-  int i;
-  int& r = i;               // r 指代 i
-  r = 1;                    // i 的值变为 1
-  int* p = &r;              // p 指向 i
-  int& rr = r;              // rr 指代 r 所指代的对象，即 i（引用的引用不存在）
-  int (&rg)(int) = g;       // 绑定到函数
-  rg(i);                    // 调用 g
-  int a[3];
-  int (&ra)[3] = a;         // 绑定到数组
-  ra[1] = i;                // 修改 a[1]
+```cpp run ok
+#include <cstdio>
+int main() {
+  int i = 1;
+  int& r = i;            // r 指代 i
+  const long& rl = i;    // rl 指代一个新建的临时 long
+  i = 5;
+  std::printf("%d %ld\n", r, rl);   // 5 1
 }
 ```
 
-¶2 引用初始化之后**不能改为指代另一个对象**，对引用赋值就是对被指代的对象赋值（[[expr.assign]]）。实参传递（[[expr.call]]）和函数返回（[[stmt.return]]）也都是初始化，所以 `void h(int&); h(1);` 失败的原因，和 `int& r = 1;` 失败的原因是同一条规则。
+引用不是对象，初始化引用就是决定它**绑定**到哪个对象或函数。`r` 绑定到 `i` 本身；`rl` 的类型与 `i` 不同，于是编译器先把 `i` 转换成一个临时 `long`，`rl` 绑定到这个临时对象，之后修改 `i` 与它无关。
 
-¶3 只有以下位置可以省略引用的初始化器：
+本节回答三个问题：能不能绑定，绑定到原对象还是临时对象，临时对象活多久。目标类型是引用、初始化器不是花括号列表时，[[dcl.init#15.2]] 把初始化交给这里；花括号的情形见 [[dcl.init.list]]，大多最终也回到这里。
 
-| 位置 | 例子 | 为什么可以 |
-|---|---|---|
-| 形参声明 | `void f(int& r);` | 每次调用时由实参初始化 |
-| 函数返回类型 | `int& g();` | 每次返回时由 `return` 初始化 |
-| 类定义中的成员声明 | `struct S { int& r; };` | 由构造函数或聚合初始化初始化 |
-| 显式 `extern` | `extern int& r2;` | 这只是声明，定义在别处 |
+阅读本节需要知道值类别（[[basic.lval]]，见专题 [[topics/value-categories]]）：左值（lvalue）指代一个已有的对象，纯右值（prvalue）只是一个值，xvalue 是即将被移走资源的对象。左值和 xvalue 合称泛左值（glvalue），xvalue 和纯右值合称右值（rvalue）。引用只能绑定到泛左值；初始化器是纯右值时，要先经过[[g:temporary-materialization-conversion|临时量实质化转换]]（[[conv.rval]]）创建一个临时对象，得到指代它的 xvalue。
 
-```cpp
-int& r1;          // error: 缺少初始化器
-extern int& r2;   // OK: 非定义声明
+## 引用必须初始化，且不能改绑（¶1–¶3）
+
+¶1 声明为 `T&` 或 `T&&` 的变量必须初始化。标准例 1 展示了绑定到变量、函数和数组：
+
+```cpp run ok
+int g(int) noexcept { return 0; }
+int main() {
+  int i;
+  int& r = i;            // r 指代 i
+  r = 1;                 // i 的值变为 1
+  int* p = &r;           // p 指向 i
+  int& rr = r;           // rr 也指代 i：引用的引用不存在
+  int (&rg)(int) = g;    // 绑定到函数
+  rg(i);                 // 调用 g
+  int a[3];
+  int (&ra)[3] = a;      // 绑定到数组
+  ra[1] = i;             // 修改 a[1]
+  (void)p; (void)rr;
+}
 ```
+
+¶2 引用初始化之后不能改为指代另一个对象，对引用赋值就是对被指代的对象赋值（[[expr.assign]]）。实参传递（[[expr.call]]）和函数返回（[[stmt.return]]）都是初始化，所以 `void h(int&); h(1);` 失败的原因与 `int& r = 1;` 相同。
+
+¶3 只有四个位置可以不写引用的初始化器：
+
+| 位置 | 例子 | 谁来初始化 |
+|---|---|---|
+| 形参声明 | `void f(int& r);` | 每次调用时的实参 |
+| 函数返回类型 | `int& g();` | 每次执行的 `return` |
+| 类定义中的成员 | `struct S { int& r; };` | 构造函数或聚合初始化 |
+| 显式 `extern` | `extern int& r2;` | 别处的定义 |
+
+<div class="compare" markdown="1">
+
+```cpp ok
+extern int& r2;   // 非定义声明
+```
+
+```cpp error
+int& r1;          // error: 缺少初始化器
+```
+
+</div>
 
 ## 引用相关与引用兼容（¶4）
 
-¶4 给定类型 "*cv1* `T1`" 与 "*cv2* `T2`"：
-
-- **引用相关**（reference-related）：如果 `T1` 与 `T2` 相似（[[conv.qual]]：逐层去掉 cv 限定后相同），或者 `T1` 是 `T2` 的基类，就说 "*cv1* `T1`" 与 "*cv2* `T2`" 引用相关。
-- **引用兼容**（reference-compatible）：如果 "指向 *cv2* `T2` 的指针" 类型的纯右值可以通过标准转换序列转换为 "指向 *cv1* `T1` 的指针"，就说 "*cv1* `T1`" 与 "*cv2* `T2`" 引用兼容。
-
-直观地说，引用兼容就是**可以安全地让一个 `T1` 引用直接指向这个 `T2` 对象**。借用指针转换来定义它很巧妙：指针转换已经精确地刻画了派生到基类（[[conv.ptr]]）、添加 cv 限定（[[conv.qual]]）、去掉函数的 `noexcept`（[[conv.fctptr]]）这些安全的视图变换，而不安全的变换（去掉 `const`、基类到派生类）都不是标准转换。
-
-| *cv1* T1（引用的类型） | *cv2* T2（初始化器的类型） | 引用相关？ | 引用兼容？ |
-|---|---|---|---|
-| `const int` | `int` | ✓ | ✓（`int*` → `const int*`） |
-| `int` | `const int` | ✓ | ✗（会丢掉 `const`） |
-| `Base` | `Derived` | ✓ | ✓（派生到基类指针转换） |
-| `Derived` | `Base` | ✗ | ✗ |
-| `const int* const` | `int*` | ✓（相似） | ✓（`int**` → `const int* const*`） |
-| `const int*` | `int*` | ✓（相似） | ✗（`int**` → `const int**` 不是合法的限定转换） |
-| `long` | `int` | ✗ | ✗ |
-| `void()` | `void() noexcept` | ✗ | ✓（函数指针转换） |
-
-¶4 最后一句规定：如果按引用兼容关系判定可以绑定，而对应的标准转换序列却非良构（基类有歧义或不可访问），那么需要这种绑定的程序非良构：
-
 ```cpp
+struct Base {}; struct Derived : Base {};
+int i;          const int ci = 0;   Derived d;
+const int& a = i;    // OK：只是多了 const
+int& b = ci;         // error: 会丢掉 const
+Base& c = d;         // OK：派生到基类
+```
+
+能否直接绑定，取决于两种类型之间的两个关系。¶4 设引用的类型是 *cv1* `T1`，初始化器的类型是 *cv2* `T2`：
+
+- 如果 `T1` 与 `T2` [[g:similar-types|相似]]（逐层去掉 cv 限定后相同，[[conv.qual]]），或者 `T1` 是 `T2` 的基类，就说 *cv1* `T1` 与 *cv2* `T2` **引用相关**（reference-related）。
+- 如果“指向 *cv2* `T2` 的指针”可以经标准转换序列转换为“指向 *cv1* `T1` 的指针”，就说 *cv1* `T1` 与 *cv2* `T2` **引用兼容**（reference-compatible）。
+
+引用相关说的是两者是不是同一类东西；引用兼容说的是能不能让 `T1` 的引用直接指向这个 `T2` 对象而不出问题。后者借用指针转换来定义：派生到基类（[[conv.ptr]]）、添加 cv 限定（[[conv.qual]]）、去掉函数类型的 `noexcept`（[[conv.fctptr]]）都是安全的指针转换，而去掉 `const`、基类到派生类都不是标准转换。
+
+| *cv1* `T1`（引用） | *cv2* `T2`（初始化器） | 引用相关 | 引用兼容 |
+|---|---|---|---|
+| `const int` | `int` | 是 | 是：`int*` → `const int*` |
+| `int` | `const int` | 是 | 否：会丢掉 `const` |
+| `Base` | `Derived` | 是 | 是：派生到基类 |
+| `Derived` | `Base` | 否 | 否 |
+| `const int* const` | `int*` | 是（相似） | 是：`int**` → `const int* const*` |
+| `const int*` | `int*` | 是（相似） | 否：`int**` → `const int**` 不是合法的限定转换 |
+| `long` | `int` | 否 | 否 |
+
+¶4 最后一句规定：如果按引用兼容判定可以绑定，而对应的指针转换本身非良构（基类有歧义或不可访问），程序非良构。这时不会退而创建临时对象。
+
+```cpp error
 struct B {};
 struct D1 : B {}; struct D2 : B {};
 struct MD : D1, D2 {} md;
-B& rb = md;            // error: B 是有歧义的基类
+B& rb = md;        // error: B 是有歧义的基类
 
 struct PD : private B {} pd;
-B& rb2 = pd;           // error（在 PD 及其友元之外）：B 是不可访问的基类
+B& rb2 = pd;       // error: B 是不可访问的基类
 ```
-
-注意这里不会退而求其次去创建临时对象，引用相关而绑定非良构就直接是错误。
 
 ## 绑定算法（¶5）
 
-用类型为 "*cv2* `T2`" 的表达式初始化 "*cv1* `T1`" 的引用时，¶5 规定按以下顺序检查：
+¶5 用 *cv2* `T2` 类型的表达式初始化 *cv1* `T1` 的引用时，按顺序检查四个分支，第一个适用的决定结果：
 
-```text
-¶5.1  左值引用，且
-        .1 初始化器是左值（非位域），cv1 T1 与 cv2 T2 引用兼容          → 直接绑定到该左值
-        .2 或 T2 是类类型，T1 与 T2 不引用相关，能转换为引用兼容的左值   → 直接绑定到转换结果
-¶5.2  否则，若是"非 const 或带 volatile"的左值引用                       → 非良构
-¶5.3  否则，若
-        .1 初始化器是右值（非位域）或函数左值，且引用兼容
-        .2 或 T2 是类类型，T1 与 T2 不引用相关，能转换为引用兼容的右值/函数左值
-      → 得到"转换后的初始化器"；若是纯右值则以 cv1 T4 为类型实质化；直接绑定
-¶5.4  否则，T1 必须与 T2 不引用相关，然后
-        .1 若 T1 或 T2 是类类型：按拷贝初始化做用户定义转换，再用结果直接初始化引用
-        .2 否则：隐式转换为 T1 的纯右值，实质化（类型 cv1 T1），绑定             → 不是直接绑定
-```
+1. **左值引用绑定左值**（¶5.1）：初始化器是引用兼容的左值，或者能经转换函数得到引用兼容的左值。直接绑定到它。
+2. **非 const 左值引用到此为止**（¶5.2）：前一条不适用，而引用是非 const 或带 `volatile` 的左值引用，程序非良构。
+3. **绑定右值**（¶5.3）：初始化器是引用兼容的右值（或函数左值），或者能经转换函数得到这样的结果。纯右值先实质化，然后直接绑定。
+4. **创建临时对象**（¶5.4）：`T1` 必须与 `T2` 不引用相关；把初始化器转换成 `T1`，绑定到转换出的临时对象。
 
-除了最后一种情形（¶5.4.2，把初始化器隐式转换为被引用类型），其余情形都称引用直接绑定（binds directly）到初始化表达式。
+下表按引用种类和初始化器给出结果：
 
-下表按引用种类和初始化器概括结果：
-
-| | 同类型左值 `i` | 同类型右值 `int()` | 不同类型 `long` 的左值 `l` | 能转换为 `int&` 的类 | 能转换为 `int` 的类 |
+| | 同类型左值 `i` | 同类型右值 `int()` | `long` 左值 | 能转换为 `int&` 的类 | 能转换为 `int` 的类 |
 |---|---|---|---|---|---|
-| `int&` | 直接绑定 ¶5.1.1 | ✗ ¶5.2 | ✗ ¶5.2 | 直接绑定 ¶5.1.2 | ✗ ¶5.2 |
-| `const int&` | 直接绑定 ¶5.1.1 | 直接绑定（实质化）¶5.3.1 | 临时量 ¶5.4.2 | 直接绑定 ¶5.1.2 | 直接绑定（实质化）¶5.3.2 |
-| `int&&` | ✗ ¶5.4（引用相关） | 直接绑定（实质化）¶5.3.1 | 临时量 ¶5.4.2 | ✗ ¶5.4（转换结果是引用相关的左值） | 直接绑定（实质化）¶5.3.2 |
+| `int&` | 直接绑定（¶5.1.1） | 非良构（¶5.2） | 非良构（¶5.2） | 直接绑定（¶5.1.2） | 非良构（¶5.2） |
+| `const int&` | 直接绑定（¶5.1.1） | 实质化后直接绑定（¶5.3.1） | 临时对象（¶5.4.2） | 直接绑定（¶5.1.2） | 实质化后直接绑定（¶5.3.2） |
+| `int&&` | 非良构（¶5.4） | 实质化后直接绑定（¶5.3.1） | 临时对象（¶5.4.2） | 非良构（¶5.4） | 实质化后直接绑定（¶5.3.2） |
 
-### ¶5.1 左值引用直接绑定左值
+### 左值引用直接绑定左值（¶5.1）
 
-¶5.1.1 最常见的情形：初始化器是左值、不是位域、引用兼容。绑定到该左值（或其中适当的基类子对象）。
-
-¶5.1.2 初始化器是类类型，`T1` 与 `T2` 不引用相关，并且能通过返回左值引用的转换函数转换为引用兼容的左值（候选按 [[over.match.ref]] 枚举）。脚注说明，这要求转换函数返回引用类型。
-
-注 2：这两种直接绑定不需要左值到右值、数组到指针、函数到指针转换，因此这些转换都不施行，引用绑定到的是对象本身，而不是它的值。
-
-```cpp
-double d = 2.0;
-double& rd = d;                 // rd 指代 d
-const double& rcd = d;          // rcd 指代 d（添加 const 是引用兼容的）
-
+```cpp run ok
 struct A { };
 struct B : A { operator int&(); } b;
-A& ra = b;                      // ¶5.1.1：ra 指代 b 中的 A 子对象
-const A& rca = b;               // 同上
-int& ir = B();                  // ¶5.1.2：ir 指代 B::operator int& 的结果
+B::operator int&() { static int n; return n; }
+double d = 2.0;
+double& rd = d;          // rd 指代 d
+const double& rcd = d;   // rcd 指代 d：添加 const 是引用兼容的
+A& ra = b;               // ¶5.1.1：ra 指代 b 中的 A 子对象
+const A& rca = b;        // 同上
+int& ir = B();           // ¶5.1.2：ir 指代 operator int& 的结果
+int main() {}
 ```
 
-`int& ir = B();` 值得留意：`B()` 是右值，但 ¶5.1.2 并不要求初始化器是左值，只要求转换结果是左值。
+¶5.1.1 是最常见的情形：引用是左值引用，初始化器是左值（但不是位域），并且引用兼容。引用绑定到这个左值，或者它的适当基类子对象。
 
-为什么 ¶5.1.2 要求 `T1` 与 `T2` 不引用相关？因为如果二者引用相关（如 `A& ra = b;`），¶5.1.1 已经决定了结果，派生类到基类的绑定不应该被一个用户定义的 `operator A&()` 抢走。
+¶5.1.2 处理类类型的初始化器：`T1` 与 `T2` 不引用相关，而 `T2` 有返回左值引用的转换函数，能得到引用兼容的左值。候选转换函数按 [[over.match.ref]] 枚举，经重载决议选出最好的一个。`int& ir = B();` 中 `B()` 本身是右值，但 ¶5.1.2 只要求转换的结果是左值。
 
-### ¶5.2 非 const 左值引用到此为止
+¶5.1.2 要求 `T1` 与 `T2` 不引用相关，是为了让 `A& ra = b;` 这样的派生到基类绑定始终由 ¶5.1.1 决定，不会被一个用户定义的 `operator A&()` 抢走。
 
-¶5.2 如果不满足 ¶5.1，而引用是非 const 的（或带 `volatile` 的）左值引用，程序非良构。
+注 2 指出，这两种直接绑定不施行左值到右值、数组到指针、函数到指针转换：引用绑定的是对象本身，不是它的值。
 
-```cpp
-double& rd2 = 2.0;              // error: 不是左值，且引用不是 const
+### 非 const 左值引用不接受临时对象（¶5.2）
+
+<div class="compare" markdown="1">
+
+```cpp ok
 int i = 2;
-double& rd3 = i;                // error: 类型不匹配，且引用不是 const
-const volatile int& rv = 1;     // error: volatile 也不行
+const double& r1 = 2.0;
+const double& r2 = i;
 ```
 
-这是 C++ 最古老的规则之一，动机非常实际。如果允许 `double& rd3 = i;` 绑定到一个临时的 `double`，那么 `rd3 = 3.14;` 修改的是临时量，`i` 毫无变化。C++ 早期（ARM 时代）允许过这种绑定，结果产生了大量难以察觉的 bug，例如 `void inc(long& x) { ++x; } int n; inc(n);` 悄悄地对临时量自增。从此，非 const 左值引用只能绑定到可修改的左值。
-
-`const` 引用允许绑定临时量，因为通过它无法修改对象，也就不存在误改临时量的问题。`volatile` 被排除在外，是因为 `volatile` 表示每次访问都必须真正发生在那个对象上，绑定到一个编译器创建的临时量违背了这一意图。
-
-### ¶5.3 绑定到右值（以及函数左值）
-
-¶5.3 引用是 const 左值引用或右值引用时，如果
-
-- ¶5.3.1 初始化器是右值（不是位域）或函数左值，且引用兼容；或者
-- ¶5.3.2 初始化器是类类型，`T1` 与 `T2` 不引用相关，并且能通过转换函数（[[over.match.ref]]）转换为引用兼容的右值或函数左值，
-
-那么第一种情形中的初始化器、第二种情形中的转换结果称为**转换后的初始化器**（converted initializer）。如果它是纯右值，设其类型为 `T4`，就施行临时量实质化转换（[[conv.rval]]），并把纯右值的类型**视为 "*cv1* `T4`"**。不论哪种情形，引用都绑定到所得的泛左值（或其适当的基类子对象）。
-
-视为 *cv1* `T4` 这一点很重要。`const int& r = 42;` 实质化出的临时对象的类型是 `const int`，所以通过 `const_cast` 修改它是 UB：
-
-```cpp
-constexpr int f() {
-  const int& x = 42;
-  const_cast<int&>(x) = 1;   // UB: 修改 const 对象
-  return x;
-}
-constexpr int z = f();       // error: 不是常量表达式（常量求值中检测到了 UB）
+```cpp error
+int i = 2;
+double& r1 = 2.0;  // error
+double& r2 = i;    // error
+const volatile int& r3 = 1;
+                   // error
 ```
 
-标准的例 5 展示了这一分支的各种形态：
+</div>
 
-```cpp
+¶5.2 如果 ¶5.1 不适用，而引用是非 const 的左值引用，或者带 `volatile` 的左值引用，程序非良构。
+
+这条规则防止的是悄悄修改临时对象。如果 `double& r2 = i;` 能绑定到一个临时 `double`，`r2 = 3.14;` 改的就是临时对象，`i` 毫无变化。C++ 早期版本允许过这种绑定，像 `void inc(long& x) { ++x; }` 被 `int` 实参调用时只自增了临时对象，这类错误很难察觉，于是这种绑定被禁止了。
+
+`const` 引用不能用来修改对象，绑定临时对象没有这个问题。`volatile` 引用仍被排除，因为 `volatile` 要求每次访问都落在那个真实的对象上，换成编译器创建的临时对象就违背了它的用意。
+
+### 绑定右值（¶5.3）
+
+```cpp ok
 struct A { };
 struct B : A { } b;
 extern B f();
-const A& rca2 = f();                // 绑定到 B 纯右值实质化后的 A 子对象
-A&& rra = f();                      // 同上
+const A& rca2 = f();     // 绑定到 B 纯右值实质化后的 A 子对象
+A&& rra = f();           // 同上
 struct X {
   operator B();
   operator int&();
 } x;
-const A& r = x;                     // ¶5.3.2：绑定到 operator B() 结果（实质化后）的 A 子对象
+const A& r = x;          // ¶5.3.2：绑定到 operator B() 结果的 A 子对象
 int i2 = 42;
-int&& rri = static_cast<int&&>(i2); // xvalue：直接绑定到 i2
-B&& rrb = x;                        // ¶5.3.2：直接绑定到 operator B() 的结果
+int&& rri = static_cast<int&&>(i2);  // xvalue：直接绑定到 i2
+B&& rrb = x;             // ¶5.3.2：直接绑定到 operator B() 的结果
+```
 
+¶5.3 到这里时，引用要么是 const 左值引用，要么是右值引用。如果
+
+- ¶5.3.1 初始化器是右值（但不是位域）或函数左值，并且引用兼容；或者
+- ¶5.3.2 初始化器是类类型，`T1` 与 `T2` 不引用相关，并且能经转换函数（[[over.match.ref]]）转换为引用兼容的右值或函数左值，
+
+那么前一种情形的初始化器、后一种情形的转换结果称为**转换后的初始化器**（converted initializer）。如果它是纯右值，设其类型为 `T4`，就施行临时量实质化转换，并把纯右值的类型视为 *cv1* `T4`。引用绑定到所得的泛左值，或者它的适当基类子对象。
+
+视为 *cv1* `T4` 意味着临时对象带上了引用的 cv 限定。`const int& x = 42;` 实质化出的临时对象类型是 `const int`，通过 `const_cast` 修改它就是修改 const 对象：
+
+```cpp error
+constexpr int f() {
+  const int& x = 42;
+  const_cast<int&>(x) = 1;   // UB：修改 const 对象
+  return x;
+}
+constexpr int z = f();       // error: 常量求值中出现 UB，不是常量表达式
+```
+
+同样的规则让数组可以整体以更 const 的类型实质化，不必逐元素转换：
+
+```cpp ok
 typedef int *AP[3];                 // 3 个 int* 的数组
 typedef const int *const ACPC[3];   // 3 个 const int* const 的数组
-ACPC &&r2 = AP{};                   // 直接绑定：AP 纯右值以 ACPC 类型实质化
+ACPC&& r = AP{};   // AP 与 ACPC 引用兼容：AP 纯右值以 ACPC 类型实质化
 ```
 
-最后一行中，`AP` 与 `ACPC` 相似且引用兼容（多层限定转换），所以数组纯右值以 `ACPC` 类型实质化，不需要逐元素转换出一个新数组。
+函数左值也归入 ¶5.3，所以 `void (&&rf)() = g;` 合法。函数没有可以移走的资源，左值与右值的区分对它没有意义。
 
-函数左值也归入 ¶5.3，所以 `void (&&rf)() = g;` 合法。右值引用可以绑定函数左值，因为函数没有可以移走的资源，左值和右值的区分对函数没有意义。
+### 创建临时对象（¶5.4）
 
-### ¶5.4 最后手段：创建临时对象
-
-¶5.4 如果以上都不满足，`T1` **必须与 `T2` 不引用相关**。这句话排除了两类情形：
-
-1. 右值引用不能绑定到引用相关的左值：`double d2; double&& r = d2;`。如果允许，`std::move` 就失去了意义，任何左值都可以悄悄地当作右值使用。
-2. cv 限定被丢弃：`const volatile int cvi = 1; const int& r2 = cvi;` 引用相关但不引用兼容（丢掉了 `volatile`），不能退而创建一个副本。
-
-然后：
-
-- ¶5.4.1 `T1` 或 `T2` 是类类型：按通过用户定义转换拷贝初始化 *cv1* `T1` 对象的规则（[[dcl.init]] ¶15.6.3、[[over.match.copy]]、[[over.match.conv]]）考虑用户定义转换；如果对应的非引用拷贝初始化非良构，这里也非良构。然后用转换函数调用的结果 E，以 `(E)` 形式直接初始化引用，此时不再考虑用户定义转换。
-- ¶5.4.2 否则：把初始化表达式隐式转换为 "`T1`" 的纯右值，以 "*cv1* `T1`" 类型实质化，引用绑定到结果。
-
-```cpp
-const double& rcd2 = 2;          // ¶5.4.2：临时 const double，值 2.0
-double&& rrd = 2;                // ¶5.4.2：临时 double，值 2.0
+```cpp ok
+#include <string>
+const double& rcd2 = 2;        // 临时 const double，值 2.0
+double&& rrd = 2;              // 临时 double，值 2.0
 int i3 = 2;
-double&& rrd3 = i3;              // ¶5.4.2：OK！int 左值与 double 不引用相关，创建临时 double
-const std::string& s = "abc";    // ¶5.4.1：string(const char*) 构造临时量
+double&& rrd3 = i3;            // OK：绑定到从 i3 转换出的临时 double
+const std::string& s = "abc";  // string(const char*) 构造临时对象
 ```
 
-`double&& rrd3 = i3;` 是一个有名的怪现象：右值引用看起来绑定到了左值。其实并非如此，它绑定的是从 `i3` 转换出的临时 `double`，修改 `rrd3` 不会影响 `i3`。
+¶5.4 前三个分支都不适用时，标准先要求 `T1` 与 `T2` **不引用相关**，然后才允许转换：
 
-标准的例 6 展示了 ¶5.4 的所有错误形态：
+- ¶5.4.1 `T1` 或 `T2` 是类类型：按“用户定义转换拷贝初始化一个 *cv1* `T1` 对象”的规则（[[dcl.init#15.6.3]]、[[over.match.copy]]、[[over.match.conv]]）选择转换；如果对应的非引用拷贝初始化非良构，这里也非良构。转换函数调用的结果 E 再以 `(E)` 的形式直接初始化引用，这一次不再考虑用户定义转换。
+- ¶5.4.2 否则：把初始化器隐式转换为 `T1` 类型的纯右值，以 *cv1* `T1` 类型实质化，引用绑定到结果。
 
-```cpp
+`double&& rrd3 = i3;` 看起来是右值引用绑定了左值，其实它绑定的是转换出的临时 `double`，修改 `rrd3` 不影响 `i3`。
+
+不引用相关这个前提排除了两类绑定：
+
+1. 右值引用绑定引用相关的左值，如 `double d2; double&& r = d2;`。如果允许，任何左值都能不经 `std::move` 就被当作右值移走。
+2. 丢掉 cv 限定，如 `const volatile int cvi = 1; const int& r2 = cvi;`。两者引用相关但不兼容（丢了 `volatile`），不能退而复制一份。
+
+标准例 6 列出了 ¶5.4 的各种错误：
+
+```cpp error
 struct Banana { };
 struct Enigma { operator const Banana(); };
 struct Alaska { operator Banana&(); };
 void enigmatic() {
   typedef const Banana ConstBanana;
-  Banana &&banana1 = ConstBanana(); // error: 引用相关（丢 const），¶5.4 禁止
-  Banana &&banana2 = Enigma();      // error: 转换结果 const Banana 与 Banana 引用相关但不兼容
-  Banana &&banana3 = Alaska();      // error: 转换结果是左值 Banana&，右值引用不能绑定
+  Banana&& banana1 = ConstBanana(); // error: 引用相关，会丢掉 const
+  Banana&& banana2 = Enigma();      // error: 见下文
+  Banana&& banana3 = Alaska();      // error: 转换结果是 Banana 左值
 }
 const volatile int cvi = 1;
 const int& r2 = cvi;                // error: 丢掉 volatile
 struct A { operator volatile int&(); } a;
-const int& r3 = a;                  // error: 转换函数的结果丢掉 volatile
+const int& r3 = a;                  // error: 转换结果丢掉 volatile
 double d2 = 1.0;
-double&& rrd2 = d2;                 // error: 初始化器是引用相关类型的左值
+double&& rrd2 = d2;                 // error: 引用相关类型的左值
 struct X { operator int&(); };
-int&& rri2 = X();                   // error: 转换函数的结果是引用相关类型的左值
+int&& rri2 = X();                   // error: 转换结果是引用相关类型的左值
 ```
 
-`Banana&& banana2 = Enigma();` 的分析值得细看。¶5.3.2 要求转换结果与 `Banana` 引用兼容，而 `const Banana` 不是（会丢掉 const），所以 ¶5.3.2 不适用。到了 ¶5.4，`Banana` 与 `Enigma` 不引用相关，进入 ¶5.4.1：按拷贝初始化 `Banana` 的规则，`operator const Banana()` 的结果 E 是 `const Banana` 纯右值；再用 `(E)` 直接初始化 `Banana&&` 时，`Banana` 与 `const Banana` 引用相关，被 ¶5.4 禁止，因此非良构。
+`banana2` 要走完整个流程。`operator const Banana()` 的结果 `const Banana` 与 `Banana` 不引用兼容（会丢掉 const），所以 ¶5.3.2 不适用。到了 ¶5.4，`Banana` 与 `Enigma` 不引用相关，进入 ¶5.4.1：转换函数的结果 E 是 `const Banana` 纯右值，再用 `(E)` 直接初始化 `Banana&&`，此时 `Banana` 与 `const Banana` 引用相关，被 ¶5.4 禁止。
 
-### 直接绑定为什么重要
+## 直接绑定
 
-¶5 末尾定义了**直接绑定**（[[g:bind-directly]]）：除 ¶5.4.2 外的所有情形都是直接绑定，也包括 ¶5.4.1 中最后那次直接初始化，因为它以 `(E)` 的形式回到了 ¶5.1/¶5.3。
+¶5 末尾规定：除 ¶5.4.2（把初始化器隐式转换为被引用类型）之外，所有情形都称引用**直接绑定**（[[g:bind-directly|bind directly]]）到初始化表达式。¶5.4.1 中最后那次 `(E)` 直接初始化会回到 ¶5.1 或 ¶5.3，因此也算直接绑定。
 
-这个概念在别处有三个用途：
+这个概念主要用于重载决议。[[over.ics.ref]] 规定，引用形参直接绑定到实参时，隐式转换序列是恒等转换（或派生到基类转换）；不是直接绑定时，转换序列按转换到被引用类型来计算。[[over.ics.rank]] 中右值引用绑定右值优于左值引用等规则也建立在它之上。
 
-1. 重载决议：[[over.ics.ref]] 规定，引用参数直接绑定到实参时，隐式转换序列是恒等转换（或派生到基类转换）；不是直接绑定时，转换序列按转换为被引用类型来计算。[[over.ics.rank]] 中“右值引用绑定右值优于左值引用”等规则也建立在这个概念之上。
-2. 寿命延长：不论是否直接绑定，只要引用最终绑定到一个（实质化产生的）临时对象，就适用 [[class.temporary]] ¶6 的寿命延长。
-3. 常量表达式与结构化绑定等处，推理引用指代哪个对象时也要用到它。
+是否直接绑定与寿命延长无关：只要引用最终绑定到实质化出的临时对象，就适用 [[class.temporary#6]] 的寿命延长。
 
 ## 位域
 
-位域不能被非 const 引用绑定（[[class.bit]]）：¶5.1.1 和 ¶5.3.1 都明确排除了位域。`const int& r = s.bf;` 按 [[class.bit]] 注 3 的说法，绑定到一个保存位域值的临时对象。
-
-```cpp
+```cpp error
 struct S { int bf : 3; } s;
 int& r1 = s.bf;          // error: 非 const 引用不能绑定位域
-const int& r2 = s.bf;    // OK: 绑定到临时量（主流实现均如此）
+const int& r2 = s.bf;    // OK：绑定到保存位域值的临时对象
 ```
 
+位域不一定从字节边界开始，没有地址，所以引用不能直接绑定它：¶5.1.1 和 ¶5.3.1 都排除了位域。[[class.bit]] 的注 3 说明，`const int&` 绑定的是一个保存位域值的临时对象。
+
 !!! lawyer "措辞上的空隙"
-    严格按 ¶5 的文字，`const int& r2 = s.bf;` 既不满足 ¶5.1.1（初始化器是位域），也不满足 ¶5.3.1（初始化器是左值，而且位域被排除），于是进入 ¶5.4。而 ¶5.4 要求 `T1`（`int`）与 `T2`（`int`）不引用相关，这里却是相同类型。照字面理解，程序就非良构了；但 [[class.bit]] 的注 3（非规范性）明确说它绑定到临时量，所有主流编译器也都接受。这是规范文字与设计意图之间的一处空隙。
+    严格按 ¶5 的文字，`const int& r2 = s.bf;` 不满足 ¶5.1.1（初始化器是位域），也不满足 ¶5.3.1（初始化器是左值），于是进入 ¶5.4；而 ¶5.4 要求 `int` 与 `int` 不引用相关，这里不满足。照字面读，程序非良构。但 [[class.bit]] 的注 3 明确说它绑定到临时对象，所有主流编译器也都接受。注不具规范效力，这是条文与设计意图之间的一处空隙。
 
-## 临时对象的寿命（¶6）
+## 临时对象活多久（¶6）
 
-¶6（注）绑定到引用的临时对象的寿命由 [[class.temporary]] 描述。要点：
+¶6 是一条注，指向 [[class.temporary]]。要点如下。
 
-- 引用绑定到临时量（或其子对象）时，如果这一泛左值是通过实质化、括号、数组下标、`.` 成员访问、`.*`、不涉及用户定义转换的 cast、条件运算符、逗号运算符等不改变所指对象的表达式得到的，临时量的寿命就延长到引用的寿命（[[class.temporary]] ¶6）。
-- 通过函数调用得到的引用（包括 `std::max`、`std::move`、返回 `const T&` 的成员函数）**不会**触发延长，因为编译器看不到函数体内部。
+引用绑定到临时对象或它的子对象时，如果这个泛左值是经实质化、括号、数组下标、`.` 成员访问、`.*`、不涉及用户定义转换的 cast、条件运算符或逗号运算符得到的，临时对象的寿命就延长到与引用相同（[[class.temporary#6]]）。
+
+经函数调用得到的引用不会延长寿命，包括 `std::max`、`std::move` 和返回 `const T&` 的成员函数，因为编译器不追踪函数内部返回的是什么。
 
 ```cpp run ub
 #include <string>
 #include <cstdio>
 const std::string& id(const std::string& s) { return s; }
 int main() {
-  const std::string& ok = std::string(40, 'a');        // 寿命延长到 ok 的作用域结束
-  const std::string& bad = id(std::string(40, 'b'));   // 临时量在本行结束时销毁
-  std::printf("%c %c\n", ok[0], bad[0]);               // UB: bad 悬垂
+  const std::string& ok = std::string(40, 'a');       // 寿命延长到 ok 的作用域结束
+  const std::string& bad = id(std::string(40, 'b'));  // 临时对象在本行结束时销毁
+  std::printf("%c %c\n", ok[0], bad[0]);              // UB：bad 悬垂
 }
 ```
 
 用 `-fsanitize=address` 运行会报告 `stack-use-after-scope`。
 
-- 例外：绑定到函数调用中引用形参的临时量、绑定到 *new-initializer* 中引用的临时量、圆括号聚合初始化中绑定到引用元素的临时量，都只存活到完整表达式结束（[[class.temporary]] ¶6.10–¶6.12）。
+也有不延长的例外：绑定到函数调用中引用形参的临时对象、圆括号聚合初始化中绑定到引用成员的临时对象、*new-initializer* 中绑定到引用的临时对象，都只活到所在完整表达式结束（[[class.temporary#6]] 的 6.10–6.12 项）。
 
-## 禁止把引用绑定到注定悬垂的临时量
+## 把必然悬垂的绑定变成编译错误
 
-既然有些绑定必然悬垂，越来越多的规则把它们从运行时的 UB 提前为编译错误。
+有些绑定一定会悬垂。C++ 逐步把它们从运行时的 UB 提前为编译错误。
 
-### 构造函数的成员初始化器
+### 成员初始化器
 
-[[class.base.init]] ¶8（C++14 之后通过缺陷报告加入）规定，在 *mem-initializer* 中把引用成员绑定到临时表达式，程序非良构；¶13 规定，在默认成员初始化器中这样做，则在实际使用该初始化器时非良构。
+[[class.base.init#8]] 规定，在 *mem-initializer* 中把引用成员绑定到临时对象，程序非良构；[[class.base.init#13]] 对默认成员初始化器作了同样的规定，构造函数实际用到这个默认成员初始化器时报错。
 
-```cpp
+```cpp error
 struct A {
-  A() : v(42) { }   // error: 临时量只活到构造函数结束
+  A() : v(42) { }   // error: 临时对象只活到构造函数结束
   const int& v;
 };
 ```
 
-### 库：`reference_constructs_from_temporary` {{c++23}}
+### 库：检测绑定到临时对象 {{c++23}}
 
-[[P2255R2]] 新增了两个类型特征 `std::reference_constructs_from_temporary<T, U>` 和 `std::reference_converts_from_temporary<T, U>`，用来判断用 `U` 类型的表达式（直接或拷贝）初始化引用 `T` 时，是否会把引用绑定到一个临时量。它们无法用普通的模板元编程实现，需要编译器内建支持。
+[[P2255R2]] 新增了类型特征 `std::reference_constructs_from_temporary` 和 `std::reference_converts_from_temporary`，判断用某类型的表达式（直接或拷贝）初始化一个引用时，会不会把引用绑定到临时对象。这件事无法用普通的模板元编程判断，需要编译器内建支持。
 
-同一提案利用这些特征，在 `std::pair`、`std::tuple` 的相关构造函数会把引用成员绑定到临时量时将其删除，并让 `INVOKE<R>`（`std::function<const T&()>` 等）在会返回悬垂引用时非良构：
+标准库用它们删去了 `std::pair`、`std::tuple` 中会把引用成员绑定到临时对象的构造函数，并让 `INVOKE<R>` 在会返回悬垂引用时非良构（例如 `std::function<const T&()>` 包装返回 `T` 的函数）：
 
-```cpp
+```cpp error
 #include <tuple>
 #include <string>
 #include <type_traits>
 static_assert(std::reference_constructs_from_temporary_v<const int&, long>);
 static_assert(!std::reference_constructs_from_temporary_v<const int&, int&>);
-std::tuple<const std::string&> t("abc");   // error（C++23 起）：引用元素会绑定到临时 string
+std::tuple<const std::string&> t("abc");   // error: 引用元素会绑定到临时 string
 ```
 
-### 核心语言：`return` 绑定临时量 {{c++26}}
+### `return` 绑定临时对象 {{c++26}}
 
-[[P2748R5]] 在 [[stmt.return]] ¶6 中规定：如果 `return` 语句把返回的引用绑定到临时表达式，程序非良构。当前草案还进一步覆盖了返回对象的**组成引用**（constituent reference，[[intro.object]]）：
+[[P2748R5]] 在 [[stmt.return#6]] 中规定：`return` 语句把返回的引用，或者返回对象的组成引用（constituent reference，[[intro.object]]），绑定到临时对象时，程序非良构。
 
-```cpp
+```cpp error
 auto&& f1() {
-  return 42;            // error（C++26）：返回的引用绑定到临时量
+  return 42;     // error: 返回的引用绑定到临时对象
 }
 const double& f2() {
   static int x = 42;
-  return x;             // error（C++26）：int → double 的转换创建了临时量
+  return x;      // error: int → double 创建了临时对象
 }
 auto&& id(auto&& r) { return static_cast<decltype(r)&&>(r); }
 auto&& f3() {
-  return id(42);        // OK（但几乎一定是 bug）：经过函数调用，编译器不追踪
+  return id(42); // 良构，但返回的引用悬垂：经过了函数调用
 }
 ```
 
-`f2` 是一个很好的例子：程序员以为返回的是静态变量 `x`，实际上 `const double&` 绑定的是 `x` 转换出的临时 `double`（¶5.4.2）。C++23 及以前它是良构的，返回一个悬垂引用（使用即 UB）；C++26 中则是编译错误。
+`f2` 的作者以为返回的是静态变量 `x`，实际上 `const double&` 绑定的是从 `x` 转换出的临时 `double`（¶5.4.2）。C++23 中它良构，返回悬垂引用，使用即 UB；C++26 中它是编译错误。
 
-这条规则豁免了为 `std::is_convertible` 虚构的那个函数（[[meta.rel]]），否则 `is_convertible_v<int, const int&>` 会变成 `false`，破坏大量现有代码。
+这条规则豁免了标准为 `std::is_convertible` 虚构的那个函数（[[meta.rel]]），否则 `is_convertible_v<int, const int&>` 会变成 `false`。
 
 !!! impl
-    截至写作时，Clang 对 `f1`、`f2` 报错（"returning reference to local temporary object"），但返回对象的引用成员绑定到临时量时（如 `struct P { const int& r; }; P g() { return P{42}; }`）尚不报错。
+    本机 Clang 23 在 `-std=c++2c` 下对 `f1`、`f2` 报错（returning reference to local temporary object），C++23 模式下只给警告。返回对象的引用成员绑定到临时对象时（如 `struct P { const int& r; }; P g() { return P{42}; }`）尚不报错，没有实现组成引用这一部分。
 
 ## 实现视角
 
 !!! impl
-    - 引用的表示就是指针：在所有主流 ABI 中，引用成员和引用形参的表示与指针相同；引用变量通常会被完全优化掉。
-    - 寿命延长的临时量存放在当前栈帧（自动存储期的引用）或静态存储（命名空间作用域的引用）中，在引用离开作用域时析构，编译器为它生成一个隐藏的局部对象。
-    - 诊断：Clang 的 `-Wdangling` 系列（默认开启）能捕获不少立即悬垂的绑定，例如圆括号聚合初始化中的引用成员、`std::string_view sv = std::string("x");`；GCC 的 `-Wdangling-reference` 尝试检测把临时量传给返回引用的函数这类情形，但有误报。
+    - 主流 ABI 中，引用成员和引用形参的表示与指针相同；局部引用变量通常被完全优化掉。
+    - 寿命延长的临时对象是编译器生成的隐藏对象：自动存储期的引用对应栈上的隐藏局部变量，命名空间作用域的引用对应静态存储中的隐藏对象，随引用一起析构。
+    - Clang 默认开启的 `-Wdangling` 系列能抓到不少立即悬垂的绑定，例如 `std::string_view sv = std::string("x");`。GCC 的 `-Wdangling-reference` 尝试检测把临时对象传给返回引用的函数，但有误报。
 
 ## 历史与演进
 
 !!! history
-    - **C++98**：非 const 左值引用只能绑定左值；const 引用可以绑定右值。对于类类型右值，实现可以选择直接绑定，也可以先拷贝出一个临时量再绑定，因此即使不拷贝，也要求拷贝构造函数可访问。
-    - **C++11**：引入右值引用。通过解决一个核心问题，类右值绑定到 const 引用时必须直接绑定，不再允许额外拷贝。此后 ¶5 经过多次改写，以处理右值引用与转换函数的组合。
-    - **C++14 之后**（缺陷报告）：*mem-initializer* 中把引用成员绑定到临时量变为非良构。
-    - **C++17**：[[P0135R1]] 引入临时量实质化，¶5.3 改用转换后的初始化器加实质化的措辞。
-    - **C++20 时期**（缺陷报告）：引用相关改用相似类型定义，`const int* const& r = p;`（`p` 为 `int*`）直接绑定到 `p`。
-    - **C++23**：[[P2255R2]] 类型特征与库中对悬垂绑定的禁止。
-    - **C++26**：[[P2748R5]] `return` 语句绑定临时量非良构。
+    - C++98：非 const 左值引用只能绑定左值，const 引用可以绑定右值。类类型右值绑定到 const 引用时，实现可以先复制出一个临时对象再绑定，所以即使不复制，也要求拷贝构造函数可访问。
+    - C++11：引入右值引用。类右值必须直接绑定，不再允许额外的复制。此后 ¶5 多次改写，以处理右值引用与转换函数的组合。
+    - C++14 之后（缺陷报告）：在 *mem-initializer* 中把引用成员绑定到临时对象变为非良构。
+    - C++17：[[P0135R1]] 引入临时量实质化，¶5.3 改用转换后的初始化器加实质化的措辞。
+    - C++20 前后（缺陷报告）：引用相关改用相似类型定义，`const int* const& r = p;`（`p` 为 `int*`）直接绑定到 `p`，不再创建临时对象。
+    - C++23：[[P2255R2]] 的类型特征，以及标准库中对悬垂绑定的禁止。
+    - C++26：[[P2748R5]]，`return` 绑定临时对象非良构。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "`const T&` 形参 + 返回引用 = 悬垂"
-    `const auto& m = std::max(a, b + 1);` 中 `b + 1` 的临时量在本行结束时销毁，`m` 可能悬垂。寿命延长只对直接绑定临时量的那个引用有效，无法穿过函数调用。
+!!! pitfall "`const T&` 形参加上返回引用"
+    `const auto& m = std::max(a, b + 1);` 中 `b + 1` 的临时对象在本行结束时销毁，`m` 可能悬垂。寿命延长只对直接绑定临时对象的那个引用有效，穿不过函数调用。
 
-!!! pitfall "看似绑定到变量，实际绑定到临时量"
-    `int i; const long& r = i; i = 5;` 之后 `r` 仍是 0，因为 `r` 绑定的是转换出的临时 `long`。形参 `void f(const long&)` 接收 `int` 实参时也是一样。
+!!! pitfall "看似绑定到变量，实际绑定到临时对象"
+    `int i = 0; const long& r = i; i = 5;` 之后 `r` 仍是 0，因为 `r` 绑定的是转换出的临时 `long`。`void f(const long&)` 接收 `int` 实参时也一样。
 
 !!! pitfall "范围 for 与链式调用"
-    `for (auto& x : make_obj().items())` 中只有 `make_obj().items()` 的结果被绑定到隐藏的引用，`make_obj()` 返回的临时对象在初始化器结束时销毁。C++23 起 [[class.temporary]] ¶7 让 *for-range-initializer* 中的所有临时量都延长寿命，修复了这一问题。
+    `for (auto& x : make_obj().items())` 中，C++20 及以前只有 `items()` 的结果绑定到隐藏的引用，`make_obj()` 返回的临时对象在初始化器结束时就销毁了。C++23 的 [[P2718R0]] 让 *for-range-initializer* 中的所有临时对象都活到循环结束（[[class.temporary#7]]）。
 
 ## 思考题
 
-!!! question "1. 下面每行绑定到什么？哪些非良构？"
+!!! question "思考题 1"
+    下面每行绑定到什么？哪些非良构？
     ```cpp
     struct B {}; struct D : B {};
     D make();
@@ -395,26 +422,28 @@ auto&& f3() {
 <details markdown="1">
 <summary>答案</summary>
 
-- `r1`：`make()` 是 `D` 纯右值，`B` 与 `D` 引用兼容 → ¶5.3.1，实质化 `D` 临时量，绑定到其 `B` 子对象；临时量寿命延长。
-- `r2`：`d` 是左值。¶5.1 不适用（右值引用），¶5.2 不适用，¶5.3.1 要求右值，不满足；¶5.4 要求 `B` 与 `D` 不引用相关，而 `B` 是 `D` 的基类 → 非良构。
-- `r3`：`std::move(d)` 是 xvalue（右值）→ ¶5.3.1，直接绑定到 `d` 的 `B` 子对象，不涉及临时量。
-- `r4`：同 `r1`，绑定到实质化的临时量的 `B` 子对象，寿命延长。
-- `r5`：非 const 左值引用，初始化器是右值 → ¶5.2 非良构。
+- `r1`：`make()` 是 `D` 纯右值，`B` 与 `D` 引用兼容，走 ¶5.3.1：实质化一个 `D` 临时对象，绑定到它的 `B` 子对象，寿命延长。
+- `r2`：`d` 是左值。¶5.1 只管左值引用，¶5.3.1 要求右值，都不适用；¶5.4 要求 `B` 与 `D` 不引用相关，而 `B` 是 `D` 的基类，所以非良构。
+- `r3`：`std::move(d)` 是 xvalue，走 ¶5.3.1，直接绑定到 `d` 的 `B` 子对象，不创建临时对象。
+- `r4`：同 `r1`，绑定到实质化出的临时对象的 `B` 子对象，寿命延长。
+- `r5`：非 const 左值引用，初始化器是右值，¶5.2 非良构。
 </details>
 
-!!! question "2. 为什么 `double&& r = i;`（`i` 是 `int` 左值）是良构的，而 `int&& r = i;` 不是？这种不对称合理吗？"
+!!! question "思考题 2"
+    为什么 `double&& r = i;`（`i` 是 `int` 左值）良构，而 `int&& r = i;` 非良构？这种不对称合理吗？
 
 <details markdown="1">
 <summary>答案</summary>
 
-`int&& r = i;`：`int` 与 `int` 引用相关，`i` 是左值；¶5.3 要求右值，¶5.4 要求不引用相关，都不满足 → 非良构。
+`int&& r = i;`：`int` 与 `int` 引用相关，`i` 是左值。¶5.3 要求右值，¶5.4 要求不引用相关，都不满足，所以非良构。
 
-`double&& r = i;`：`double` 与 `int` 不引用相关 → ¶5.4.2，`i` 转换为 `double` 纯右值并实质化，`r` 绑定到这个新的临时对象。
+`double&& r = i;`：`double` 与 `int` 不引用相关，走 ¶5.4.2，`i` 转换为 `double` 纯右值并实质化，`r` 绑定到这个新的临时对象。
 
-这是合理的。右值引用的语义是可以窃取所绑定对象的资源。如果 `int&& r = i;` 合法，就等于允许窃取 `i`，而 `i` 之后还会被使用；`double&& r = i;` 绑定的是一个与 `i` 无关的临时量，没有人会再用它，窃取它是安全的。规则真正禁止的是**把右值引用绑定到现存的左值对象**。
+这种不对称是合理的。右值引用的含义是可以拿走所绑定对象的资源。`int&& r = i;` 若合法，就等于允许拿走 `i` 的资源，而 `i` 之后还会被使用；`double&& r = i;` 绑定的是一个与 `i` 无关、别人用不到的临时对象，拿走它的资源是安全的。规则真正禁止的是把右值引用绑定到已有的左值对象。
 </details>
 
-!!! question "3. 下面的 `get` 在 C++23 和 C++26 中分别如何？"
+!!! question "思考题 3"
+    下面的 `get` 在 C++23 和 C++26 中分别怎样？
     ```cpp
     struct Cfg { long timeout; };
     const int& get(const Cfg& c) { return c.timeout; }
@@ -423,17 +452,7 @@ auto&& f3() {
 <details markdown="1">
 <summary>答案</summary>
 
-`c.timeout` 是 `const long` 左值，`int` 与 `long` 不引用相关 → ¶5.4.2：转换为 `int` 纯右值并实质化，返回的引用绑定到这个临时量。临时量在 `return` 语句的完整表达式结束时销毁，返回的引用悬垂。
+`c.timeout` 是 `const long` 左值，`int` 与 `long` 不引用相关，走 ¶5.4.2：转换为 `int` 纯右值并实质化，返回的引用绑定到这个临时对象。临时对象在 `return` 语句结束时销毁，返回的引用悬垂。
 
-- C++23：良构，但任何使用返回值的行为都是 UB（多数编译器会警告返回了局部临时对象的引用）。
-- C++26：[[stmt.return]] ¶6（[[P2748R5]]）使其非良构。
+C++23 中程序良构，但使用返回值是 UB，编译器通常会警告。C++26 中 [[stmt.return#6]] 使它非良构，本机 Clang 23 在 `-std=c++2c` 下报错。
 </details>
-
-## 小结
-
-!!! summary
-    - 引用相关 = 相似类型或基类；引用兼容 = 对应的指针能通过标准转换安全转换。
-    - ¶5 的顺序：左值引用直接绑定左值（或转换函数返回的左值）→ 非 const 左值引用到此为止 → 绑定右值/函数左值（或转换函数返回的右值），纯右值实质化 → 不引用相关时才允许创建临时量。
-    - 除了隐式转换为被引用类型再实质化（¶5.4.2）这一种情形，其余都叫直接绑定。
-    - 右值引用永远不能绑定到引用相关的左值，但可以绑定到从不相关类型的左值转换出的临时量。
-    - 寿命延长无法穿过函数调用；C++14/23/26 逐步把必然悬垂的绑定变成编译错误。
