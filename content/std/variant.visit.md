@@ -302,7 +302,7 @@ libc++ 在编译期构造一个 N 维的函数指针数组，运行时按下标�
 规格中的几条要求在实现里都有对应：
 
 - ¶5 的结果一致：所有函数指针必须同一类型才能放进同一个数组，不同时就触发前面那条 `static_assert`。
-- ¶5 的穷尽性：调用前用 `static_assert(is_invocable_v<...>)` 检查，消息是 "`std::visit` requires the visitor to be exhaustive."
+- ¶5 的穷尽性：`visit<R>` 在调用前用 `static_assert(is_invocable_v<...>)` 检查，消息是 "`std::visit` requires the visitor to be exhaustive."。不带 `R` 的 `std::visit` 走不到这条断言：内部分派函数尾置返回类型里的 SFINAE 先失败，本机 Clang 23 报的是 "no matching function for call to '__invoke'" 和 "cannot deduce return type 'auto'"。
 - ¶7 的 valueless 检查：查表之前先调用 `__throw_if_valueless`，因为无值标记不是有效下标。
 - ¶2 的约束：`visit` 的声明带一个默认模板实参 `void_t<decltype(std::__as_variant(std::declval<_Vs>()))...>`，用 SFINAE 实现。
 - ¶8 的复杂度：查表是 O(1)。多个 variant 时，表的大小是各候选类型数之积，编译时间和代码体积随之增长。

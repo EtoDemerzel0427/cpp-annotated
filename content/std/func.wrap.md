@@ -67,7 +67,7 @@ int main() {
 
 几处差别值得展开：
 
-- 空状态。`function` 把调用空包装器定义为抛 `bad_function_call`，每次调用都隐含一次判空（libc++ 把空状态实现成一个会抛异常的调用桩）。后来的 `move_only_function` 和 `copyable_function` 把非空改成前置条件，实现不必为空状态付任何代价，`noexcept` 签名也才能成立。`function_ref` 干脆不允许空状态：没有默认构造函数，从空函数指针构造违反前置条件。
+- 空状态。`function` 把调用空包装器定义为抛 `bad_function_call`，每次调用都隐含一次判空（本机 libc++ 默认 ABI 下，`-O2` 生成的调用代码里确实有一次判空跳转 `cbz`；只有选用 `_LIBCPP_ABI_OPTIMIZED_FUNCTION` 时，空状态才改成一个会抛异常的调用桩，省掉这次分支）。后来的 `move_only_function` 和 `copyable_function` 把非空改成前置条件，实现不必为空状态付任何代价，`noexcept` 签名也才能成立。`function_ref` 干脆不允许空状态：没有默认构造函数，从空函数指针构造违反前置条件。
 - const 正确性。`function::operator()` 是 const 成员函数，却能调用目标的非 const `operator()`，详见 [[func.wrap.func]]。新包装器把 `const` 写进签名：`move_only_function<void() const>` 只接受能以 const 左值调用的目标。
 - 引用限定。`move_only_function<void() &&>` 表示只能作为右值调用，适合一次性任务，调用时目标也以右值调用。`function_ref` 不支持引用限定，因为它不拥有目标，把目标当右值没有意义。
 
