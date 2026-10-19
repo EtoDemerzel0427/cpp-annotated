@@ -1,71 +1,104 @@
 ---
 title: 发送器适配器
-summary: 适配器的通用规则（惰性、属性与环境如何转发、exception_ptr 签名可省略）；管道语法 sndr | then(f) 背后的闭包对象；then / upon_error / upon_stopped；write_env 与 unstoppable；into_variant；stopped_as_optional 与 stopped_as_error
-status: done
+summary: 适配器的通用规则（惰性、属性和环境怎样转发、可省略的 exception_ptr 签名）；sndr | then(f) 背后的闭包对象；then、upon_error、upon_stopped；write_env 与 unstoppable；into_variant；stopped_as_optional 与 stopped_as_error。
+status: draft
 covers: exec.adapt.general, exec.adapt.obj, exec.write.env, exec.unstoppable, exec.then, exec.into.variant, exec.stopped.opt, exec.stopped.err
 papers: P2300R10
 related: exec.snd, exec.factories, exec.on, exec.let, exec.bulk, exec.when.all, exec.queries, exec.snd.transform
 tags: 标准库, std::execution, 发送器适配器
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-适配器（[[g:sender-adaptor]]）接受一个或多个发送器，返回一个新的发送器——它们是把小块异步工作**组合**成大块的工具。本页覆盖 [exec.adapt] 的总则、管道语法，以及几个较简单的适配器；换调度器的 `starts_on`/`continues_on`/`on` 见 [[exec.on]]，`let_*` 见 [[exec.let]]，`bulk*` 见 [[exec.bulk]]，`when_all` 见 [[exec.when.all]]，`associate`/`spawn_future` 见 [[exec.spawn]]。
+!!! tldr
+    - 适配器接受发送器、返回新的发送器，并且是惰性的：在结果被 connect 并 start 之前，除了复制、移动实参之外什么也不做。
+    - `then(sndr, f)` 和 `sndr | then(f)` 等价；少给发送器的 `then(f)` 是一个闭包对象，闭包之间也能用 `|` 组合，设计与 ranges 的范围适配器相同。
+    - `then`、`upon_error`、`upon_stopped` 分别在值、错误、取消完成时调用回调，把回调的结果作为值发出；回调抛出的异常变成 `set_error(exception_ptr)`。
+    - `write_env` 给子发送器换上一个合并后的环境，写入的查询优先；`unstoppable` 就是写入一个永不停止的停止令牌。
+    - `into_variant` 把多种值签名合成一个 variant；`stopped_as_optional`、`stopped_as_error` 把取消变成空 `optional` 或一个错误。
 
-## 通用规则（[exec.adapt.general]）
+本页的 `std::execution` 例子没有经过编译验证：本机 Clang 23 附带的 libc++ 还没有实现发送器库，所以不加判定标记。
 
-¶2 位或运算符 `|` 被重载用来构造发送器链；适配器也支持等价的函数调用语法：`then(sndr, f)` ≡ `sndr | then(f)`。
+[[g:sender-adaptor|发送器适配器]]（sender adaptor）接受一个或多个发送器（称为子发送器），返回一个新的发送器（父发送器），是把小块异步工作组合成大块的工具。本页讲通用规则、管道语法和几个较简单的适配器。其余的在别处：切换执行资源的 `starts_on`、`continues_on`、`on` 见 [[exec.on]]，`let_*` 见 [[exec.let]]，`bulk*` 见 [[exec.bulk]]，`when_all` 见 [[exec.when.all]]，`associate`、`spawn_future` 见 [[exec.spawn]]。
 
-¶3 除非另有规定：
-
-- ¶3.1 **惰性**：在返回的发送器被 connect 并且 start 之前，适配器不得产生除复制/移动实参以外的可观察效果。`then(sndr, f)` 不会调用 `f`，也不会"预先启动" `sndr`。
-- ¶3.2 **单子发送器的属性**：父发送器的属性等于 *FWD-ENV*(get_env(sndr))——子发送器的转发查询原样透出；但 `get_completion_scheduler<Tag>`、`get_completion_domain<Tag>` 按 [[exec.snd.general#3]]–4 的规则重新计算（不能直接照搬，因为适配器可能改变完成发生的位置）。
-- ¶3.3 **多子发送器的属性**：等于 `env<>{}`，完成调度器/domain 同上另算。
-- ¶3.4 **环境向下传**：父发送器与接收器 `rcvr` connect 时，连接子发送器所用的接收器，其环境等于 *FWD-ENV*(get_env(rcvr))。
-- ¶3.5 子发送器都是非依赖的（[[exec.async.ops#13]]），则适配器也是非依赖的。
-- ¶3.6 这些要求也适用于实现所选择的任何函数（包括 domain 定制选中的实现）。
-- ¶3.7 *Recommended practice*：实现应该用适配器的完成签名向用户报告类型错误，并传播子发送器的类型错误。
-
-¶4 若某适配器被规定在签名中包含 `set_error_t(Err)`（`decay_t<Err>` 是 `exception_ptr`），但实现**不会**潜在求值带 `exception_ptr` 的 error 完成，实现可以省略这个签名。例如实现能证明 `then` 的回调不会抛异常时，就不必报告 `set_error_t(exception_ptr)`——这让下游少处理一种不可能的情况。
-
-!!! note "¶3.1 的实际意义"
-    惰性意味着发送器可以被**自由地构造、复制、丢弃**，没有副作用。一个函数可以返回一个"描述了很多工作"的发送器，调用者决定是 `sync_wait` 它、`spawn` 它，还是干脆丢弃它。这与 `std::async` 的返回值截然不同：丢弃一个 `async` 返回的 `future` 会在析构时阻塞等待已经开始的工作。
-
-## 闭包对象与管道语法（[exec.adapt.obj]）
-
-¶1 [[g:pipeable-sender-adaptor-closure-object|**可管道化发送器适配器闭包对象**]]：接受发送器、返回发送器的函数对象 `c`，使得 `c(sndr)` 与 `sndr | c` 等价。两个闭包 `c | d` 产生一个新闭包 `e`：它是一个完美转发调用包装器（[[func.require]]），目标对象是 `d` 的副本，绑定实参是 `c` 的副本，调用模式是 `d2(c2(arg))`——先 `c` 后 `d`。
-
-¶2 类型 `T` 的对象是闭包对象，当 `T` 模型化 `derived_from<sender_adaptor_closure<T>>`、没有其他 `sender_adaptor_closure<U>` 基类，且 `T` **不**满足 `sender`。
-
-¶3 `sender_adaptor_closure<D>` 的 `D` 可以不完整；但在 `D` 作为 `|` 的操作数出现之前必须完整。若重载决议选中了一个**程序定义**的 `operator|`，涉及 `D` 的 `|` 表达式行为未定义 {{ub}}——不要给自己的闭包类型再写 `operator|`。
-
-¶4 **可管道化发送器适配器对象**：一个第一个实参是发送器、返回发送器的 CPO。只接受一个实参的，本身就是闭包对象。
-
-¶5 接受多个实参的适配器对象 `adaptor`，`adaptor(args...)`（**少给**了发送器）产生一个闭包：目标对象是 `adaptor` 的副本，绑定实参是 `args...` 的 decay 副本，调用模式是 `adaptor(sndr, bound_args...)`。
+## 管道语法与闭包对象 [exec.adapt.obj]
 
 ```cpp title="pipe.cpp"
 namespace ex = std::execution;
 
-auto add1  = ex::then([](int x) { return x + 1; });   // 闭包：then 少给了发送器
-auto twice = add1 | add1;                             // 闭包组合：先 add1 再 add1
+auto add1  = ex::then([](int x) { return x + 1; });   // 少给了发送器：得到闭包
+auto twice = add1 | add1;                             // 组合两个闭包：先 add1 再 add1
 auto s     = ex::just(40) | twice;                    // 等价于 then(then(just(40), f), f)
-
-// 自定义闭包：派生 sender_adaptor_closure 即可获得 | 支持
-struct log_t : ex::sender_adaptor_closure<log_t> {
-  template<ex::sender S> auto operator()(S&& s) const {
-    return std::forward<S>(s) | ex::then([](auto v) { std::println("{}", v); return v; });
-  }
-};
 ```
 
-这套设计与 ranges 的范围适配器闭包（`views::transform(f)`，`range_adaptor_closure`）几乎一一对应。
+这套语法和 ranges 的范围适配器几乎一一对应。下面是 ranges 里的同样写法：
 
-## then、upon_error、upon_stopped（[exec.then]）
+```cpp run ok
+#include <ranges>
+#include <vector>
+#include <print>
 
-¶1 `then` 给输入发送器的 **value** 完成接一个可调用对象作为后续；`upon_error`、`upon_stopped` 对 error、stopped 完成做同样的事。三者都把可调用对象的结果作为 **value** 完成发出。
+int main() {
+  auto add1  = std::views::transform([](int x) { return x + 1; });
+  auto twice = add1 | add1;          // 组合两个闭包
+  std::vector v{1, 2, 3};
+  for (int x : v | twice) std::print("{} ", x);   // 3 4 5
+}
+```
 
-¶2–3 `decltype((sndr))` 不满足 `sender` 或 `decltype((f))` 不满足 *movable-value* 时非良构；否则等价于 *make-sender*(*then-cpo*, f, sndr)。
+¶1 **可管道化发送器适配器闭包对象**（[[g:pipeable-sender-adaptor-closure-object|pipeable sender adaptor closure object]]）是接受发送器、返回发送器的函数对象 `c`，`c(sndr)` 与 `sndr | c` 等价。两个闭包 `c | d` 产生一个新闭包，调用它相当于 `d(c(arg))`：先 `c` 后 `d`。新闭包里存的是 `c` 和 `d` 的副本。
 
-¶4 *impls-for* 只覆盖 *complete*：
+¶2 一个类型 `T` 要成为闭包对象的类型，需要派生自 `sender_adaptor_closure<T>`（并且只有这一个这样的基类），同时自己不能满足 `sender`。所以自定义闭包只需继承这个基类：
+
+```cpp title="closure.cpp"
+struct log_values_t : ex::sender_adaptor_closure<log_values_t> {
+  template<ex::sender S> auto operator()(S&& s) const {
+    return std::forward<S>(s)
+         | ex::then([](auto v) { std::println("{}", v); return v; });
+  }
+};
+inline constexpr log_values_t log_values;
+// ex::just(1) | log_values | ex::then(...)
+```
+
+¶3 `sender_adaptor_closure<D>` 的 `D` 在声明基类时可以不完整，但在作为 `|` 的操作数出现之前必须完整。如果重载决议对这样的操作数选中了程序自己定义的 `operator|`，行为未定义 {{ub}}，所以不要给自己的闭包类型再写 `operator|`。
+
+¶4 **可管道化发送器适配器对象**是第一个实参为发送器、返回发送器的定制点对象，`then`、`write_env` 都是。只接受一个实参的（如 `into_variant`），本身就是闭包对象。
+
+¶5 接受多个实参的适配器对象，少给发送器调用时，比如 `then(f)`，产生一个闭包：它存着适配器和其余实参的退化副本，以 `sndr` 调用时相当于 `then(sndr, f)`。
+
+## 通用规则 [exec.adapt.general]
+
+¶2 适配器同时支持函数调用写法和 `|` 写法，两者含义相同。
+
+¶3 除非另有规定，所有适配器都遵守以下规则：
+
+- ¶3.1 适配器是**惰性**的：在返回的发送器被 connect 并 start 之前，它不能产生可观察的效果，复制、移动实参除外。`then(sndr, f)` 不调用 `f`，也不会预先启动 `sndr`。
+- ¶3.2 只有一个子发送器时，父发送器的属性就是子发送器的属性，只透出[[g:forwarding-query|转发查询]]（*FWD-ENV*）。完成调度器和完成 domain 两个查询除外，它们按 [[exec.snd.general#3]]、[[exec.snd.general#4]] 重新计算，因为适配器可能改变完成发生的位置。
+- ¶3.3 有多个子发送器时，父发送器的属性是空环境 `env<>{}`，完成调度器和完成 domain 同样另算。
+- ¶3.4 父发送器与接收器 `rcvr` connect 时，子发送器看到的环境是 *FWD-ENV*(get_env(rcvr))，也就是外部环境中的转发查询。
+- ¶3.5 子发送器都是[[g:non-dependent-sender|非依赖发送器]]时，适配器也是非依赖的。
+- ¶3.6 这些要求同样适用于实现选用的任何函数，包括通过 domain 定制选中的实现。
+- ¶3.7 建议（*Recommended practice*）实现用适配器的完成签名向用户报告类型错误，并把子发送器的类型错误传播上来。
+
+惰性意味着发送器可以被自由地构造、复制、丢弃，没有副作用。一个函数可以返回一个描述了很多工作的发送器，由调用者决定是 `sync_wait`、`spawn`，还是直接丢掉。`std::async` 则不同：它一调用就开始工作，丢弃返回的 `future` 会在析构时阻塞等待。
+
+¶4 有些适配器规定签名中包含 `set_error_t(exception_ptr)`。如果实现确定不会发出这种错误完成，可以省略这个签名。例如实现能证明 `then` 的回调不会抛异常时，就不必报告它，下游也就少处理一种不可能发生的情况。
+
+## then、upon_error、upon_stopped [exec.then]
+
+```cpp title="upon-error.cpp"
+namespace ex = std::execution;
+
+auto s = ex::just_error(std::make_error_code(std::errc::timed_out))
+       | ex::upon_error([](std::error_code) { return -1; });   // set_value_t(int)
+auto [v] = std::this_thread::sync_wait(std::move(s)).value();   // v == -1
+```
+
+¶1 `then` 给输入发送器的值完成接上一个可调用对象作为后续；`upon_error`、`upon_stopped` 对错误、取消完成做同样的事。三者都把可调用对象的结果作为值完成发出。所以 `upon_error` 把错误变成了值，是处理错误并恢复执行的工具。
+
+¶2–3 `sndr` 不是发送器，或者 `f` 不满足 *movable-value*（能退化复制成独立的值，见 [[exec.general]]）时非良构；否则等价于 *make-sender*(*then-cpo*, f, sndr)。
+
+¶4 *impls-for* 只覆盖 *complete*（钩子的含义见 [[exec.snd]]）：
 
 ```cpp
 static constexpr auto complete =
@@ -78,81 +111,87 @@ static constexpr auto complete =
   };
 ```
 
-- 子操作以**对应**的处置完成：调用 `fn`，把结果 `set_value` 出去；`fn` 返回 `void` 就 `set_value()`；`fn` 抛异常就 `set_error(exception_ptr)`。
-- 其他处置：原样转发。
+*set-cpo* 对 `then`、`upon_error`、`upon_stopped` 分别是 `set_value`、`set_error`、`set_stopped`。子操作以对应的方式完成时，调用 `fn`，把结果 `set_value` 出去：`fn` 返回 `void` 就是 `set_value()`，`fn` 抛异常就是 `set_error(exception_ptr)`。其他完成原样转发。
 
-¶5 *check-types*：对子发送器每个对应处置的签名 `Tag(Ts...)`，若 `invocable<F, Ts...>` 为 false 就抛异常——类型错误在计算签名时报出（[[exec.snd]] 中构造即报错的机制）。
-
-¶6 若 *then-cpo*(sndr, f) 返回的发送器不满足"对应处置调用 `f`（或其副本）并以其结果作 value 完成，其他完成原样转发"，行为未定义。这条约束的对象是**定制实现**：domain 若替换了 `then`，必须保持这一语义。
-
-签名变换一览（`f` 可能抛异常时）：
-
-| 子发送器签名 | `then(f)` | `upon_error(f)` | `upon_stopped(f)` |
+| 子发送器的签名 | `then(f)` | `upon_error(f)` | `upon_stopped(f)` |
 |---|---|---|---|
-| `set_value_t(int)` | `set_value_t(R)`，`R = invoke_result_t<F, int>`（`void` 则 `set_value_t()`） | 原样 | 原样 |
+| `set_value_t(int)` | `set_value_t(invoke_result_t<F, int>)` | 原样 | 原样 |
 | `set_error_t(E)` | 原样 | `set_value_t(invoke_result_t<F, E>)` | 原样 |
 | `set_stopped_t()` | 原样 | 原样 | `set_value_t(invoke_result_t<F>)` |
-| 额外 | `set_error_t(exception_ptr)` | 同左 | 同左 |
+| `f` 可能抛异常时追加 | `set_error_t(exception_ptr)` | 同左 | 同左 |
 
-注意 `upon_error` 把错误**变成了值**——它是"处理错误并恢复"的工具：
+结果类型为 `void` 时，对应的签名是 `set_value_t()`。
 
-```cpp title="upon-error.cpp"
-namespace ex = std::execution;
+回调是以右值调用的（`invoke(std::move(fn), ...)`），而且只调用一次。只有 `&` 限定 `operator()` 的函数对象不能用于 `then`。
 
-auto s = ex::just_error(std::make_error_code(std::errc::timed_out))
-       | ex::upon_error([](std::error_code ec) { return -1; });   // set_value_t(int)
-auto [v] = std::this_thread::sync_wait(std::move(s)).value();      // v == -1
-```
+¶5 *check-types* 检查回调能否用子发送器对应完成的每一组实参调用，不能就抛异常，签名计算因此失败。由于 *make-sender* 会在构造时检查非依赖发送器的签名，`then(just(1), [](std::string) {})` 在构造这一行就非良构（[[exec.snd]]）。
 
-!!! pitfall "then 的 f 被 std::move 后调用"
-    `invoke(std::move(fn), ...)`：回调以**右值**被调用。一个只有 `&` 限定 `operator()` 的函数对象不能用于 `then`（*check-types* 中 `invocable<F, Ts...>` 检查的也是右值 `F`）。另外 `f` 只会被调用一次——这与"每次 connect 一次、每次完成一次"相符。
+¶6 如果 `then` 返回的发送器不是这样工作的：对相应的完成调用 `f`（或其副本）并以其结果作为值完成，其他完成原样转发，行为未定义。这一条约束的是定制实现：domain 换掉 `then` 的实现时，必须保持这一语义。
 
-## write_env（[exec.write.env]）
+## write_env 与 unstoppable
 
-¶1 `write_env(sndr, env)`：connect 时，把 `sndr` 与一个环境为"`env` 合并到 `get_env(rcvr)` 之上"的接收器 connect。
-
-¶2 `sndr` 不是发送器或 `env` 不满足 *queryable* 时非良构；否则 *make-sender*(write_env, env, sndr)。
-
-¶3–4 *impls-for* 覆盖 *get-env*：返回 *join-env*(state, *FWD-ENV*(get_env(rcvr)))，其中对查询 `q`，先问 `state`（即写入的 `env`），不行再问外部环境。**写入的环境优先**。
-
-¶5 *check-types*：子发送器在合并后的环境下计算签名。
+### write_env [exec.write.env]
 
 ```cpp title="write-env.cpp"
 namespace ex = std::execution;
 
 std::pmr::monotonic_buffer_resource pool;
-auto s = ex::write_env(work, ex::prop(std::get_allocator, std::pmr::polymorphic_allocator<>(&pool)));
-// work 内部 get_allocator(get_env(rcvr)) 得到 pool 的分配器
+auto s = ex::write_env(work, ex::prop(std::get_allocator,
+                                      std::pmr::polymorphic_allocator<>(&pool)));
+// work 内部 get_allocator(get_env(rcvr)) 得到使用 pool 的分配器
 ```
 
-注意两点：
+¶1 `write_env(sndr, env)` 返回的发送器与接收器 `rcvr` connect 时，用一个新的接收器连接 `sndr`，新接收器的环境是把 `env` 合并到 `get_env(rcvr)` 之上的结果。
 
-- 写入的环境对子发送器可见，**不**改变 `write_env` 发送器自己的属性；
-- 外部环境经过 *FWD-ENV*，只有转发查询能穿透；写入的环境则完整可见（包括非转发查询）。
+¶2 `sndr` 不是发送器或 `env` 不是[[g:queryable-object|可查询对象]]时非良构；否则等价于 *make-sender*(write_env, env, sndr)。
 
-## unstoppable（[exec.unstoppable]）
+¶3–4 *impls-for* 覆盖 *get-env*：对查询 `q`，先问写入的 `env`，回答不了再问外部环境（经过 *FWD-ENV*）。写入的环境优先。
 
-¶1–2 `unstoppable(sndr)` ≡ `write_env(sndr, prop(get_stop_token, never_stop_token{}))`。
+¶5 *check-types* 在合并后的环境下计算子发送器的签名。
 
-子发送器看到的停止令牌永远是 `never_stop_token`，于是外部的取消请求不会传到它。用途：一段**必须做完**的工作（比如提交事务、释放资源），即使外部被取消也不能中途放弃。由于 `unstoppable_token<never_stop_token>` 为 true，子发送器还可能借此在类型上去掉 `set_stopped_t()` 签名（例如 `run_loop` 的调度发送器，[[exec.run.loop]]）。
+有两点要注意。写入的环境只对子发送器可见，不改变 `write_env` 发送器自己的属性。外部环境要经过 *FWD-ENV*，只有转发查询能穿透；写入的环境则完整可见，包括非转发查询。
 
-## into_variant（[exec.into.variant]）
+### unstoppable [exec.unstoppable]
 
-¶1 把有**多个** value 完成签名的发送器，变成只有**一个** value 签名、其值是 "variant of tuples" 的发送器。
+¶1–2 `unstoppable(sndr)` 等价于 `write_env(sndr, prop(get_stop_token, never_stop_token{}))`。
 
-¶3 *make-sender*(into_variant, {}, sndr)。¶5 *get-state* 只返回一个 `type_identity<value_types_of_t<child, FWD-ENV-T(env)>>`，用来携带类型。¶6 *complete*：value 完成时，`TRY-SET-VALUE(rcvr, variant_type(decayed-tuple<Args...>{args...}))`；其他完成原样转发。¶4 *check-types*：子发送器的结果数据必须都能 decay-copy。
+子发送器看到的停止令牌永远是 `never_stop_token`，外部的取消请求不会传到它。这适合必须做完的工作，比如提交事务、释放资源。`unstoppable_token<never_stop_token>` 为 true，所以子发送器还可能借此在类型上去掉 `set_stopped_t()` 签名，例如 `run_loop` 的调度发送器（[[exec.run.loop]]）。
 
-子发送器签名 `set_value_t(int)`、`set_value_t(std::string, double)` → `into_variant` 签名 `set_value_t(std::variant<std::tuple<int>, std::tuple<std::string, double>>)`（可能还有 `set_error_t(exception_ptr)`，因为构造 variant 可能抛异常）。
+## into_variant [exec.into.variant]
 
-`when_all` 要求每个子发送器只有一种 value 签名（[[exec.when.all]]），`sync_wait` 也一样（[[exec.consumers]]）；`into_variant` 是把多签名发送器喂给它们的适配层。`when_all_with_variant` 与 `sync_wait_with_variant` 就是在内部套了一层 `into_variant`。
+¶1 `into_variant` 把有多种值完成签名的发送器变成只有一种值签名的发送器，值是一个由 tuple 组成的 variant。例如：
 
-## stopped_as_optional（[exec.stopped.opt]）
+| 子发送器的值签名 | `into_variant` 的值签名 |
+|---|---|
+| `set_value_t(int)`、`set_value_t(std::string, double)` | `set_value_t(std::variant<std::tuple<int>, std::tuple<std::string, double>>)` |
 
-¶1 把 stopped 完成映射成值为**空 optional** 的 value 完成；原来的 value 完成也包进 `optional`。结果发送器**不会**以 stopped 完成。
+构造 variant 可能抛异常，所以还可能多一个 `set_error_t(exception_ptr)`。
 
-¶2 *make-sender*(stopped_as_optional, {}, sndr)。¶3 *check-types*：除默认检查外，子发送器必须有 *single-sender-value-type* 且**不是** `void`——即恰好一种 value 签名、且带至少一个值。
+¶2–3 `sndr` 不是发送器时非良构；否则等价于 *make-sender*(into_variant, {}, sndr)。¶4 *check-types* 要求子发送器的结果都能退化复制。¶5 *get-state* 只用来携带 variant 的类型。¶6 *complete* 在值完成时构造 variant 并 `set_value`，其他完成原样转发。
 
-¶4 它不直接实现，而是在 `transform_sender` 中降级（[[exec.snd.transform]]）：
+`when_all` 要求每个子发送器只有一种值签名（[[exec.when.all]]），`sync_wait` 也一样（[[exec.consumers]]）。`into_variant` 是把多签名发送器交给它们的转接层，`when_all_with_variant`、`sync_wait_with_variant` 就是在内部套了一层 `into_variant`。
+
+## stopped_as_optional 与 stopped_as_error
+
+### stopped_as_optional [exec.stopped.opt]
+
+```cpp title="stopped-as-optional.cpp"
+namespace ex = std::execution;
+
+// 设 cancellable_read() 的签名是 set_value_t(int)、set_stopped_t()
+auto s = cancellable_read() | ex::stopped_as_optional;   // set_value_t(optional<int>)
+if (auto r = std::this_thread::sync_wait(std::move(s))) {
+  auto [opt] = *r;     // opt 为空表示被取消
+}
+```
+
+¶1 `stopped_as_optional` 把取消完成变成一个值为空 `optional` 的值完成，原来的值也包进 `optional`。结果发送器不会以取消完成。
+
+管道里写的是 `| stopped_as_optional`，没有括号：它只接受一个发送器，本身就是闭包对象（[exec.adapt.obj] ¶4）。
+
+¶2 等价于 *make-sender*(stopped_as_optional, {}, sndr)。¶3 *check-types* 额外要求子发送器恰好有一种值签名，并且这种签名带有值（不是 `set_value_t()`）。因此 `just_stopped() | then([] { return 1; })` 不能用：`just_stopped()` 没有值完成，`then` 的回调根本不会被调用，结果的签名只有 `set_stopped_t()`。
+
+¶4 它没有自己的实现，而是在 `transform_sender` 中改写成其他适配器的组合（[[exec.snd.transform]]）：
 
 ```cpp
 auto&& [_, _, child] = sndr;
@@ -165,29 +204,15 @@ return let_stopped(
   []() noexcept { return just(optional<V>()); });
 ```
 
-子发送器在环境下根本没有签名时，变换结果是 *not-a-sender*()，错误推迟到签名计算时报出。
+值经过 `then` 包进 `optional`，取消经过 `let_stopped` 换成一个发出空 `optional` 的 `just`。子发送器在该环境下根本算不出签名时，改写的结果是 *not-a-sender*()，错误推迟到计算签名时报出。
 
-```cpp title="stopped-as-optional.cpp"
-namespace ex = std::execution;
+### stopped_as_error [exec.stopped.err]
 
-// 设 cancellable_read() 的签名是 set_value_t(int)、set_stopped_t()
-auto s = cancellable_read() | ex::stopped_as_optional;      // set_value_t(optional<int>)
-if (auto r = std::this_thread::sync_wait(std::move(s))) {
-  auto [opt] = *r;     // opt 为空表示被取消；sync_wait 自己不会再因 stopped 返回空 optional
-}
-```
+¶1 `stopped_as_error(sndr, err)` 把取消完成变成以 `err` 为数据的错误完成，结果不会以取消完成。适合调用者不区分取消和失败，或者需要把取消变成一个具体错误码（如 `errc::operation_canceled`）交给只处理错误的代码。
 
-注意管道写法是 `| stopped_as_optional` 而不是 `| stopped_as_optional()`：它是只接受一个发送器的适配器对象，本身就是闭包对象（[exec.adapt.obj] ¶4），没有"少给发送器"的零实参形式。
+¶2 `sndr` 不是发送器或 `err` 不满足 *movable-value* 时非良构；否则等价于 *make-sender*(stopped_as_error, err, sndr)。
 
-还要注意 ¶3 的要求是"恰好一种 value 签名、且值类型非 `void`"。`just_stopped() | then([] { return 1; })` 不能拿来演示：`just_stopped()` 没有 value 完成，`then` 的回调分支根本不会被实例化，结果的签名只有 `set_stopped_t()`，*single-sender-value-type* 是 `void`，*check-types* 抛异常。
-
-## stopped_as_error（[exec.stopped.err]）
-
-¶1 把 stopped 完成映射成带自定义错误的 error 完成。结果不会以 stopped 完成。
-
-¶2 `sndr` 不是发送器或 `err` 不满足 *movable-value* 时非良构；否则 *make-sender*(stopped_as_error, err, sndr)。
-
-¶3 降级为：
+¶3 它同样改写成 `let_stopped`：
 
 ```cpp
 auto&& [_, err, child] = sndr;
@@ -199,7 +224,13 @@ return let_stopped(
   });
 ```
 
-用途：调用者不区分"取消"与"失败"，或者需要把取消变成一个具体的错误码（比如 `errc::operation_canceled`）交给只处理错误的代码。
+<details class="fine" markdown="1"><summary>其余条文</summary>
+
+[exec.adapt.general] ¶1 只说明本子条款规定了一组发送器适配器。
+
+[exec.adapt.obj] ¶1 和 ¶5 规定，`c | d` 以及 `adaptor(args...)` 只有在新闭包的各个状态实体都能初始化时才良构。¶5.3 把调用模式写成 `adaptor(rcvr, bound_args...)`，这里的 `rcvr` 指的是调用闭包时传入的那个实参，也就是发送器。
+
+</details>
 
 ## 思考题
 
@@ -209,23 +240,16 @@ return let_stopped(
 <details markdown="1">
 <summary>答案</summary>
 
-`then` 的回调可能抛异常，所以中间发送器签名是 `set_value_t(int)`、`set_error_t(exception_ptr)`。`upon_error` 把 error 变成 value：`invoke_result_t<F, exception_ptr>` 是 `int`，于是得到 `set_value_t(int)`（两条来源的 `set_value_t(int)` 去重，*impls-for* 的签名集合是"潜在求值的完成"构成的集合）；回调也可能抛异常（未声明 noexcept），所以还有 `set_error_t(exception_ptr)`。运行时：`then` 的回调抛出 `int`，*TRY-SET-VALUE* 捕获并 `set_error(exception_ptr)`；`upon_error` 调用回调返回 0，`set_value(0)`；`sync_wait` 返回 `optional<tuple<int>>`，值为 0。
+`then` 的回调可能抛异常，所以中间发送器的签名是 `set_value_t(int)` 和 `set_error_t(exception_ptr)`。`upon_error` 把错误变成值，`invoke_result_t<F, exception_ptr>` 是 `int`，所以得到 `set_value_t(int)`，和原样转发来的值签名重合，只算一个。`upon_error` 的回调没有声明 noexcept，所以还有 `set_error_t(exception_ptr)`。
+
+运行时，`then` 的回调抛出 `int`，*TRY-SET-VALUE* 捕获后调用 `set_error(exception_ptr)`；`upon_error` 的回调返回 0，于是 `set_value(0)`。`sync_wait` 返回 `optional<tuple<int>>`，值为 0。
 </details>
 
 !!! question "2. write_env 能覆盖停止令牌吗？"
-    外部接收器环境有停止令牌 `t1`，`write_env(sndr, prop(get_stop_token, t2))` 后 `sndr` 看到哪个？外部请求停止时 `sndr` 会被取消吗？
+    外部接收器环境里有停止令牌 `t1`，`write_env(sndr, prop(get_stop_token, t2))` 之后 `sndr` 看到哪个？外部请求停止时 `sndr` 会被取消吗？
 
 <details markdown="1">
 <summary>答案</summary>
 
-看到 `t2`：*join-env* 先问写入的环境（[exec.write.env] ¶4.2）。外部通过 `t1` 请求停止**不会**传到 `sndr`，因为 `sndr` 根本不知道 `t1`——`write_env` 是覆盖，不是合并。若想"两个令牌任一触发都取消"，需要把两个令牌合成一个，这正是 [[exec.spawn]] 中阐述用的 *stop-when* 所做的事。
+看到 `t2`：合并后的环境先问写入的部分（[exec.write.env] ¶4.2）。外部通过 `t1` 请求停止不会传到 `sndr`，因为 `sndr` 根本拿不到 `t1`：`write_env` 是覆盖，不是合并两个令牌。想要任一令牌触发都取消，需要把两个令牌合成一个，[[exec.spawn]] 中阐述用的 *stop-when* 做的就是这件事。
 </details>
-
-## 小结
-
-- 适配器是惰性的；单子适配器转发子发送器属性，多子适配器属性为空；环境以 *FWD-ENV* 传给子发送器。
-- `c(sndr)` ≡ `sndr | c`；多参数适配器少给发送器时返回闭包；闭包可用 `|` 组合。
-- `then`/`upon_error`/`upon_stopped`：对应处置调用回调，结果作 value 发出；回调抛异常则 `set_error(exception_ptr)`。
-- `write_env`：写入的环境优先；`unstoppable` = 写入 `never_stop_token`。
-- `into_variant`：多 value 签名 → 一个 variant-of-tuples 签名。
-- `stopped_as_optional`、`stopped_as_error`：通过 `let_stopped` 降级实现，消除 stopped 完成。
