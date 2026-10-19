@@ -1,88 +1,64 @@
 ---
 title: 随机数设施的要求
-summary: <random> 的"合同层"——按模板形参名施加的类型要求（cv 限定、RealType/IntType/UIntType 不合要求即非良构）、单参构造函数必须 explicit；种子序列、均匀随机比特生成器（概念与具名要求）、引擎、引擎适配器、分布五张要求表的逐项含义，尤其是引擎与分布的 == 语义、discard、流式往返和 param_type
+summary: 一个类型要满足什么才算种子序列、URBG、引擎、引擎适配器或分布；引擎和分布的 == 比较什么；以及 IntType、RealType、UIntType 这些模板形参接受哪些类型。
 status: done
 covers: *
 related: rand, rand.eng, rand.util, rand.dist, rand.device, concepts.callable, utility.arg.requirements, basic.fundamental, temp.inst
 tags: 标准库, 随机数, 具名要求, 概念
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[rand.req] 是 `<random>` 的"类型系统"：它不定义任何具体的类，而是规定**一个类型要满足什么才算**种子序列、URBG、引擎、引擎适配器、分布。标准自己的 `mt19937`、`normal_distribution` 等都按这些要求来规定（"Each type instantiated from … meets the requirements of …"），用户也可以写自己的引擎或分布，与标准组件自由组合。
+!!! tldr
+    - 概念 `uniform_random_bit_generator` 只检查语法：能以非 const 左值调用、返回无符号整型、有 `constexpr` 的静态 `min() < max()`。均匀与否只能靠统计检验。
+    - 引擎由状态、转移算法和生成算法规定。两个引擎 `==` 的含义是它们将来产生的无限序列相同，而不是内部字节相同。
+    - 分布可以有内部状态（例如缓存的第二个正态值），`reset()` 清除它；`d(g, p)` 用临时参数生成而不改变 `d`。
+    - 引擎的文本表示跨实现通用，分布的文本表示格式由实现定义。
+    - `uniform_int_distribution<char>`、`<bool>`、`<const int>` 都是非良构的；`signed char` 和 `unsigned char` 可以。
 
-| 子条款 | 内容 |
-|---|---|
-| [rand.req.genl] | 用模板形参名表达要求；单参构造函数必须 `explicit` |
-| [rand.req.seedseq] | 种子序列（表 126） |
-| [rand.req.urng] | 概念 `uniform_random_bit_generator` 与同名具名要求 |
-| [rand.req.eng] | 随机数引擎（表 127） |
-| [rand.req.adapt] | 随机数引擎适配器 |
-| [rand.req.dist] | 随机数分布（表 128） |
-
-## 一般要求（[rand.req.genl]）
-
-### 模板形参的名字就是约束（¶1）
-
-¶1：在 [rand] 中，模板形参未受约束时，用形参的**名字**表达对实例化的类型要求：
-
-| 形参名 | 要求 | 违反的后果 |
-|---|---|---|
-| `Sseq`、`URBG`、`Engine`、`RealType`、`IntType`、`UIntType` | 实参不得 cv 限定（¶1.1） | **非良构** |
-| `Sseq` | 满足种子序列要求（¶1.2） | 库的一般规则：UB |
-| `URBG` | 满足均匀随机比特生成器要求（¶1.3） | 同上 |
-| `Engine` | 满足随机数引擎要求（¶1.4） | 同上 |
-| `RealType` | 标准浮点类型，或实现定义的扩展浮点类型子集（¶1.5） | **非良构** |
-| `IntType` | 标准有符号/无符号整数类型；或宽度在 `char` 与 `long long` 之间的扩展整数类型；或实现定义的整数类型子集（¶1.6） | **非良构** |
-| `UIntType` | 宽度在 `short` 与 `long long` 之间的标准或扩展无符号整数类型；或实现定义的子集（¶1.7） | **非良构** |
-
-几个容易踩的点：
-
-- **`char`、`bool`、`char8_t` 等不是 `IntType`**。标准有符号整数类型是 `signed char`、`short`、`int`、`long`、`long long`（[[basic.fundamental]]），`char` 不在其中；`bool` 和字符类型也不是"整数类型"意义上的标准整数类型。所以 `uniform_int_distribution<char>` 非良构，而 `uniform_int_distribution<signed char>`（即通常的 `int8_t`）合法。
-- **`unsigned char`/`uint8_t` 是 `IntType` 但不是 `UIntType`**：引擎的 `UIntType` 宽度至少要和 `short` 一样。
-- 这些规定把旧标准中的"未定义"改成了"非良构"，实现必须诊断。
-
-```cpp title="inttype.cpp" error
-#include <random>
-
-std::uniform_int_distribution<signed char> ok1(-5, 5);    // OK：标准有符号整数类型
-std::uniform_int_distribution<unsigned char> ok2(0, 9);   // OK
-std::uniform_int_distribution<char> bad1;                 // error：char 不是 IntType
-std::uniform_int_distribution<const int> bad2;            // error：cv 限定
-std::linear_congruential_engine<unsigned char, 3, 1, 0> bad3;  // error：UIntType 窄于 short
-```
-
-!!! impl "libc++"
-    libc++ 用 `__libcpp_random_is_valid_inttype` 白名单加 `static_assert` 检查 `IntType`，`char` 和 `const int` 都得到"IntType must be a supported integer type"。源码里把 `int8_t`/`uint8_t` 注释为"extension"——那是旧标准下的说法，按当前草案它们已经是标准允许的。`__int128` 也被接受，属于 ¶1.6 的"实现定义的子集"。`UIntType = unsigned char` 则没有被正面检查：只声明 `linear_congruential_engine<unsigned char, 3, 1, 0>` 对象时 libc++ 照常编译；直到调用 `operator()`，才在内部模板 `__lce_ta` 的实例化上出错。按 ¶1.7 这本应在实例化时就被诊断，所以例子最后一行在 libc++ 上实际不报错。
-
-### 单参构造函数必须 explicit（¶3）
-
-¶3：[rand] 中任何能以单个实参调用、且满足本子条款某个要求的构造函数，都必须声明为 `explicit`。所以 `std::mt19937 g = 42;`、`std::normal_distribution<> d = p;` 都是非良构的——只能直接初始化。这避免了 `void f(std::mt19937)` 被 `f(42)` 悄悄调用、每次产生一个新引擎。
-
-¶2 只是措辞约定："x 是某种迭代器"读作"x 是满足相应迭代器要求的类型的值"。
-
-## 种子序列（[rand.req.seedseq]）
-
-¶1：**种子序列**（seed sequence，[[g:seed-sequence]]）是一个对象，它消耗一串整数数据，按请求产生任意个 [0, 2³²) 内的无符号整数。注释说明用途：避免多个引擎的随机流相互重复，对需要大量引擎的应用尤其有用。
-
-表 126 的要求（`S` 为类型、`q` 为值、`r` 为可能 const 的值）：
-
-| 表达式 | 要求 |
-|---|---|
-| `S::result_type` | 至少 32 位的无符号整数类型 |
-| `S()` | 与所有默认构造的 `S` 有相同初始状态；常数复杂度 |
-| `S(ib, ie)` | 内部状态依赖于 `[ib, ie)` 的部分或全部比特；O(ie−ib) |
-| `S(il)` | 同 `S(il.begin(), il.end())` |
-| `q.generate(rb, re)` | 空范围什么都不做；否则用 32 位量填满 `[rb, re)`，这些量依赖构造时提供的序列，**也可以**依赖以前的 `generate` 调用历史；O(re−rb) |
-| `r.size()` | `param` 会复制多少个 32 位单元；常数 |
-| `r.param(ob)` | 写出一串 32 位单元，用它构造另一个 `S` 能得到与 `r`"不可区分"的状态 |
-
-注意 `generate` 是**非 const** 的，并允许依赖调用历史：同一个种子序列对象喂给两个引擎，两个引擎得到的可以不同。标准的 `seed_seq` 实际上不依赖历史（见 [[rand.util]]），但通用代码不能这样假设。`size`/`param` 的存在是为了能保存和重建种子序列。
+[rand.req] 不定义具体的类，只规定一个类型要满足什么才算种子序列、URBG、引擎、适配器或分布。标准自己的 `mt19937`、`normal_distribution` 都按这些要求来规定，用户写的类型只要满足要求，也能和标准组件自由组合。各类实体的概览见 [[rand]]。
 
 ## 均匀随机比特生成器（[rand.req.urng]）
 
-¶1：**均匀随机比特生成器**（[[g:uniform-random-bit-generator]]）`g` 是一个返回无符号整数的函数对象，其可能结果范围内的每个值（理想情况下）等概率。"理想情况"由统计检验来衡量（注释）。
+先看一个自己写的生成器：
 
-C++20 起它是一个概念：
+```cpp run title="urbg-concept.cpp" ok
+#include <cstdint>
+#include <random>
+
+struct Counter {
+  using result_type = std::uint32_t;
+  static constexpr result_type min() { return 0; }
+  static constexpr result_type max() { return 0xFFFF'FFFF; }
+  result_type n = 0;
+  result_type operator()() { return n++; }
+};
+static_assert(std::uniform_random_bit_generator<Counter>);
+
+// 没有静态的 min()/max()
+using Lambda = decltype([s = 0u]() mutable { return s++; });
+static_assert(!std::uniform_random_bit_generator<Lambda>);
+
+struct Degenerate {                     // min < max 不成立
+  using result_type = unsigned;
+  static constexpr unsigned min() { return 5; }
+  static constexpr unsigned max() { return 5; }
+  unsigned operator()() { return 5; }
+};
+static_assert(!std::uniform_random_bit_generator<Degenerate>);
+
+struct Signed {                         // 结果必须是无符号的
+  static constexpr int min() { return 0; }
+  static constexpr int max() { return 9; }
+  int operator()() { return 3; }
+};
+static_assert(!std::uniform_random_bit_generator<Signed>);
+
+int main() {}
+```
+
+`Counter` 显然不随机，却满足概念。概念只能检查语法；每个值等概率这一点只能由文档和统计检验保证。把 `Counter` 传给分布是良构的，得到一个确定的序列，测试分布实现时正好用得上。
+
+¶1 **均匀随机比特生成器**（[[g:uniform-random-bit-generator]]）`g` 是一个返回无符号整数的函数对象，取值范围内每个值（理想情况下）等概率。C++20 起它对应一个概念：
 
 ```cpp
 template<class G>
@@ -95,94 +71,73 @@ template<class G>
     };
 ```
 
-逐项读：
+逐项来看：
 
-- `invocable<G&>`：以**非 const 左值**调用，所以 `operator()` 可以（通常也必须）修改状态；
-- `unsigned_integral`：结果是无符号的整型。注意 `bool` 满足 `unsigned_integral`（它是整型且不是有符号的），所以概念本身不排除返回 `bool` 的生成器；¶3 的具名要求更严，要求结果是[[basic.fundamental|无符号整数类型]]，`bool` 不是；
-- `G::min()`、`G::max()` 是**静态**成员，返回类型与 `g()` 完全相同；
-- `bool_constant<(G::min() < G::max())>` 迫使 `min()`、`max()` 是**常量表达式**，并且 `min < max`。
+- `invocable<G&>`：以非 const 左值调用，所以 `operator()` 可以修改状态，通常也必须修改；
+- `unsigned_integral`：结果是无符号整型。`bool` 也满足 `unsigned_integral`，概念本身不排除它；
+- `G::min()`、`G::max()` 是静态成员，返回类型与 `g()` 完全相同；
+- `bool_constant<(G::min() < G::max())>` 迫使两者是常量表达式，并且 `min < max`。
 
-¶2 是语义要求（只有满足才算"建模"）：`G::min() <= g()`、`g() <= G::max()`，`g()` 的复杂度是摊还常数。
+¶2 要建模（model）这个概念，还要满足语义要求：`G::min() <= g()`、`g() <= G::max()`，`g()` 的复杂度是摊还常数。
 
-¶3：类 `G` 满足**具名要求** *uniform random bit generator*，当且仅当它建模上述概念、`invoke_result_t<G&>` 是无符号整数类型（[[basic.fundamental]]），并且提供嵌套的 `result_type` 与之相同。概念不要求 `result_type`，具名要求要求——旧式代码（以及 [rand.req.genl] 中名为 `URBG` 的模板形参）依赖它。
+¶3 **具名要求** *uniform random bit generator* 比概念多两条：`invoke_result_t<G&>` 必须是无符号整数类型（[[basic.fundamental]]，`bool` 不算），并且要有嵌套的 `result_type` 与之相同。旧式代码和名为 `URBG` 的模板形参依赖这个 `result_type`。
 
-```cpp run title="urbg-concept.cpp" ok
-#include <cstdint>
-#include <random>
+## 种子序列（[rand.req.seedseq]）
 
-struct Counter {                                   // 满足概念，也满足具名要求
-  using result_type = std::uint32_t;
-  static constexpr result_type min() { return 0; }
-  static constexpr result_type max() { return 0xFFFF'FFFF; }
-  result_type n = 0;
-  result_type operator()() { return n++; }
-};
-static_assert(std::uniform_random_bit_generator<Counter>);
+¶1 **种子序列**（[[g:seed-sequence]]）消耗一串整数，再按请求产生任意多个 [0, 2³²) 内的无符号整数。注释说明了用途：避免多个引擎产生重复的随机流，需要大量引擎的程序尤其用得上。标准提供的种子序列是 `seed_seq`（[[rand.util]]）。
 
-using Lambda = decltype([s = 0u]() mutable { return s++; });
-static_assert(!std::uniform_random_bit_generator<Lambda>);   // 没有静态 min()/max()
+表 126 的要求（`S` 是类型，`q` 是值，`r` 是可能 const 的值）：
 
-struct Degenerate {
-  using result_type = unsigned;
-  static constexpr unsigned min() { return 5; }
-  static constexpr unsigned max() { return 5; }  // min < max 不成立
-  unsigned operator()() { return 5; }
-};
-static_assert(!std::uniform_random_bit_generator<Degenerate>);
+| 表达式 | 要求 |
+|---|---|
+| `S::result_type` | 至少 32 位的无符号整数类型 |
+| `S()` | 与所有默认构造的 `S` 初始状态相同 |
+| `S(ib, ie)`、`S(il)` | 内部状态依赖于输入序列的部分或全部比特 |
+| `q.generate(rb, re)` | 用 32 位量填满 `[rb, re)`；结果依赖构造时的输入，也可以依赖之前 `generate` 的调用历史 |
+| `r.size()` | `param` 会写出多少个 32 位单元 |
+| `r.param(ob)` | 写出一串 32 位单元，用它构造另一个 `S` 能得到与 `r` 不可区分的状态 |
 
-struct Signed {
-  static constexpr int min() { return 0; }
-  static constexpr int max() { return 9; }
-  int operator()() { return 3; }
-};
-static_assert(!std::uniform_random_bit_generator<Signed>);   // 结果必须是无符号整数
-```
-
-`Counter` 完全满足语法要求，但它显然不"均匀随机"——概念只能检查语法，"每个值等概率"永远只能靠文档和统计检验保证。把 `Counter` 传给分布是良构的，结果是确定的、可预测的序列；这在测试分布实现时很有用。
+`generate` 不是 const 成员，而且允许依赖调用历史。所以同一个种子序列对象依次喂给两个引擎，两个引擎得到的种子可以不同。标准的 `seed_seq` 恰好不依赖历史，但通用代码不能这样假设。`size` 和 `param` 用来保存并重建种子序列。
 
 ## 随机数引擎（[rand.req.eng]）
 
-¶1：**随机数引擎**（[[g:random-number-engine]]）是额外满足播种、输入输出等要求的 URBG。
+¶1 **随机数引擎**（[[g:random-number-engine]]）是另外满足播种、输入输出等要求的 URBG。
 
-### 状态模型（¶2–¶3）
+### 状态、转移与生成（¶2–¶3）
 
-¶2：引擎 `e` 在任意时刻有状态 eᵢ（i ≥ 0），构造后为初始状态 e₀；状态可以由构造函数、`seed`、赋值或 `operator>>` 建立。
+¶2 引擎 `e` 在任意时刻处于某个状态 eᵢ（i ≥ 0），构造后为初始状态 e₀。状态可以由构造函数、`seed`、赋值或 `operator>>` 建立。
 
-¶3：引擎类型的规范必须定义三样东西：
+¶3 每种引擎的规范必须定义三样东西：
 
-1. 状态的大小，以 `result_type` 大小的倍数表示，是整数常量表达式；
-2. **转移算法** TA：把 eᵢ 推进到后继状态 eᵢ₊₁；
-3. **生成算法** GA：把状态映射为一个 `result_type` 值。
+1. 状态的大小，以 `result_type` 大小的倍数表示；
+2. **转移算法**（transition algorithm）TA：把 eᵢ 推进到后继状态 eᵢ₊₁；
+3. **生成算法**（generation algorithm）GA：把状态映射为一个 `result_type` 值。
 
-`e()` 的语义（表 127）是：把状态推进到 eᵢ₊₁ = TA(eᵢ)，并返回 GA(eᵢ)。GA 作用在**转移前**的状态上，但它的定义可以引用转移的结果——例如线性同余引擎把 GA 定义为 GA(xᵢ) = xᵢ₊₁，于是返回的正是新状态（见 [[rand.eng]]）。
+`e()` 把状态推进到 eᵢ₊₁ = TA(eᵢ)，并返回 GA(eᵢ)。GA 作用在转移前的状态上，但它的定义可以引用转移的结果。例如线性同余引擎定义 GA(xᵢ) = xᵢ₊₁，返回的正是新状态（[[rand.eng]]）。
 
-### 表 127 的要点
+### 表 127 的要点（¶4）
 
-| 表达式 | 语义 | 复杂度 |
-|---|---|---|
-| `E()` | 与所有默认构造的 `E` 初始状态相同 | O(状态大小) |
-| `E(x)` | 与 `x` 比较相等 | O(状态大小) |
-| `E(s)` | 由 `result_type` 值 `s` 决定初始状态 | O(状态大小) |
-| `E(q)` | 初始状态依赖于对种子序列 `q` 的**一次** `generate` 调用的结果 | 同 `q.generate` 填充一个"状态大小"长的序列 |
-| `e.seed()`、`e.seed(s)`、`e.seed(q)` | 后置条件分别是 `e == E()`、`e == E(s)`、`e == E(q)` | 同相应构造 |
-| `e()` | 推进到 TA(eᵢ)，返回 GA(eᵢ) | 摊还常数（按 URBG） |
-| `e.discard(z)` | 把状态推进到 eᵢ₊z，效果等价于连续调用 z 次 `e()` | 不劣于 z 次调用 |
-| `x == y` | 等价关系；当且仅当 `x`、`y` 将来无限次调用产生的**无限序列相同**时为真 | O(状态大小) |
+| 表达式 | 语义 |
+|---|---|
+| `E()` | 与所有默认构造的 `E` 初始状态相同 |
+| `E(s)` | 由一个 `result_type` 值 `s` 决定初始状态 |
+| `E(q)` | 初始状态依赖于对种子序列 `q` 的一次 `generate` 调用 |
+| `e.seed()`、`e.seed(s)`、`e.seed(q)` | 后置条件分别是 `e == E()`、`e == E(s)`、`e == E(q)` |
+| `e()` | 推进到 TA(eᵢ)，返回 GA(eᵢ)；摊还常数复杂度 |
+| `e.discard(z)` | 推进到 eᵢ₊z，效果等价于连续调用 z 次 `e()` |
+| `x == y` | 当且仅当 `x`、`y` 将来无限次调用产生的无限序列相同 |
 
-`==` 的定义值得细读：它比较的是**未来行为**，而不是内部表示。两个内部字节不同、但未来输出序列完全一致的引擎状态也必须比较相等（例如 `philox_engine` 中缓存的输出 Y 可以从 K、X 重建）。反过来，相等的引擎可以互相替换而不改变程序的可观察行为。
+`==` 比较的是将来的行为，不是内部表示。两个内部字节不同、将来输出完全相同的引擎必须比较相等，例如 `philox_engine` 里缓存的输出可以由密钥和计数器重建。反过来，相等的引擎可以互相替换而不改变程序的可观察行为。
 
-脚注 220 说明 `discard` 常常可以用引擎特有的方式实现得远比循环快——线性同余引擎可以用快速幂跳跃，`philox_engine` 只需改计数器。但标准只要求"不劣于"朴素循环；libc++ 的 `mersenne_twister_engine::discard` 和 `linear_congruential_engine::discard` 都是循环调用 `operator()`。
+脚注 220 指出，`discard` 往往可以用引擎特有的方式实现得比循环快得多：线性同余引擎可以用快速幂跳跃，`philox_engine` 只需修改计数器。标准只要求不比循环慢；libc++ 的 `mersenne_twister_engine::discard` 就是循环调用 `operator()`。
 
-¶5：引擎必须满足 *Cpp17CopyConstructible* 与 *Cpp17CopyAssignable*，复杂度不劣于 O(状态大小)。复制一个 `mt19937` 要复制约 2.5 KB 状态，按值传递引擎是常见的性能陷阱，也是逻辑陷阱：副本被推进，原引擎不变，下一次又产生同样的数。
+¶5 引擎必须可复制构造、可复制赋值，复杂度不超过 O(状态大小)。复制一个 `mt19937` 要复制约 2.5 KB 的状态。按值传递引擎既慢又容易出错：被推进的是副本，原引擎不变，下次调用又得到同样的数。
 
-### 流式输入输出（¶6–¶17）
+### 文本表示（¶6–¶17）
 
-在宿主实现上：
+在宿主实现上，`os << x` 以十进制、左对齐、空格填充写出 `x` 当前状态的文本表示，之后恢复流的格式标志（¶7–¶11）。`is >> v` 读回状态，读入失败时 `v` 保持不变并设置 `failbit`（¶12–¶17）。写出再读回之后 `x == v`，前提是两者之间都没有被调用。
 
-- `os << x`（¶7–¶11）：以 `dec | left`、填充字符为空格写出 `x` 当前状态的文本表示，相邻数字之间至少一个空格；之后恢复 `os` 的格式标志与填充字符。
-- `is >> v`（¶12–¶17）：前置条件是输入由 locale、`charT`、`traits` 都相同的流写出；读入失败时**保证 `v` 不变**并设置 `failbit`。往返保证：`os << x` 写出、`is >> v` 读入后 `x == v`，只要期间两者都没有被调用。
-
-文本表示的内容由各引擎规定（[[rand.eng]]），所以一个实现写出的 `mt19937` 状态可以被另一个实现读入——这是引擎"可移植"的另一面。
+文本表示的内容由各引擎规定（[[rand.eng]]），所以一个实现写出的 `mt19937` 状态可以被另一个实现读入。
 
 ```cpp run title="engine-roundtrip.cpp" ok
 #include <cassert>
@@ -193,56 +148,51 @@ int main() {
   std::mt19937 a(42);
   a.discard(100);
   std::stringstream ss;
-  ss << a;                // 保存完整状态（624 个数）
+  ss << a;              // 保存完整状态（624 个数）
   std::mt19937 b;
-  ss >> b;                // 恢复
-  assert(a == b);         // == 比较未来序列
+  ss >> b;              // 恢复
+  assert(a == b);       // 比较将来的序列
   assert(a() == b());
 }
 ```
 
-## 随机数引擎适配器（[rand.req.adapt]）
+## 引擎适配器（[rand.req.adapt]）
 
-¶1：**引擎适配器** `a` 是一个引擎，它取另一个引擎（**基引擎** `b`）产生的值，施加某种算法，得到随机性质不同的序列。`a.base()` 必须有效并返回基引擎的 const 引用。
+¶1 **引擎适配器**（[[g:random-number-engine-adaptor]]）`a` 是一个引擎，它取另一个引擎（**基引擎**，base engine）`b` 产生的值，施加某种算法，得到随机性质不同的序列。`a.base()` 返回基引擎的 const 引用。
 
-¶2–¶9 规定如何把引擎要求"翻译"到适配器上：默认构造、`A(s)`、`A(q)`、`seed(…)` 都转发给基引擎；`a1 == a2` 当且仅当两者的基引擎相等。
+¶2–¶9 把引擎的要求转到适配器上：默认构造、`A(s)`、`A(q)`、各个 `seed` 都转发给基引擎；`a1 == a2` 当且仅当两者的基引擎相等。
 
-¶10 的附加要求：
-
-- ¶10.1 每个函数的复杂度不超过基引擎上对应函数的复杂度；
-- ¶10.2 适配器的状态**包含**基引擎的状态，大小不小于基引擎；
-- ¶10.3 复制适配器要复制基引擎状态；
-- ¶10.4 文本表示要包含基引擎的文本表示。
+¶10 还要求：每个函数的复杂度不超过基引擎上对应函数的复杂度；适配器的状态包含基引擎的状态；复制适配器要复制基引擎的状态；文本表示包含基引擎的文本表示。
 
 !!! lawyer "== 只看基引擎？"
-    ¶4 说两个适配器"基引擎相等则返回 true，否则 false"。但表 127 对引擎的 `==` 要求"未来序列相同"。对 `discard_block_engine`，额外状态 n（块内计数）不同、基引擎相同的两个对象，未来序列显然不同。这两条放在一起读，¶4 只能理解为对**以同样方式构造并经历同样操作**的适配器的简化描述；实践中 libc++ 的 `discard_block_engine::operator==` 同时比较基引擎和 n，`shuffle_order_engine` 同时比较表 V 与 Y。
+    ¶4 说两个适配器的基引擎相等就返回 true。但表 127 要求引擎的 `==` 表示将来的序列相同。两个 `discard_block_engine` 基引擎相同、块内计数不同时，将来的序列显然不同。两条放在一起读，¶4 只能理解为对以同样方式构造、经历同样操作的适配器的简化描述。libc++ 的 `discard_block_engine::operator==` 同时比较基引擎和计数，`shuffle_order_engine` 同时比较内部表和缓存值。
 
 ## 随机数分布（[rand.req.dist]）
 
-¶1：**随机数分布**（[[g:random-number-distribution]]）`d` 是一个函数对象，返回值服从某个概率密度函数 p(z)（连续）或离散概率函数 P(zᵢ)。¶2：概率函数通常含有外部给定的量，称为**分布的参数**，写作 p(z | a, b) 或 p(z | {p})。
+¶1 **随机数分布**（[[g:random-number-distribution]]）`d` 是一个函数对象，返回值服从某个概率密度函数 p(z) 或离散概率函数 P(zᵢ)。¶2 概率函数里通常含有外部给定的量，称为分布的**参数**，写作 p(z | a, b) 或 p(z | {p})。
 
-### 表 128 的要点
+### 表 128 的要点（¶3）
 
 | 表达式 | 语义 |
 |---|---|
-| `D::result_type` | 算术类型 |
-| `D::param_type` | 参数包类型 `P` |
-| `D()` | 与任何新默认构造的 `D` 行为不可区分 |
-| `D(p)` | 与直接用 `p` 的那组值构造的分布行为不可区分 |
-| `d.reset()` | 之后对 `d` 的使用**不依赖** reset 之前任何引擎产生的值；常数复杂度 |
-| `x.param()` / `d.param(p)` | 读 / 设参数；`D(p).param() == p` |
-| `d(g)` | 对同一个 `g` 连续调用，结果按 p(z \| {d.param()}) 分布；摊还常数次调用 `g` |
-| `d(g, p)` | 用参数 `p` 生成，**不改变** `d` 的参数 |
-| `x.min()` / `x.max()` | 可能返回值的最大下界 / 最小上界 |
-| `x == y` | 参数相等，且在 `g1 == g2` 时两者未来产生的无限序列相同 |
+| `D::param_type` | 参数包类型，下面记作 `P` |
+| `D()`、`D(p)` | 默认参数，或用 `p` 中的参数构造 |
+| `d.reset()` | 之后对 `d` 的使用不依赖 reset 之前任何引擎产生的值 |
+| `x.param()`、`d.param(p)` | 读、写参数；`D(p).param() == p` |
+| `d(g)` | 对同一个 `g` 连续调用，结果服从 p(z \| {d.param()})；平均调用 `g` 常数次 |
+| `d(g, p)` | 用参数 `p` 生成，不改变 `d` 自己的参数 |
+| `x.min()`、`x.max()` | 可能返回值的最大下界、最小上界 |
+| `x == y` | 参数相等，并且在 `g1 == g2` 时两者将来产生的序列相同 |
 
-`reset` 的存在说明分布可以有**内部状态**：最典型的是正态分布的 Box–Muller/极坐标法一次生成两个值、缓存一个。`reset` 清掉这类缓存。`d(g, p)` 让同一个分布对象可以用不同参数生成，而不必为每组参数构造对象——例如在一个循环里按不同上界抽样：
+`reset` 的存在说明分布可以有内部状态。典型例子是正态分布的 Box–Muller 或极坐标法，一次算出两个值、缓存一个，`reset` 清除这类缓存（[[rand]] 的思考题演示了它的影响）。
 
-```cpp title="dist-param.cpp" ok
+`d(g, p)` 让同一个分布对象可以用不同参数生成。下面的洗牌每一步上界都不同：
+
+```cpp run title="dist-param.cpp" ok
 #include <random>
+#include <utility>
 #include <vector>
 
-// Fisher–Yates：每一步上界不同，复用同一个分布对象
 template<class T, class G>
 void shuffle_vec(std::vector<T>& v, G& g) {
   std::uniform_int_distribution<std::size_t> d;
@@ -250,46 +200,81 @@ void shuffle_vec(std::vector<T>& v, G& g) {
   for (std::size_t i = v.size(); i > 1; --i)
     std::swap(v[i - 1], v[d(g, P(0, i - 1))]);
 }
+
+int main() {
+  std::vector<int> v{1, 2, 3, 4, 5};
+  std::mt19937 g(1);
+  shuffle_vec(v, g);
+}
 ```
 
-### 其他段落
+### 其他要求（¶4–¶20）
 
-- ¶4：`D` 满足 *Cpp17CopyConstructible*、*Cpp17CopyAssignable*。
-- ¶5：`d(g)` 产生的序列**不受**其间调用 `os << d` 或任何 `const` 成员函数的影响——查询参数、打印状态不会扰动随机流。
-- ¶6：把 `x` 的文本表示用 `os << x` 写出、再用 `is >> y` 读回同类型的 `y`，此后 `y(g)` 与 `x(g)` 产生相同的序列。文本表示包括参数**和附加内部数据**（¶12），比如正态分布缓存的那个值。注意文本表示的格式是实现定义的，跨实现读入没有保证——这与引擎不同。
-- ¶7：`D::param_type` 是嵌套类还是 typedef，**未指明**。所以不能前向声明 `struct std::normal_distribution<double>::param_type;`，也不能依赖它的名字做 ADL。
-- ¶8–¶10：`P` 满足可复制构造、可复制赋值、*Cpp17EqualityComparable*；对 `D` 每个接受分布参数的构造函数，`P` 有参数个数、类型、默认值都相同的构造函数；对 `D` 每个返回参数的成员函数，`P` 有同名、同类型、同语义的成员函数；`P` 声明 `using distribution_type = D;`。
-- ¶11–¶20：流插入/提取，失败时保证 `d` 不变。
+- ¶4 分布可复制构造、可复制赋值。
+- ¶5 在两次 `d(g)` 之间调用 `os << d` 或任何 const 成员函数，不会改变产生的序列。查询参数、打印状态不会扰动随机流。
+- ¶6 把 `x` 写出、再读回同类型的 `y`，此后 `y(g)` 与 `x(g)` 产生相同的序列。文本表示包括参数和内部数据，例如正态分布缓存的值。文本格式由实现定义，跨实现读入没有保证，这一点与引擎不同。
+- ¶7 `D::param_type` 是嵌套类还是 typedef，未指明。所以不能前向声明 `std::normal_distribution<double>::param_type`。
+- ¶8–¶10 `P` 可复制、可比较相等；`D` 每个接受参数的构造函数，`P` 都有参数相同的构造函数；`D` 每个返回参数的成员函数，`P` 都有同名的成员函数；`P` 声明 `using distribution_type = D;`。
+- ¶11–¶20 流插入和提取，读入失败时 `d` 不变。
+
+## 模板实参的限制（[rand.req.genl]）
+
+```cpp title="inttype.cpp" error
+#include <random>
+
+std::uniform_int_distribution<signed char> a(-5, 5);    // OK
+std::uniform_int_distribution<unsigned char> b(0, 9);   // OK
+std::uniform_int_distribution<char> c;      // error: char 不是 IntType
+std::uniform_int_distribution<const int> d; // error: cv 限定
+std::linear_congruential_engine<unsigned char, 3, 1, 0>
+    e;                          // error: UIntType 比 short 窄
+```
+
+¶1 [rand] 的模板形参没有用概念约束时，形参的名字本身就表示对实参的要求：
+
+| 形参名 | 实参必须是 | 违反的后果 |
+|---|---|---|
+| `Sseq`、`URBG`、`Engine`、`RealType`、`IntType`、`UIntType` | 没有 cv 限定的类型（¶1.1） | 非良构 |
+| `Sseq` / `URBG` / `Engine` | 满足种子序列 / URBG / 引擎要求（¶1.2–¶1.4） | 违反库的要求，UB |
+| `RealType` | 标准浮点类型，或实现选定的扩展浮点类型（¶1.5） | 非良构 |
+| `IntType` | 标准有符号或无符号整数类型；宽度在 `char` 与 `long long` 之间的扩展整数类型；或实现选定的其他整数类型（¶1.6） | 非良构 |
+| `UIntType` | 宽度在 `short` 与 `long long` 之间的标准或扩展无符号整数类型；或实现选定的其他无符号整数类型（¶1.7） | 非良构 |
+
+标准有符号整数类型只有 `signed char`、`short`、`int`、`long`、`long long` 五个（[[basic.fundamental]]），`char`、`bool` 和各种字符类型都不在其中。所以 `uniform_int_distribution<char>` 非良构，而 `uniform_int_distribution<signed char>`（通常就是 `int8_t`）合法。`unsigned char` 可以做 `IntType`，但不能做 `UIntType`，因为引擎的 `UIntType` 至少要和 `short` 一样宽。要随机的布尔值，用 `bernoulli_distribution`。
+
+!!! impl "libc++"
+    libc++ 用一个白名单加 `static_assert` 检查 `IntType`，`char`、`bool`、`const int` 都会得到 "IntType must be a supported integer type"。`__int128` 被接受，属于实现选定的其他整数类型。`UIntType = unsigned char` 则没有被直接检查：只声明 `linear_congruential_engine<unsigned char, 3, 1, 0>` 的对象时照常编译，直到调用 `operator()` 才在内部模板的实例化上出错。按 ¶1.7 这本应在实例化时就诊断，所以上面例子的最后一个声明在 libc++ 上实际不报错。
+
+¶3 [rand] 中任何能以单个实参调用、并且满足本节某项要求的构造函数都必须是 `explicit` 的。所以 `std::mt19937 g = 42;` 非良构，只能写 `std::mt19937 g(42);`。这样 `void f(std::mt19937)` 不会因为 `f(42)` 悄悄构造出一个新引擎。
+
+<details class="fine" markdown="1"><summary>其余条文</summary>
+
+[rand.req.genl] ¶2：[rand] 中"x 是某种迭代器"读作"x 是满足相应迭代器要求的类型的值"。
+
+[rand.req.eng] ¶4 还列出了 `E(x)`（与 `x` 比较相等）以及各操作的复杂度：构造、`seed`、`==` 都是 O(状态大小)，`E(q)` 与 `q.generate` 填充一个状态大小的序列同阶，`discard(z)` 不劣于 z 次 `e()`。
+
+</details>
 
 ## 思考题
 
 !!! question "1"
-    `std::uniform_int_distribution<bool>` 和 `std::uniform_int_distribution<std::int8_t>` 是否良构？若 `std::int8_t` 在某平台上是一个扩展整数类型而不是 `signed char` 呢？
+    `std::uniform_int_distribution<bool>` 和 `std::uniform_int_distribution<std::int8_t>` 良构吗？如果某个平台上 `std::int8_t` 是扩展整数类型而不是 `signed char` 呢？
 
 <details markdown="1">
 <summary>答案</summary>
 
-`bool` 不是标准有符号或无符号整数类型，也不是扩展整数类型，除非实现把它放进"实现定义的子集"，否则按 [rand.req.genl] ¶1.6 非良构。（要随机布尔值，用 `bernoulli_distribution`。）
+`bool` 既不是标准整数类型也不是扩展整数类型，除非实现把它放进自己选定的集合，否则按 [rand.req.genl] ¶1.6 非良构。libc++ 拒绝它。
 
-`int8_t` 通常是 `signed char` 的别名，属于标准有符号整数类型，良构。若它是扩展整数类型，¶1.6 要求其宽度"大于等于 `char` 的宽度、小于等于 `long long` 的宽度"——8 位等于 `char` 的宽度，也良构。
+`int8_t` 通常是 `signed char` 的别名，属于标准有符号整数类型，良构。如果它是扩展整数类型，¶1.6 要求宽度不小于 `char`、不大于 `long long`；8 位等于 `char` 的宽度，同样良构。
 </details>
 
 !!! question "2"
-    `std::mt19937 a, b; b.discard(1); a();` 之后 `a == b` 吗？`a` 和 `b` 的内部字节一定相同吗？
+    `std::mt19937 a, b; b.discard(1); a();` 之后 `a == b` 吗？两者的内部字节一定相同吗？
 
 <details markdown="1">
 <summary>答案</summary>
 
-相等：`discard(1)` 的效果等价于调用一次 `b()`（表 127），之后两者的未来无限序列相同，按表 127 的 `==` 语义比较相等。至于内部字节，标准不关心——`==` 是按未来行为定义的。对 `mt19937` 而言两条路径执行的操作完全相同，实际字节通常也相同；但对一般的引擎，`discard` 可以走跳跃式捷径，得到表示不同而未来序列相同的状态，它们也必须比较相等。
+相等。`discard(1)` 等价于调用一次 `b()`（表 127），之后两者将来的无限序列相同，所以比较相等。
+
+内部字节标准并不关心，`==` 是按将来的行为定义的。`mt19937` 的两条路径执行完全相同的操作，字节实际上也相同；但一般的引擎可以让 `discard` 走跳跃式的捷径，得到表示不同而将来序列相同的状态，它们也必须比较相等。
 </details>
-
-## 小结
-
-| 实体 | 关键要求 |
-|---|---|
-| 一般 | 形参名即约束；`RealType`/`IntType`/`UIntType`/cv 限定违规为非良构；单参构造函数 `explicit` |
-| 种子序列 | 输出 32 位量；`generate` 可依赖历史；`param` 可重建 |
-| URBG | 概念：可调用、无符号结果、`constexpr` 的 `min < max`；具名要求另需 `result_type` |
-| 引擎 | 状态 + TA + GA；`==` 比较未来序列；`discard`；可移植的文本表示 |
-| 适配器 | 状态包含基引擎；`base()` |
-| 分布 | 可有内部状态（`reset` 清除）；`d(g, p)` 不改参数；`param_type` 形式未指明；文本格式不跨实现 |
