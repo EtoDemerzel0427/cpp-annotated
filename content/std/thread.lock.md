@@ -1,55 +1,76 @@
 ---
 title: 锁与通用加锁算法
-summary: lock_guard、scoped_lock、unique_lock、shared_lock 的精确契约——被引用的互斥量必须活得比锁久、adopt_lock 的前置条件、unique_lock 哪些误用是有定义的 system_error 而不是 UB、release() 不解锁；std::lock 的免死锁保证与 libc++ 的"尝试并退让"算法；声明式陷阱 unique_lock<mutex>(m)
+summary: lock_guard、scoped_lock、unique_lock、shared_lock 这四种 RAII 锁各管什么，被锁的互斥量为什么必须比锁活得久，哪些误用会抛 system_error 而不是 UB，以及 std::lock 怎样保证不死锁。
 status: done
 covers: *, thread.lock.algorithm
 related: thread.mutex, thread.mutex.requirements, thread.req, thread.condition, basic.life, dcl.ambig.res
 tags: 标准库, 并发, 锁, RAII, 死锁
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-互斥量的 `lock`/`unlock` 必须严格配对，并且 [[thread.mutex.requirements]] 规定"线程在拥有互斥量时终止"是 UB。手工配对在异常和提前返回面前很脆弱，所以标准库提供了 RAII 包装——**锁**（lock）。本页覆盖 [thread.lock] 的全部子条款，以及紧随其后的 [thread.lock.algorithm]。
+!!! tldr
+    - 锁是在析构时自动解锁互斥量的 RAII 对象。它只引用互斥量，不管理互斥量的生命周期：互斥量先于锁销毁就是 UB。
+    - `lock_guard` 和 `scoped_lock` 在整个生命周期内一直持锁；`unique_lock` 和 `shared_lock` 用一个 `owns` 标志记录是否持锁，可以推迟加锁、中途解锁、移动。
+    - 对 `unique_lock` 重复加锁或在未持锁时解锁会抛 `system_error`，同样的操作直接作用在 `std::mutex` 上是 UB。`release()` 不解锁。
+    - `std::lock` 和多参数的 `scoped_lock` 保证不死锁，但具体的加锁顺序未指定。
+    - `std::unique_lock<std::mutex>(m);` 声明了一个名为 `m` 的变量，什么也没锁。锁对象一定要起名字。
 
-## 总述（[thread.lock.general]）
+## 为什么需要锁
 
-¶1 **锁**是持有一个可锁对象的引用、并可能在自身析构时（比如离开块作用域时）解锁该对象的对象。执行代理可以用锁以异常安全的方式管理可锁对象的所有权。锁当前正在为某个执行代理管理一个可锁对象的所有权时，称锁**拥有**该可锁对象。**锁不管理它所引用的可锁对象的生命周期。** 注 1：锁意在减轻在正常与异常情况下解锁的负担。
+```cpp
+std::mutex m;
+int balance;
 
-¶2 一些锁的构造函数接受**标签类型**，描述构造时如何处置可锁对象：
+void withdraw(int n) {
+  m.lock();
+  if (balance < n) return;       // 忘了 unlock
+  balance -= n;
+  m.unlock();
+}
+```
+
+提前返回或抛出异常都会跳过 `unlock`，互斥量从此一直被占用。线程在持有互斥量时结束也是 UB（[[thread.mutex.requirements]]）。
+
+[thread.lock.general] ¶1 标准库的解决办法是**锁**（lock）：一个持有可锁对象引用的对象，它可以在自己析构时（比如离开块作用域时）解锁这个可锁对象。可锁对象指具有 `lock`/`unlock` 等成员的类型，标准互斥量都是（[[thread.req]]）。锁当前在替某个线程管理可锁对象的所有权时，称锁**拥有**这个可锁对象。
+
+同一段还规定：锁不管理它所引用的可锁对象的生命周期。下面讲的四种锁都把这一点写成了要求，违反就是 UB。
+
+¶2 有些锁的构造函数接受一个标签参数，说明构造时怎样处理可锁对象：
 
 | 标签 | 含义 |
 |---|---|
-| `defer_lock` | 不获取所有权 |
-| `try_to_lock` | 不阻塞地尝试获取所有权 |
-| `adopt_lock` | 假定调用线程**已经**获得了所有权，由锁来管理它 |
+| `std::defer_lock` | 不加锁 |
+| `std::try_to_lock` | 尝试加锁，不阻塞 |
+| `std::adopt_lock` | 调用线程已经持有锁，由锁对象接管 |
 
-## lock_guard（[thread.lock.guard]）
+## lock_guard：构造加锁，析构解锁 [thread.lock.guard]
 
-最简单的锁：构造时加锁，析构时解锁，中间不能做任何事。类里只有一个仅说明用的引用成员 `mutex_type& pm`，不可复制、不可移动。
+```cpp run ok
+#include <mutex>
+std::mutex m;
+int balance = 100;
 
-¶1 `lock_guard` 在一个作用域内控制可锁对象的所有权，并在其整个生命周期内保持所有权。**若 `pm` 引用的可锁对象没有在 `lock_guard` 的整个生命周期内存在，行为未定义** {{ub}}。`Mutex` 须满足 *Cpp17BasicLockable*。
+bool withdraw(int n) {
+  std::lock_guard lk(m);      // m.lock()
+  if (balance < n) return false;
+  balance -= n;
+  return true;
+}                             // ~lock_guard: m.unlock()
 
-- ¶2 `explicit lock_guard(mutex_type& m)`：初始化 `pm`，调用 `m.lock()`。
-- ¶3–¶5 `lock_guard(mutex_type& m, adopt_lock_t)`：*Preconditions*：调用线程持有 `m` 上的非共享锁；只初始化 `pm`；不抛异常。
-- ¶6 析构函数：等价于 `pm.unlock()`。
+int main() { return withdraw(30) ? 0 : 1; }
+```
 
-`lock_guard` 只要求 *Cpp17BasicLockable*（只用 `lock`/`unlock`），所以也能包装任何用户自定义的锁、`unique_lock`，甚至 RCU 的 `rcu_domain`（[[saferecl]]）。
+¶1 `lock_guard` 在它的整个生命周期内一直持有可锁对象的所有权。如果它引用的可锁对象没有存在于 `lock_guard` 的整个生命周期，行为未定义 {{ub}}。模板实参只需满足 *Cpp17BasicLockable*，也就是有 `lock` 和 `unlock`。
 
-## scoped_lock（[thread.lock.scoped]） {{c++17}}
+¶2 `lock_guard(m)` 保存对 `m` 的引用并调用 `m.lock()`。¶6 析构函数调用 `unlock()`。
 
-`scoped_lock` 是可变参数版的 `lock_guard`：仅说明用成员 `tuple<MutexTypes&...> pm`。
+¶3 `lock_guard(m, adopt_lock)` 只保存引用，不加锁。它的前置条件是调用线程已经持有 `m` 上的非共享锁；¶5 它不抛异常。
 
-¶1 同样的生命周期要求（被引用的可锁对象必须在整个生命周期内存在，否则 UB）。以及：
+`lock_guard` 不可复制、不可移动，也没有解锁、查询之类的成员函数。因为它总是持锁，析构函数不需要检查任何状态，对象里只有一个引用。
 
-- ¶1.1 若 `sizeof...(MutexTypes)` 为 1，唯一的类型须满足 *Cpp17BasicLockable*，成员 `mutex_type` 就是该类型；
-- ¶1.2 否则，所有类型须满足 *Cpp17Lockable*（需要 `try_lock`），且**没有** `mutex_type` 成员。
+## scoped_lock：一次锁多个 [thread.lock.scoped] {{c++17}}
 
-¶2 `explicit scoped_lock(MutexTypes&... m)`：用 `tie(m...)` 初始化 `pm`。然后：0 个互斥量时无效果；1 个时调用 `m.lock()`；**多个时调用 `std::lock(m...)`**——即使用下面的免死锁算法。
-
-¶3–¶5 `explicit scoped_lock(adopt_lock_t, MutexTypes&... m)`：*Preconditions*：调用线程持有每个 `m` 上的非共享锁；只初始化 `pm`；不抛异常。注意标签放在**最前面**（可变参数包必须在最后），与 `lock_guard(m, adopt_lock)` 的顺序相反。
-
-¶6 析构函数：对 `[0, sizeof...(MutexTypes))` 中的每个 `i`，调用 `get<i>(pm).unlock()`。
-
-`scoped_lock<>`（零个互斥量）是合法的，什么也不做。这让泛型代码可以写 `std::scoped_lock lk(ms...);` 而不必特殊处理空包。
+两个线程以相反的顺序给同一对互斥量加锁，是最常见的死锁：
 
 ```cpp run title="scoped-lock-transfer.cpp" ok
 #include <mutex>
@@ -61,7 +82,7 @@ struct Account {
 };
 
 void transfer(Account& from, Account& to, long amt) {
-  std::scoped_lock lk(from.m, to.m);   // 两把锁：用 std::lock 的免死锁算法
+  std::scoped_lock lk(from.m, to.m);   // 两把锁一起锁，不会死锁
   from.balance -= amt;
   to.balance += amt;
 }
@@ -69,52 +90,57 @@ void transfer(Account& from, Account& to, long amt) {
 int main() {
   Account a, b;
   std::jthread t1([&] { for (int i = 0; i < 100000; ++i) transfer(a, b, 1); });
-  std::jthread t2([&] { for (int i = 0; i < 100000; ++i) transfer(b, a, 1); });   // 相反的顺序，不会死锁
+  std::jthread t2([&] { for (int i = 0; i < 100000; ++i) transfer(b, a, 1); });
 }
 ```
 
-如果把 `scoped_lock lk(from.m, to.m)` 换成两个 `lock_guard` 按参数顺序加锁，t1 先锁 a 再锁 b、t2 先锁 b 再锁 a，几乎必然死锁。
+如果把 `scoped_lock` 换成两个依次构造的 `lock_guard`，t1 先锁 a 再锁 b，t2 先锁 b 再锁 a，几乎必然死锁。
 
-## unique_lock（[thread.lock.unique]）
+¶1 `scoped_lock` 是可变参数版本的 `lock_guard`，同样一直持锁，同样要求被引用的可锁对象存在于它的整个生命周期。对模板实参的要求分两种情况：
 
-`unique_lock` 是"可以不持有锁的锁"：仅说明用成员 `mutex_type* pm` 与 `bool owns`。它可移动、可推迟加锁、可中途解锁再加锁、可转移所有权，是 `condition_variable` 必须使用的锁类型。
+- ¶1.1 只有一个类型时，它需满足 *Cpp17BasicLockable*，成员 `mutex_type` 就是这个类型；
+- ¶1.2 否则，每个类型都要满足 *Cpp17Lockable*（多一个 `try_lock`），并且没有 `mutex_type` 成员。
 
-### 总述（[thread.lock.unique.general]）
+¶2 构造函数按数量分三种情况：零个可锁对象时什么也不做；一个时调用 `m.lock()`；多个时调用 `std::lock(m...)`，用下文的免死锁算法。零个参数也合法，泛型代码写 `std::scoped_lock lk(ms...);` 时不必单独处理空包。
 
-¶1 `unique_lock` 在一个作用域内控制可锁对象的所有权。所有权可以在构造时或构造后获得，获得后可以转移给另一个 `unique_lock`。不可复制但可移动。**若 `pm` 非空，而它指向的可锁对象没有在 `unique_lock` 剩余的整个生命周期内存在，行为未定义**。`Mutex` 须满足 *Cpp17BasicLockable*。
+¶3 采纳已有锁的构造函数是 `scoped_lock(adopt_lock, m...)`。标签放在最前面，因为参数包必须在最后，这与 `lock_guard(m, adopt_lock)` 的顺序相反。前置条件是调用线程持有每个 `m` 上的非共享锁。¶6 析构函数对每个可锁对象调用 `unlock()`。
 
-¶2 注 1：`unique_lock<Mutex>` 满足 *Cpp17BasicLockable*；`Mutex` 满足 *Cpp17Lockable* 时它也满足 *Cpp17Lockable*；满足 *Cpp17TimedLockable* 时它也满足。所以 `unique_lock` 可以再传给 `std::lock` 或 `condition_variable_any`。
+## unique_lock：可以不持锁的锁 [thread.lock.unique]
 
-### 构造、析构与赋值（[thread.lock.unique.cons]）
+`unique_lock` 内部是一个指针 `pm` 和一个布尔值 `owns`。`owns` 记录当前是否持锁，所以它可以先不加锁、中途解锁再加锁、把所有权移交给另一个 `unique_lock`。`condition_variable::wait` 要求的正是这种锁（[[thread.condition]]）。
 
-| 构造函数 | 段落 | 前置条件 | 效果 | 之后 `owns` |
-|---|---|---|---|---|
-| `unique_lock()` | ¶1 | — | — | `false`，`pm == nullptr` |
-| `unique_lock(m)` | ¶2–¶3 | — | `m.lock()` | `true` |
-| `unique_lock(m, defer_lock)` | ¶4 | — | 不加锁；`noexcept` | `false` |
-| `unique_lock(m, try_to_lock)` | ¶5–¶7 | `Mutex` 满足 *Cpp17Lockable* | `m.try_lock()` | 其返回值 |
-| `unique_lock(m, adopt_lock)` | ¶8–¶10 | 调用线程持有 `m` 上的非共享锁 | 不加锁；不抛 | `true` |
-| `unique_lock(m, abs_time)` | ¶11–¶13 | `Mutex` 满足 *Cpp17TimedLockable* | `m.try_lock_until(abs_time)` | 其返回值 |
-| `unique_lock(m, rel_time)` | ¶14–¶16 | 同上 | `m.try_lock_for(rel_time)` | 其返回值 |
+### 生命周期要求与可锁性 [thread.lock.unique.general]
 
-- ¶17 移动构造：接管 `u` 的 `pm` 与 `owns`，`u` 变为 `pm == 0`、`owns == false`。
-- ¶18–¶19 移动赋值：等价于 `unique_lock(std::move(u)).swap(*this)`——原先持有的锁随临时对象析构而释放。
-- ¶20 析构函数：若 `owns`，调用 `pm->unlock()`。
+¶1 `unique_lock` 不可复制，可以移动。如果 `pm` 不为空，而它指向的可锁对象没有存在于 `unique_lock` 剩余的整个生命周期，行为未定义。模板实参需满足 *Cpp17BasicLockable*。
 
-注意 "满足 *Cpp17Lockable*" 被写成**前置条件**（¶5），不是 *Constraints*。用一个只有 `lock`/`unlock` 的类型调用 `unique_lock(m, try_to_lock)` 时，在实践中会因为找不到 `try_lock` 而编译失败，但标准把它归为 UB 而非非良构。
+¶2 注 1 指出，`unique_lock<Mutex>` 本身也是可锁对象：它满足 *Cpp17BasicLockable*；`Mutex` 满足 *Cpp17Lockable* 或 *Cpp17TimedLockable* 时，它也满足对应的要求。所以 `unique_lock` 可以再传给 `std::lock` 或 `condition_variable_any`。
 
-### 加锁（[thread.lock.unique.locking]）
+### 构造 [thread.lock.unique.cons]
 
-`lock()`（¶1–¶4）：如同 `pm->lock()`；之后 `owns == true`。错误条件：
+| 构造函数 | 段落 | 效果 | 之后的 `owns` |
+|---|---|---|---|
+| `unique_lock()` | ¶1 | 不关联任何互斥量 | `false` |
+| `unique_lock(m)` | ¶2–¶3 | `m.lock()` | `true` |
+| `unique_lock(m, defer_lock)` | ¶4 | 不加锁，`noexcept` | `false` |
+| `unique_lock(m, try_to_lock)` | ¶5–¶7 | `m.try_lock()` | 它的返回值 |
+| `unique_lock(m, adopt_lock)` | ¶8–¶10 | 不加锁；前置条件：调用线程已持有 `m` | `true` |
+| `unique_lock(m, abs_time)` | ¶11–¶13 | `m.try_lock_until(abs_time)` | 它的返回值 |
+| `unique_lock(m, rel_time)` | ¶14–¶16 | `m.try_lock_for(rel_time)` | 它的返回值 |
 
-- ¶4.1 `operation_not_permitted`：`pm` 为空；
-- ¶4.2 `resource_deadlock_would_occur`：进入时 `owns` 已为 `true`。
+`try_to_lock` 和两个限时版本还要求 `Mutex` 满足 *Cpp17Lockable* 或 *Cpp17TimedLockable*。标准把这写成前置条件，而不是约束；实际上类型缺少 `try_lock` 时会在实例化时编译失败。
 
-`try_lock()`（¶5–¶10）、`try_lock_until()`（¶11–¶16）、`try_lock_for()`（¶17–¶22）：同理，也有同样两个错误条件。
+¶17 移动构造接管 `u` 的 `pm` 和 `owns`，`u` 变成不关联互斥量、不持锁。¶18 移动赋值等价于 `unique_lock(std::move(u)).swap(*this)`：`*this` 原来持有的锁转到临时对象里，随临时对象析构而释放。¶20 析构函数在 `owns` 为真时调用 `pm->unlock()`。
 
-`unlock()`（¶23–¶26）：如同 `pm->unlock()`；之后 `owns == false`；错误条件 ¶26.1 `operation_not_permitted`：进入时 `owns` 为 `false`。
+### 误用会抛异常 [thread.lock.unique.locking]
 
-这一点很重要：**对 `unique_lock` 的误用多数是有定义的**。对一个没有持锁的 `unique_lock` 调用 `unlock()` 会抛 `system_error`；而对**互斥量本身**做同样的事是 UB。`unique_lock` 用 `owns` 记住了"我是否持有锁"，因此能检测这些错误。
+¶1–¶4 `lock()` 的效果如同 `pm->lock()`，之后 `owns` 为真。它有两个错误条件，出现时抛 `system_error`：
+
+- ¶4.1 `pm` 为空：`operation_not_permitted`；
+- ¶4.2 进入时 `owns` 已经为真：`resource_deadlock_would_occur`。
+
+`try_lock`（¶5–¶10）、`try_lock_until`（¶11–¶16）、`try_lock_for`（¶17–¶22）有同样的两个错误条件。
+
+¶23–¶26 `unlock()` 在进入时 `owns` 为假时报告 `operation_not_permitted`。
 
 ```cpp run title="unique-lock-errors.cpp" ok
 #include <cstdio>
@@ -125,127 +151,140 @@ int main() {
   std::mutex m;
   std::unique_lock lk(m, std::defer_lock);
   try {
-    lk.unlock();                                // 没有持锁：有定义的错误
+    lk.unlock();                 // 未持锁时解锁
   } catch (const std::system_error& e) {
-    std::printf("unlock: %d\n", e.code() == std::errc::operation_not_permitted);   // 1
+    std::printf("%d\n", e.code() == std::errc::operation_not_permitted);         // 1
   }
   lk.lock();
   try {
-    lk.lock();                                  // 已经持锁：有定义的错误，不是重复加锁 m
+    lk.lock();                   // 已持锁时再加锁
   } catch (const std::system_error& e) {
-    std::printf("lock: %d\n", e.code() == std::errc::resource_deadlock_would_occur); // 1
+    std::printf("%d\n", e.code() == std::errc::resource_deadlock_would_occur);   // 1
   }
 }
 ```
 
-### 修改器与观察器（[thread.lock.unique.mod]、[thread.lock.unique.obs]）
+直接对 `std::mutex` 做同样的事都是 UB：已持有时再 `lock`，或未持有时 `unlock`，都违反 [[thread.mutex.requirements]] 的前置条件。`unique_lock` 用 `owns` 记住了自己是否持锁，所以能把这些错误变成有定义的异常。
 
-- `swap`（¶1）交换数据成员。
-- `release()`（¶2–¶3）：之后 `pm == 0`、`owns == false`，返回原来的 `pm`。**它不解锁**：如果之前持有锁，锁现在归调用者手动管理。忘记这一点是常见的锁泄漏来源。
-- 非成员 `swap`（¶4）。
-- `owns_lock()`、`explicit operator bool()`（返回 `owns`）、`mutex()`（返回 `pm`）。
+### 修改器与观察器 [thread.lock.unique.mod] [thread.lock.unique.obs]
 
-## shared_lock（[thread.lock.shared]） {{c++14}}
+[thread.lock.unique.mod] ¶2–¶3 `release()` 把 `pm` 置空、`owns` 置假，返回原来的 `pm`。它不解锁：之前持有的锁从此由调用者负责手动 `unlock()`。
 
-`shared_lock` 是 `unique_lock` 的共享版本：同样的成员 `pm`、`owns`，但加锁函数调用的是 `lock_shared`、`try_lock_shared`、`try_lock_shared_for`、`try_lock_shared_until`，析构调用 `unlock_shared`。
+此外还有 `swap`，以及观察器 `owns_lock()`、`explicit operator bool()`（都返回 `owns`）和 `mutex()`（返回 `pm`）。
 
-[thread.lock.shared.general] ¶1：同样的生命周期要求；`Mutex` 须满足 *Cpp17SharedLockable*。¶2 注 1：`shared_lock<Mutex>` 满足 *Cpp17Lockable*（它的 `lock()` 获取的是**共享**锁）；`Mutex` 满足 *Cpp17SharedTimedLockable* 时它满足 *Cpp17TimedLockable*。
+## shared_lock：共享锁的 unique_lock [thread.lock.shared] {{c++14}}
 
-这个"把共享锁伪装成普通锁"的设计让 `shared_lock` 可以传给 `condition_variable_any::wait`，在等待期间释放并重新获取**共享**锁。
+`shared_lock` 和 `unique_lock` 结构相同，区别是它获取的是共享锁：加锁调用 `lock_shared`、`try_lock_shared` 等，析构调用 `unlock_shared`。读写锁 `std::shared_mutex` 的读者通常这样写：
 
-[thread.lock.shared.cons]、[thread.lock.shared.locking]、[thread.lock.shared.mod]、[thread.lock.shared.obs] 与 `unique_lock` 一一对应：`adopt_lock` 的前置条件是"调用线程持有 `m` 上的**共享**锁"（¶7）；错误条件同样是 `operation_not_permitted`（`pm` 为空或未持锁时解锁）与 `resource_deadlock_would_occur`（已持锁时再加锁）。
+```cpp run ok
+#include <map>
+#include <shared_mutex>
+#include <string>
 
-## 通用加锁算法（[thread.lock.algorithm]）
+std::shared_mutex rw;
+std::map<std::string, int> table;
+
+int lookup(const std::string& k) {
+  std::shared_lock lk(rw);           // 多个读者可同时持有
+  auto it = table.find(k);
+  return it == table.end() ? -1 : it->second;
+}
+
+void update(const std::string& k, int v) {
+  std::unique_lock lk(rw);           // 写者独占
+  table[k] = v;
+}
+
+int main() { update("a", 1); return lookup("a") == 1 ? 0 : 1; }
+```
+
+[thread.lock.shared.general] ¶1 生命周期要求与 `unique_lock` 相同；模板实参需满足 *Cpp17SharedLockable*。¶2 注 1 指出，`shared_lock<Mutex>` 满足 *Cpp17Lockable*，它的 `lock()` 获取的是共享锁。这样 `shared_lock` 可以传给 `condition_variable_any::wait`，等待期间释放、醒来后重新获取的都是共享锁。
+
+其余子条款与 `unique_lock` 一一对应。[thread.lock.shared.cons] ¶7 `adopt_lock` 版本的前置条件是调用线程已持有 `m` 上的共享锁；[thread.lock.shared.locking] 的错误条件与 `unique_lock` 相同。
+
+## 通用加锁算法 [thread.lock.algorithm]
+
+两个函数模板都接受至少两个参数，每个参数的类型需满足 *Cpp17Lockable*（¶1、¶4）。适当实例化的 `unique_lock` 满足这一要求。
 
 ### std::try_lock（¶1–¶3）
 
-`template<class L1, class L2, class... L3> int try_lock(L1&, L2&, L3&...)`
+¶2 `std::try_lock(l1, l2, ...)` 从第一个参数开始，依次调用 `try_lock()`，直到全部成功，或某一次失败（返回 `false` 或抛出异常）。一旦失败，就对前面已经锁上的参数调用 `unlock()`，不再继续。
 
-- ¶1 *Preconditions*：每个模板形参类型满足 *Cpp17Lockable*。注 1：适当实例化的 `unique_lock` 满足这一要求。
-- ¶2 *Effects*：**按顺序**对每个实参调用 `try_lock()`，直到全部处理完或某次 `try_lock()` 失败（返回 `false` 或抛出异常）。若某次失败，对**之前所有**实参调用 `unlock()`，不再继续 `try_lock()`。
-- ¶3 *Returns*：全部成功时返回 `-1`，否则返回失败的那个实参的从零开始的下标。
+¶3 全部成功时返回 `-1`，否则返回失败的那个参数的下标（从 0 开始）。
 
 ### std::lock（¶4–¶5）
 
-- ¶4 前置条件同上。
-- ¶5 *Effects*：通过对每个实参调用 `lock()`、`try_lock()` 或 `unlock()` 的一个序列锁住所有实参。**这个调用序列不会导致死锁，但除此之外未指定** {{unspec}}。注 3：可以使用诸如"尝试并退让"（try-and-back-off）的死锁避免算法，但为了不过度约束实现，没有指定具体算法。若某次 `lock()` 或 `try_lock()` 抛出异常，对已经通过 `lock()` 或 `try_lock()` 锁住的每个实参调用 `unlock()`。
+!!! std
+    The sequence of calls does not result in deadlock, but is otherwise unspecified.
 
-"不会导致死锁"是一个很强的承诺：**无论**其他线程以什么顺序对同一组互斥量调用 `std::lock`，都不会死锁。但它只对**都使用 `std::lock`（或 `scoped_lock`）**的线程成立——另一个线程用 `lock_guard` 按固定顺序逐个加锁，仍然可能与之死锁。
+¶5 `std::lock(l1, l2, ...)` 通过对各参数调用 `lock()`、`try_lock()`、`unlock()` 的某个序列锁住全部参数。这个序列不会造成死锁，除此之外未指定 {{unspec}}。注 3 提到可以用尝试并退让（try-and-back-off）一类的算法。如果某次 `lock()` 或 `try_lock()` 抛出异常，已经锁上的参数都会被解锁。
+
+不会死锁的承诺对所有用 `std::lock` 或 `scoped_lock` 锁同一组互斥量的线程成立，不论它们传参的顺序。另一个线程如果用 `lock_guard` 按自己的顺序逐个加锁，仍然可能与之死锁。
 
 !!! impl "libc++ 的算法（`<mutex>`）"
-    两个互斥量时：
+    两个参数时，`std::lock` 循环执行：阻塞地锁 `l0`，再 `try_lock` `l1`，成功就返回，失败就解锁 `l0` 并让出 CPU；然后反过来，阻塞地锁 `l1`、尝试 `l0`。
 
-    ```text
-    循环：
-      阻塞地锁 l0；try_lock l1；成功则返回，否则解锁 l0
-      yield
-      阻塞地锁 l1；try_lock l0；成功则返回，否则解锁 l1
-      yield
-    ```
+    参数更多时，每一轮阻塞地锁住一个参数，再对其余参数调用 `std::try_lock`。如果第 j 个失败，就全部释放，下一轮先阻塞地锁第 j 个。也就是说，线程总是在上一轮让它失败的那个互斥量上阻塞等待，而不是空转重试。这种算法不会死锁，但高度争用时可能反复重试多轮。
 
-    多于两个时（`__lock_first`）：阻塞地锁住第 i 个，再对其余的调用 `std::try_lock`；若第 j 个失败，就全部释放，下一轮改为**先阻塞地锁第 j 个**。也就是说，每一轮都从"上一轮让自己失败的那个互斥量"开始阻塞等待，而不是空转重试。这就是注 3 所说的"尝试并退让"。它不会死锁，但在高争用时可能活锁般地多次重试。
+## 常见误解
 
-## 陷阱
-
-!!! pitfall "`std::unique_lock<std::mutex>(m);` 是一个声明"
-    按 [[dcl.ambig.res]]，这条语句被解析为**声明一个名为 `m` 的变量**（类型 `unique_lock<mutex>`，默认构造，不持有任何锁），而不是创建一个锁住 `m` 的临时对象。它会遮蔽外层的 `m`，然后什么也不锁。
+!!! pitfall "`std::unique_lock<std::mutex>(m);` 能锁住 m"
+    按 [[dcl.ambig.res]]，这条语句是一个声明：它声明了一个名为 `m`、默认构造的 `unique_lock<mutex>` 变量，遮蔽了外层的 `m`，什么也没锁。
 
     ```cpp title="vexing-lock.cpp" ok
     #include <mutex>
     std::mutex m;
     int shared;
     void f() {
-      std::unique_lock<std::mutex>(m);   // 声明了一个名为 m 的局部变量！
-      ++shared;                          // 没有被保护
+      std::unique_lock<std::mutex>(m);   // 声明了一个名为 m 的局部变量
+      ++shared;                          // 没有受到保护
     }
     void g() {
-      std::scoped_lock{m};               // 临时对象：在分号处就解锁
-      ++shared;                          // 也没有被保护
+      std::scoped_lock{m};               // 临时对象：在分号处就解锁了
+      ++shared;                          // 也没有受到保护
     }
     int main() { f(); g(); }
     ```
 
-    两段代码都是良构的，行为也有定义（单线程下）——只是完全没有起到保护作用。Clang 23 对前者给出 `warning: parentheses were disambiguated as redundant parentheses around declaration of variable named 'm' [-Wvexing-parse]`；对后者，libc++ 把构造函数标为 `[[nodiscard]]`，Clang 给出 `warning: ignoring temporary created by a constructor declared with 'nodiscard' attribute [-Wunused-value]`。正确写法是**总是给锁起名字**：`std::scoped_lock lk(m);`。
+    两个函数都是良构的，只是锁没有起作用。Clang 23 对 `f` 给出 `-Wvexing-parse` 警告；libc++ 把 `scoped_lock` 的构造函数标为 `[[nodiscard]]`，所以 `g` 也会得到一条警告。给锁对象起名字就能避免这两种错误：`std::scoped_lock lk(m);`。
 
-!!! pitfall "锁比互斥量活得久"
+!!! pitfall "锁可以比互斥量活得久"
     ```cpp
     std::unique_lock<std::mutex> make_lock() {
       std::mutex m;
-      return std::unique_lock(m);   // 返回后 m 已销毁，而锁还持有它：UB
+      return std::unique_lock(m);   // 返回后 m 已销毁，锁还引用着它：UB
     }
     ```
-    所有四种锁都把"可锁对象在锁的生命周期内存在"列为要求（违反即 UB）。
+    四种锁都要求被引用的可锁对象在锁的生命周期内一直存在。
 
-!!! pitfall "release() 之后忘记解锁"
-    `lk.release()` 把"持有锁"的责任交还给你；若之前持有锁，你必须手动 `m.unlock()`，否则线程终止时仍拥有互斥量（UB）。
+!!! pitfall "`release()` 会解锁"
+    `release()` 只是让 `unique_lock` 放手，锁仍然被持有。调用者忘记手动 `unlock()`，线程就会在持有互斥量时结束，这是 UB。
 
 ## 思考题
 
-!!! question "1. `std::lock(m, m)`——同一个 `std::mutex` 传两次——会怎样？"
+!!! question "思考题 1"
+    `std::lock(m, m)`，同一个 `std::mutex` 传两次，会怎样？
 
 <details markdown="1">
 <summary>答案</summary>
 
-UB。`std::lock` 的算法会在持有 `m` 的情况下对同一个 `m` 调用 `try_lock()`，违反 `mutex` 的前置条件"调用线程不拥有该互斥量"（[[thread.mutex.requirements]]）。`scoped_lock lk(m, m)` 同理。
+UB。算法会在已经持有 `m` 时对 `m` 调用 `try_lock()` 或 `lock()`，违反 `std::mutex` 的前置条件：调用线程不得已拥有这个互斥量（[[thread.mutex.requirements]]）。`std::scoped_lock lk(m, m);` 也一样。
 </details>
 
-!!! question "2. `lock_guard` 的析构函数为什么不检查是否持有锁？"
+!!! question "思考题 2"
+    `lock_guard` 的析构函数为什么不检查是否持锁？
 
 <details markdown="1">
 <summary>答案</summary>
 
-因为 `lock_guard` 在其整个生命周期内**总是**持有锁（¶1）：构造函数要么成功加锁，要么以异常退出（此时对象未构造完成，析构函数不运行）；`adopt_lock` 构造函数的前置条件保证已持有锁；且没有任何成员函数能在中途释放它。不需要 `owns` 标志，所以 `lock_guard` 只是一个引用的大小。
+因为它在整个生命周期内总是持锁（¶1）。普通构造函数要么成功加锁，要么抛出异常，此时对象没有构造完成，析构函数不会运行；`adopt_lock` 版本的前置条件保证调用线程已经持锁；它也没有任何能中途解锁的成员函数。
 </details>
 
 ## 小结
 
-| | 持有锁的时间 | 可移动 | 可中途解锁/加锁 | 多个互斥量 | 误用检测 |
+| | 持锁时间 | 可移动 | 可中途解锁、加锁 | 多个互斥量 | 误用 |
 |---|---|---|---|---|---|
-| `lock_guard` | 整个生命周期 | 否 | 否 | 否 | — |
-| `scoped_lock` | 整个生命周期 | 否 | 否 | 是（`std::lock`） | — |
-| `unique_lock` | 可变（`owns`） | 是 | 是 | 否（但可传给 `std::lock`） | `system_error` |
-| `shared_lock` | 可变（`owns`），共享锁 | 是 | 是 | 否 | `system_error` |
-
-- 被引用的可锁对象必须在锁的生命周期内存在。
-- `std::lock`/`scoped_lock` 承诺不死锁，具体调用序列未指定。
-- 永远给锁对象起名字。
+| `lock_guard` | 整个生命周期 | 否 | 否 | 否 | 无此类操作 |
+| `scoped_lock` | 整个生命周期 | 否 | 否 | 是（`std::lock`） | 无此类操作 |
+| `unique_lock` | 由 `owns` 记录 | 是 | 是 | 可以传给 `std::lock` | 抛 `system_error` |
+| `shared_lock` | 由 `owns` 记录（共享锁） | 是 | 是 | 可以传给 `std::lock` | 抛 `system_error` |
