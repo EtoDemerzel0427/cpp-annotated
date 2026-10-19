@@ -1,145 +1,139 @@
 ---
 title: deque
-summary: std::deque 的契约与实现——"块 + 块指针表"的结构如何由两端常数插入、恰好一次构造、引用稳定这三条要求逼出来；两端插入使迭代器失效却不使引用失效；中间插入/擦除只挪较短一侧；两端插入的强异常保证；libc++ 的 4096 字节块
+summary: std::deque 是两端都能常数时间插入擦除的随机访问序列；它的复杂度和失效规则几乎唯一地决定了"定长块加块指针表"的实现。
 status: done
 covers: *, deque.syn
 related: sequence.reqmts, container.requirements, vector, list, container.adaptors
 tags: 标准库, 容器, deque, 迭代器失效
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-`std::deque`（double-ended queue）是"两端都能高效插入"的随机访问序列。它的规范正文只有几段，却通过复杂度和失效规则精确地刻画了一个特定的数据结构。理解 `deque`，最好的办法是从条款**反推**实现。
+!!! tldr
+    - 在两端插入单个元素总是常数时间，只调用一次 `T` 的构造函数，已有元素从不移动。
+    - 两端插入使所有迭代器失效，但不使任何元素的引用失效；中间插入使两者都失效。
+    - 两端插入单个元素具有无条件的强异常保证，这一点比 `vector::push_back` 强。
+    - 中间插入或擦除时，实现只挪动离两端较近的那一侧。
+    - `deque` 不是连续存储，没有 `capacity()` 和 `reserve()`。
 
-## 概述（[deque.overview]）
+`std::deque`（double-ended queue）是一个两端都能高效插入的随机访问序列。它的条文不长，但复杂度和失效规则几乎唯一地确定了它的数据结构，所以最好从条文反推实现。
 
-¶1：`deque` 支持随机访问迭代器；在开头或末尾插入和擦除是**常数时间**，在中间是线性时间。
-
-¶2：满足容器、可逆容器、分配器感知容器、序列容器（**包括全部**可选序列操作）的要求。这是唯一提供 [[sequence.reqmts]] ¶70 里全部可选操作的容器：`front`/`back`/`push_front`/`push_back`/`emplace_*`/`prepend_range`/`append_range`/`pop_*`/`operator[]`/`at`。
-
-¶3：迭代器满足 constexpr 迭代器要求。整个 `deque` 在当前草案中是 `constexpr` 的（C++26 将 `deque`、`list`、`forward_list` 及关联容器等一并 constexpr 化）；但截至本文编写时，本机 libc++ 尚未为 `deque` 实现 constexpr，`constexpr` 函数中使用 `deque` 无法常量求值。
-
-## 从条款反推数据结构
-
-[deque.modifiers] ¶2 的这一句是关键：
-
-!!! std
-    Inserting a single element at either the beginning or end of a deque always takes constant time and causes a single call to a constructor of T.
-
-    在 deque 开头或末尾插入单个元素，总是常数时间，并且只调用一次 T 的构造函数。
-
-注意"**always**"与"**single call to a constructor**"：不是摊还常数，并且不允许搬迁任何已有元素。再加上 ¶1 "两端插入不影响引用的有效性"，可以推出：元素一旦放下就**永不移动**，只能把新元素放进**新分配的块**里。另一方面，随机访问要求 `operator[]` 常数，于是需要一张"块指针表"（通常叫 map）来定位第 i 个元素所在的块：
-
-```text
-   map（块指针表，可扩容、可在两端留空位）
-  ┌────┬────┬────┬────┬────┐
-  │    │ b0 │ b1 │ b2 │    │
-  └────┴─┬──┴─┬──┴─┬──┴────┘
-         ▼    ▼    ▼
-       [..xx][xxxx][xx..]       ← 定长的元素块；x 为活对象
-          ▲              ▲
-        begin           end
-```
-
-这个结构正好解释了每一条规则：
-
-- 两端插入：在首块/尾块的空位上构造；没空位就分配一个新块，并在 map 两端登记。map 本身满了要重新分配——只复制**块指针**，不搬元素。所以**引用不失效**，但迭代器（内部持有指向 map 槽位的指针）**全部失效**。
-- 严格说，map 扩容要复制 O(块数) 个指针，所以"总是常数时间"只对**元素操作**成立——这正是 [[container.requirements]] ¶2"复杂度只数元素操作"的用武之地。
-- 中间插入：只能挪动元素；挑较短的一侧挪（下文 ¶2）。
-
-{{impl}} libc++ 的块大小由 `__deque_block_size` 决定：`sizeof(T) < 256 ? 4096 / sizeof(T) : 16`。本机实测：`deque<int>` 第一次 `push_back` 先分配 1 个 8 字节的 map 槽，再分配一个 1024 × 4 = 4096 字节的块；元素为 1000 字节时一块 16 个元素（16000 字节）。`sizeof(std::deque<int>) == 48`。libstdc++ 的块为 512 字节，MSVC STL 的块极小（16 字节或 1 个元素），对大对象几乎退化为"每元素一次分配"。
-
-## 构造函数（[deque.cons]）
-
-`deque(const Allocator&)`（常数）、`deque(n)`（*Cpp17DefaultInsertable*，n 个 default-inserted 元素）、`deque(n, value)`（*Cpp17CopyInsertable*）、迭代器区间与 `from_range` 构造（线性于距离），全部与 [[sequence.reqmts]] 的通用条目一致（¶1–¶12）。
-
-## 容量（[deque.capacity]）
-
-- `resize(sz)`（¶1–¶2）：要求 *Cpp17MoveInsertable* 与 *Cpp17DefaultInsertable*；缩小则擦除末尾，增大则追加 default-inserted 元素。
-- `resize(sz, c)`（¶3–¶4）：*Cpp17CopyInsertable*。
-- `shrink_to_fit()`（¶5–¶8）：**非约束请求**，减少内存占用但不改变大小。若 size 等于旧容量，或抛出的异常不是不可拷贝 `T` 的移动构造抛出的，则无效果；若 size ≠ 旧容量，线性复杂度，并使**全部**引用、指针、迭代器和 end 失效。
-
-`deque` 没有 `capacity()` 和 `reserve()` 成员——¶6–¶8 里说的"容量"是规范内部的概念。没有 `reserve` 的原因很自然：两端插入从不搬迁元素，预留空间没有收益。
-
-## 修改器（[deque.modifiers]）
-
-### 插入（¶1–¶3）
-
-¶1 失效规则：
-
-- **在中间插入**：使 `deque` 的**所有**迭代器和元素引用失效；
-- **在任一端插入**：使所有迭代器失效，但**不影响**元素引用的有效性。
+## 从一个保证说起
 
 ```cpp title="deque-refs.cpp" run ok
-#include <deque>
 #include <cstdio>
+#include <deque>
 
 int main() {
   std::deque<int> d{1, 2, 3};
   int* p = &d[1];
-  auto it = d.begin() + 1;
-  for (int i = 0; i < 10000; ++i) d.push_back(i);   // 两端插入：引用保持有效
+  for (int i = 0; i < 10000; ++i) d.push_back(i);
   for (int i = 0; i < 10000; ++i) d.push_front(i);
-  std::printf("%d\n", *p);                         // OK：仍是 2
-  (void)it;                                         // 但 it 已失效，不得再使用
+  std::printf("%d\n", *p);   // 2：两端插入不使引用失效
 }
 ```
 
-这使 `deque` 成为"需要稳定元素地址、又只在两端增长"的场景（对象池、事件队列）的首选：比 `list` 省内存、对缓存友好，又不像 `vector` 那样扩容时搬家。
+插入了两万个元素，`p` 仍然指向原来的 2。`vector` 做不到这一点：扩容时元素会被搬到新的存储里，旧指针全部悬垂。
 
-¶2 复杂度：线性于插入元素个数**加上到开头和末尾距离中较小者**。也就是说，在中间插入时实现必须挪动**较短**的一侧——在靠近开头处插入就把前半段往前挪。
+¶1 `deque` 支持随机访问迭代器，在开头或末尾插入、擦除是常数时间，在中间是线性时间。¶2 它满足容器、可逆容器、分配器感知容器和序列容器的要求，包括 [[sequence.reqmts]] 中全部可选操作：`front`、`back`、`push_front`、`push_back`、`emplace_front`、`emplace_back`、`prepend_range`、`append_range`、`pop_front`、`pop_back`、`operator[]`、`at`。标准库中只有 `deque` 提供了全部这些操作。
 
-¶3 异常安全：
+## 条文决定的数据结构
 
-- 抛出者不是 `T` 的拷贝/移动构造或（移动）赋值：无效果；
-- 在**任一端**插入单个元素时抛出：**无效果**；
-- 否则，若由不可拷贝 `T` 的移动构造抛出：效果未指明。
+插入一节的第 2 段（[[deque.modifiers#2]]）是关键：
 
-与 [[vector]] 比较：`vector::push_back` 的强保证依赖"`T` 可拷贝或移动不抛"，因为扩容要搬迁旧元素；`deque` 的两端插入从不搬迁旧元素，所以**无条件**地具有强保证。
+!!! std
+    Inserting a single element at either the beginning or end of a deque always takes constant time and causes a single call to a constructor of T.
 
-### 擦除（¶4–¶6）
+这里说的是总是常数时间，不是摊还常数；而且只调用一次构造函数，不允许搬动已有元素。再加上两端插入不使引用失效，可以推出：元素一旦放下就不再移动，新元素只能放进新分配的块里。另一方面，`operator[]` 必须是常数时间，于是还需要一张块指针表（通常叫 map），用来定位第 i 个元素在哪个块里。
 
-¶4 按擦除位置区分：
+```text
+   map（块指针表，可以扩容，两端可以留空位）
+  ┌────┬────┬────┬────┬────┐
+  │    │ b0 │ b1 │ b2 │    │
+  └────┴─┬──┴─┬──┴─┬──┴────┘
+         ▼    ▼    ▼
+       [..xx][xxxx][xx..]       ← 定长的元素块，x 是元素
+          ▲              ▲
+        begin           end
+```
 
-| 擦除的是 | 失效 |
+每条规则都能在这个结构上得到解释：
+
+- 两端插入时，在首块或尾块的空位上构造元素；没有空位就分配一个新块，登记到 map 的一端。map 满了要重新分配，但只复制块指针，不搬元素。所以引用不失效；而迭代器内部保存着指向 map 槽位的指针，map 一重新分配它们就失效了。
+- map 扩容要复制 O(块数) 个指针，严格说不是常数时间。标准的复杂度只计算对元素的操作次数（[[container.requirements.pre#2]]），所以总是常数时间对元素操作成立。
+- 中间插入只能挪动元素，所以是线性的，实现挑较短的一侧去挪。
+
+!!! impl
+    libc++ 的块大小是 `sizeof(T) < 256 ? 4096 / sizeof(T) : 16` 个元素，`deque<int>` 一块是 1024 个 `int`。本机 `sizeof(std::deque<int>)` 是 48。libstdc++ 的块是 512 字节；MSVC STL 的块只有 16 字节，元素大于 8 字节时每块只放一个元素，对大对象几乎等于每个元素一次分配。
+
+## 插入 [deque.modifiers]
+
+¶1 失效规则按插入位置区分：
+
+- 在中间插入，使 `deque` 的所有迭代器和元素引用失效；
+- 在任一端插入，使所有迭代器失效，但不影响元素引用的有效性。
+
+因此 `deque` 很适合需要稳定元素地址、又只在两端增长的场景，例如对象池或事件队列。它比 `list` 省内存、对缓存友好，又不像 `vector` 那样扩容时搬迁元素。
+
+¶2 复杂度线性于插入的元素个数，加上插入点到开头和到末尾两个距离中较小的那个。也就是说，在靠近开头的位置插入时，实现要把前半段往前挪，而不是把后半段往后挪。
+
+¶3 异常安全分三种情况：
+
+- 抛出异常的不是 `T` 的复制构造、移动构造、复制赋值或移动赋值：没有效果；
+- 在任一端插入单个元素时抛出异常：没有效果；
+- 其他情况下，如果异常来自一个不可复制插入的 `T` 的移动构造函数：效果未指明。
+
+和 [[vector]] 比较：`vector::push_back` 的强保证依赖 `T` 可复制或移动构造不抛异常，因为扩容时要搬迁旧元素。`deque` 的两端插入从不搬迁旧元素，所以强保证是无条件的。
+
+## 擦除
+
+¶4 失效规则按擦除位置区分：
+
+| 擦除的元素 | 失效的范围 |
 |---|---|
-| 最后一个元素（含 `pop_back`） | 仅被擦除元素的迭代器和引用 + 尾后迭代器 |
-| 第一个但不是最后一个元素（含 `pop_front`） | 仅被擦除元素的迭代器和引用 |
-| 既非第一也非最后的元素 | 尾后迭代器 + **所有**迭代器和引用 |
+| 包括最后一个元素（如 `pop_back`） | 被擦除元素的迭代器和引用，以及尾后迭代器 |
+| 包括第一个但不包括最后一个元素（如 `pop_front`） | 只有被擦除元素的迭代器和引用 |
+| 既不是第一个也不是最后一个 | 尾后迭代器，以及所有元素的迭代器和引用 |
 
-注 1 明确：`pop_front` 和 `pop_back` 是擦除操作。
+注 1 明确，`pop_front` 和 `pop_back` 也是擦除操作。
 
-¶5：除 `T` 的赋值运算符外不抛异常。¶6：析构函数调用次数等于擦除个数；赋值运算符调用次数**不超过**擦除点之前与之后元素个数中的较小者——又一次规定"挪短的一侧"。
+¶5 除了 `T` 的赋值运算符，擦除不抛异常。¶6 析构函数的调用次数等于擦除的元素个数；赋值运算符的调用次数不超过擦除点之前和之后元素个数中较小的那个，同样是只挪较短的一侧。
 
-## 擦除（[deque.erasure]）
+!!! pitfall "以为 pop_front 后所有迭代器都失效"
+    擦除首元素（且它不是最后一个元素）只使被擦除元素失效。用 `deque` 做先进先出队列时，指向其余元素的迭代器在 `pop_front` 之后仍然有效。不过之后的 `push_back` 会使所有迭代器失效。
 
-非成员 `erase`/`erase_if` 等价于 erase-remove 惯用法（¶1–¶2），与 [[vector]] 相同。
+## 容量 [deque.capacity]
 
-## `deque` 与容器适配器
+¶1–¶4 `resize(sz)` 和 `resize(sz, c)`：缩小时擦除末尾多出的元素，增大时在末尾追加默认插入的元素或 `c` 的副本。
 
-`std::stack` 和 `std::queue` 的默认底层容器都是 `deque`（[[container.adaptors]]）：`queue` 需要 `push_back` + `pop_front`，`vector` 没有后者；`stack` 只需要尾部操作，`vector` 也能胜任；默认选 `deque` 是沿袭 C++98 的设计，其好处是增长时不搬迁元素、不出现单次大的重新分配。
+¶5–¶8 `shrink_to_fit()` 是一个非约束性请求，可以减少内存占用，但不改变元素个数。如果大小已经等于原来的容量，或者抛出的异常不是来自不可复制插入的 `T` 的移动构造函数，就没有效果。真的发生了收缩时，复杂度线性，并使所有引用、指针、迭代器以及尾后迭代器失效。
 
-## 常见误区
+`deque` 没有 `capacity()` 和 `reserve()`，第 6 到 8 段中的容量只是规范内部的概念。不提供 `reserve` 也合理：两端插入从不搬迁元素，预留空间没有收益。
 
-!!! pitfall "以为 `deque` 是连续的"
-    `deque` 的迭代器是随机访问的，但**不是** `contiguous_iterator`。`&d[0] + i == &d[i]` 只在同一块内成立；把 `&d[0]` 传给需要连续缓冲区的 C 接口是 {{ub}}。
+!!! pitfall "以为 deque 是连续存储"
+    `deque` 的迭代器是随机访问迭代器，但不是 `contiguous_iterator`。`&d[0] + i == &d[i]` 只在同一块之内成立，把 `&d[0]` 当作连续缓冲区交给 C 接口，越过块边界的访问是 {{ub}}。
 
-!!! pitfall "以为 `pop_front` 后迭代器都失效"
-    恰恰相反：擦除首元素（且不是最后一个）**只**使被擦除者失效。用 `deque` 做 FIFO 时，指向其余元素的迭代器在 `pop_front` 后仍然有效；但随后的 `push_back` 会使全部迭代器失效。
+## 构造与 erase_if
+
+[deque.cons] 中的构造函数与 [[sequence.reqmts]] 的通用条目一致：空构造常数时间，`deque(n)` 和 `deque(n, value)` 线性于 n，迭代器区间和 `from_range` 构造线性于区间长度（¶1–¶12）。
+
+[deque.erasure] 的非成员 `erase` 和 `erase_if` 等价于先 `remove`/`remove_if` 再 `erase` 的惯用法，与 [[vector]] 相同（¶1–¶2）。
+
+## 与容器适配器的关系
+
+`std::stack` 和 `std::queue` 默认的底层容器都是 `deque`（[[container.adaptors]]）。`queue` 需要 `push_back` 和 `pop_front`，`vector` 没有后者；`stack` 只用尾部操作，`vector` 也能胜任。默认选 `deque` 沿袭自 C++98，它的好处是增长时不搬迁元素，也不会出现单次很大的重新分配。
+
+!!! impl
+    当前草案中 `deque` 的成员都是 `constexpr`，迭代器满足 constexpr 迭代器的要求（[[deque.overview#3]]）。本机 libc++ 还没有为 `deque` 实现这一点：在 `consteval` 函数中构造 `deque` 无法常量求值。
 
 ## 思考题
 
-!!! question "`deque<T>::insert(begin() + 1, x)` 会调用 `T` 的赋值运算符吗？会调用几次？"
+!!! question "思考题"
+    `d.insert(d.begin() + 1, x)` 会调用 `T` 的赋值运算符吗？之后哪些迭代器和引用还有效？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-会，最多 1 次。插入点离开头只有 1 个元素，¶2 要求复杂度线性于"插入个数 + 到两端距离的较小者"，实现会把第 0 个元素往前挪一格：在新的首位置**构造**（移动构造）原 `d[0]` 的值，然后把 `x` **赋值**到原第 0 个位置（或先挪后赋值，具体顺序由实现决定）。这也是 [[sequence.reqmts]] ¶25 要求 `deque` 的 `insert(p, t)` 还需 *Cpp17CopyAssignable* 的原因。由于这是中间插入，¶1 宣布全部迭代器和引用失效——即使物理上大多数元素根本没动。
+通常会，大约一次。插入点离开头只有一个元素，[[deque.modifiers#2]] 要求复杂度线性于插入个数加上到两端距离的较小者，所以实现会挪动前面那一个元素：在新的首位置移动构造原来的 `d[0]`，再把 `x` 赋值到原来第 0 个元素所在的位置。这也是 [[sequence.reqmts#25]] 要求 `deque` 的 `insert(p, t)` 还满足 *Cpp17CopyAssignable* 的原因。
+
+这是中间插入，按 [[deque.modifiers#1]]，所有迭代器和引用都失效，尽管物理上大多数元素根本没有动。
 </details>
-
-## 小结
-
-- 结构：定长块 + 块指针表；元素一旦放下永不移动（除非中间插入/擦除或 `shrink_to_fit`）。
-- 两端插入：常数、恰好一次构造、**无条件强保证**；迭代器全失效，引用全保留。
-- 中间插入/擦除：挪较短一侧，全部失效。
-- 擦除首元素只失效被擦除者；擦除尾元素还失效 end。
-- 没有 `capacity`/`reserve`；`shrink_to_fit` 是非约束请求。
