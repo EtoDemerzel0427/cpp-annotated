@@ -1,89 +1,65 @@
 ---
 title: C++ 与 ISO C++ 2011 的差异
-summary: Annex C.6：从 C++11 升级到 C++14 会遇到的 7 条不兼容——数字分隔符改变宏实参的切分、带大小的 operator delete 成为常规释放函数、条件运算符中 throw 分支不再触发转换、constexpr 成员函数不再隐式 const、带默认成员初始化器的类可以是聚合、gets 删除。逐条给出前后对比与 Clang 23 实测。
-status: draft
+summary: 从 C++11 升级到 C++14 时，哪些原来合法的代码会报错或改变行为：数字分隔符改变宏实参的切分、带大小的 operator delete 成为常规释放函数、条件运算符的 throw 分支、constexpr 成员函数不再隐式 const、带默认成员初始化器的聚合、gets 删除。
+status: done
 covers: *
 related: diff, diff.cpp14, diff.cpp03, lex.icon, basic.stc, expr.cond, dcl.constexpr, dcl.init.aggr
 tags: 附录, 兼容性, 迁移, C++14
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[diff.cpp11] 列出 C++11 → C++14 这一步引入的不兼容。C++14 是一次小版本，只有 7 条，但其中两条很典型：数字分隔符 `'` 改变了**分词**，导致同一段宏调用在两个标准下展开成不同的东西；`constexpr` 成员函数不再隐式 `const`，导致一组重载变成重复声明。
+!!! tldr
+    - C++14 只有 7 条不兼容，大多数只在刻意构造的代码里出现。
+    - 最可能真正碰到的是 `constexpr` 非静态成员函数不再隐式是 `const` 的：依赖这个隐式 `const` 的重载会变成重复声明。
+    - 数字分隔符 `'` 改变了分词，同一个宏调用在两个标准下可以展开成不同的结果。
+    - 带默认成员初始化器的类可以是聚合，`S b{a};` 可能改用另一个转换函数，结果静默改变。
+    - `gets` 被删除；`operator delete(void*, std::size_t)` 成为常规的释放函数，与它同签名的自定义布置释放函数会出问题。
 
-实测环境：Clang 23.1.3，对比 `-std=c++11` 与 `-std=c++14`。
+[diff.cpp11] 列出 C++14 相对 C++11 的不兼容：原来良构的代码，在 C++14 中变成非良构，或者含义改变。每一条在标准里都写成同样的格式：受影响的条款、改了什么、为什么改、对旧代码有什么影响。
 
-¶1 [diff.cpp11.general]：本小节列出与 ISO C++ 2011 的差异，是在前面各小节所列差异**之外**的部分。
+¶1 这一节列的是在前面各节之外的差异：从 C++11 升级到当前草案，还要再看 [[diff.cpp14]] 及之后各节。条目按正文的章节顺序排列。文中的实测都用本机 Clang 23.1.3，对比 `-std=c++11` 与 `-std=c++14`。
 
-## Clause [lex]：词法约定 {#diff.cpp11.lex}
+## 词法约定 [diff.cpp11.lex] {#diff.cpp11.lex}
 
-### ¶1 *pp-number* 可以包含单引号
-
-**受影响小节**：[[lex.ppnumber]]
-
-**改动**：预处理数（[[g:pp-number]]）的文法允许数字之间出现 `'`，作为数字分隔符（`1'000'000`，见 [[lex.icon]]）。
-
-**影响**：C++11 中 `1'2` 是 `1` 后跟一个字符字面量的开头 `'2,3'`。这在宏实参的切分上会造成差别：
+### 数字分隔符改变宏实参的切分
 
 ```cpp run title="digit_sep.cpp" ok
 #include <cstdio>
 #define M(x, ...) __VA_ARGS__
 int x[2] = { M(1'2,3'4, 5) };
+// C++11：int x[2] = { 5 };
+// C++14：int x[2] = { 3'4, 5 };
 int main() { std::printf("%d %d\n", x[0], x[1]); }
-// C++11：'2,3' 是一个字符字面量，M 的实参是 1'2,3'4 与 5，展开为 { 5 }
-// C++14：1'2 与 3'4 是两个数，M 的实参是 1'2、3'4、5，展开为 { 3'4, 5 }
 ```
 
-这个例子在两个标准下**都是良构的**，只是结果不同，属于静默改变。
+¶1 C++14 允许在数字之间写单引号作分隔符，例如 `1'000'000`（[[lex.icon]]）。为此，预处理阶段的数字记号，即**预处理数**（[[g:pp-number]]），可以包含单引号（[[lex.ppnumber]]）。
 
-**Clang 23 实测**：
+C++11 中，`1'2,3'4` 里的 `'2,3'` 是一个字符字面量，所以 `M` 的实参是 `1'2,3'4` 和 `5`，展开为 `{ 5 }`。C++14 中 `1'2` 和 `3'4` 是两个数，实参变成三个，展开为 `{ 3'4, 5 }`。两种结果都是良构的，只是含义不同，编译器不会提示。
 
-```text
--std=c++11:  5 0
--std=c++14:  34 5
-```
+本机运行，`-std=c++11` 输出 `5 0`，`-std=c++14` 输出 `34 5`。实际代码中几乎不会这样写。
 
+## 基础 [diff.cpp11.basic] {#diff.cpp11.basic}
 
-**改写难度**：实际代码中几乎不会出现，无需特别处理。
-
-## Clause [basic]：基础 {#diff.cpp11.basic}
-
-### ¶1 新的常规（非布置）释放函数
-
-**受影响小节**：[[basic.stc.dynamic.deallocation]]
-
-**改动**：`operator delete(void*, std::size_t)` 成为**常规释放函数**（带大小的释放，sized deallocation）。
-
-**理由**：支持带大小的释放：编译器把对象大小传给 `operator delete`，分配器就不必自己记录块大小。
-
-**影响**：C++11 中可以这样声明一对全局的**布置**分配/释放函数：
+### 带大小的 `operator delete` 成为常规释放函数
 
 ```cpp
-void* operator new(std::size_t, std::size_t);
-void operator delete(void*, std::size_t) noexcept;
-```
+void* operator new(std::size_t, std::size_t);         // 布置分配函数
+void operator delete(void*, std::size_t) noexcept;    // C++11：与之配对的布置释放函数
+                                                       // C++14：与常规释放函数同签名
 
-C++11 里第二个声明是与第一个配对的布置释放函数。现在它的签名与预定义的常规 `operator delete(void*, std::size_t)` 相同。如果一个布置 `new` 表达式找到的匹配释放函数恰好是一个常规释放函数，程序非良构（类成员版本一直就是这样，见 [[expr.new]]）。
-
-**Clang 23 实测**：两个声明本身在两种模式下都能编译；问题出在使用处。加上
-
-```cpp
 struct T { T(); };
-T* f() { return new (8) T; }
+T* f() { return new (8) T; }   // error: C++11 中良构
 ```
 
-之后，`-std=c++11` 通过，`-std=c++14` 报 `'new' expression with placement arguments refers to non-placement 'operator delete'`。
+¶1 C++14 引入了带大小的释放：`delete p` 时编译器把对象大小一并传给 `operator delete(void*, std::size_t)`，分配器就不必自己记录每块内存的大小（[[basic.stc.dynamic.deallocation]]）。这个函数因此成为一个**常规释放函数**，即 `delete` 表达式会调用的那一类，而不是只在布置 `new` 构造失败时才调用的布置释放函数。
 
-**改写难度**：容易。给布置形式换一个不会撞车的标签类型作第二形参。
+C++11 中，上例的第二个声明是与第一个布置分配函数配对的布置释放函数。C++14 中它与预定义的常规释放函数同签名。布置 `new` 表达式在构造函数抛出异常时要调用与之配对的释放函数，如果找到的恰好是一个常规释放函数，程序非良构；类成员版本一直就是这个规则（[[expr.new]]）。
 
-## Clause [expr]：表达式 {#diff.cpp11.expr}
+Clang 23 在 `-std=c++14` 下对 `new (8) T` 报错，提示带布置实参的 `new` 引用了非布置的 `operator delete`。修正方法是给这对布置函数换一个不会撞车的第二形参类型，比如一个自定义的标签类型。
 
-### ¶1 条件表达式中的 `throw` 分支保留另一分支的类型和值类别
+## 表达式 [diff.cpp11.expr] {#diff.cpp11.expr}
 
-**受影响小节**：[[expr.cond]]
-
-**改动**：条件表达式的第二或第三操作数是 *throw-expression* 时，结果的类型和值类别就是另一个操作数的类型和值类别。C++11 要求对另一个操作数施加左值到右值、数组到指针、函数到指针转换。
-
-**理由**：原来强制的转换（特别是左值到右值转换产生的临时对象）被认为是多余且令人意外的。
+### 条件表达式中的 `throw` 分支
 
 ```cpp
 struct S {
@@ -92,56 +68,46 @@ struct S {
 };
 int f(bool cond) {
   S s;
-  (cond ? s : throw 0).mf();   // C++11：在 s 的副本上调用 mf；现在：在 s 本身上调用
+  (cond ? s : throw 0).mf();   // C++14：在 s 本身上调用；C++11：在 s 的副本上
   return s.x;
 }
-// f(true)：C++11 返回 1，现在返回 2
-
-// sizeof(true ? "" : throw 0)：C++11 为 sizeof(const char*)，现在为 sizeof(const char[1])
+// f(true)：C++14 返回 2，C++11 返回 1
+// sizeof(true ? "" : throw 0)：C++14 是 sizeof(const char[1])，C++11 是 sizeof(const char*)
 ```
 
-**Clang 23 实测**：两种模式下 `f(true)` 都返回 2，`sizeof` 都是 1。Clang 把这条作为 DR 回溯到了 C++11。
+¶1 条件表达式 `c ? a : b` 的一个分支是 throw 表达式时，C++14 规定结果的类型和值类别就是另一个分支的类型和值类别（[[expr.cond]]）。C++11 则要求先对另一个分支做左值到右值、数组到指针、函数到指针的转换，于是左值 `s` 变成了一个临时副本，`""` 退化成了指针。这些转换，尤其是左值到右值转换产生的那个临时对象，被认为既多余又出人意料。
 
-**改写难度**：只有依赖那份"多余副本"的代码受影响，实际中几乎没有。
+Clang 23 把这条当作缺陷修正，`-std=c++11` 下也是新行为：`f(true)` 返回 2，`sizeof` 的结果是 1。只有依赖那份多余副本的代码受影响，实际中几乎没有。
 
-## Clause [dcl]：声明 {#diff.cpp11.dcl.dcl}
+## 声明 [diff.cpp11.dcl.dcl] {#diff.cpp11.dcl.dcl}
 
-### ¶1 `constexpr` 非静态成员函数不再隐式 `const`
+### `constexpr` 成员函数不再隐式 `const`
 
-**受影响小节**：[[dcl.constexpr]]
-
-**改动**：C++11 中 `constexpr` 非静态成员函数隐式是 `const` 成员函数，C++14 取消了这个隐式规则。
-
-**理由**：C++14 放宽了 `constexpr` 函数的限制，允许修改对象，所以 `constexpr` 成员函数需要能修改 `*this`。
+<div class="compare" markdown="1">
 
 ```cpp error
 struct S {
-  constexpr const int& f();   // C++11：隐式 const，即 f() const
-  int& f();                   // C++11：与上一个是两个不同的重载
+  constexpr const int& f();
+  int& f();   // error
 };
-// 现在：两个都是非 const 成员函数，只有返回类型不同 → 非良构
 ```
 
-**Clang 23 实测**：
-
-```text
-$ clang++ -std=c++11 ...
-warning: 'constexpr' non-static member function will not be implicitly 'const' in C++14; add 'const' to avoid a change in behavior [-Wconstexpr-not-const]
-$ clang++ -std=c++14 ...
-error: functions that differ only in their return type cannot be overloaded
+```cpp ok
+struct S {
+  constexpr const int& f() const;
+  int& f();   // OK
+};
 ```
 
-**改写难度**：容易。按 Clang 提示的那样，给原来依赖隐式 `const` 的 `constexpr` 成员函数显式加上 `const`。这样的代码在 C++11 和 C++14 下含义一致。
+</div>
 
-### ¶2 带默认成员初始化器的类可以是聚合
+¶1 C++11 中，`constexpr` 非静态成员函数隐式就是 `const` 成员函数，C++14 取消了这条隐式规则（[[dcl.constexpr]]）。C++14 允许 `constexpr` 函数修改对象，`constexpr` 成员函数也就需要能修改 `*this`，不能再一律是 `const` 的。
 
-**受影响小节**：[[dcl.init.aggr]]
+左边在 C++11 中声明了两个不同的重载：一个 `const`，一个非 `const`。C++14 中两个都是非 `const` 成员函数，只有返回类型不同，程序非良构。按右边那样给原来依赖隐式 `const` 的函数显式写上 `const`，在两个标准下含义一致。
 
-**改动**：类有默认成员初始化器（`int m = 1;`）不再妨碍它成为聚合。
+Clang 23 在 `-std=c++11` 下就会给出 `-Wconstexpr-not-const` 警告，提示加上 `const`；`-std=c++14` 下报错。
 
-**理由**：让聚合初始化也能使用默认成员初始化器。
-
-**影响**：`S b{a}` 从"复制初始化（经用户定义转换）"变成"聚合初始化（第一个成员从 `a` 初始化）"，可能选择不同的转换函数：
+### 带默认成员初始化器的类可以是聚合
 
 ```cpp run title="aggr14.cpp" ok
 #include <cstdio>
@@ -152,60 +118,31 @@ struct X {
 };
 int main() {
   X a{};
-  S b{a};   // C++11：用 operator S 再复制；现在：聚合初始化 b.m = int(a)
+  S b{a};   // C++14：聚合初始化，b.m 由 int(a) 初始化
+            // C++11：经 operator S 再复制
   std::printf("b.m=%d\n", b.m);
 }
 ```
 
-**Clang 23 实测**：
+¶2 C++11 中，有默认成员初始化器（如 `int m = 1;`）的类不是**聚合**，C++14 取消了这个限制（[[dcl.init.aggr]]），让聚合初始化也能使用默认成员初始化器。
 
-```text
--std=c++11:  operator S / b.m=1
--std=c++14:  operator int / b.m=5
-```
+于是 `S b{a}` 从复制初始化（先用 `operator S` 把 `a` 转换成 `S`）变成了聚合初始化（用 `a` 初始化第一个成员 `m`，经 `operator int`）。本机运行，`-std=c++11` 输出 `operator S` 和 `b.m=1`，`-std=c++14` 输出 `operator int` 和 `b.m=5`。结果静默改变，但同时提供到类类型和到它首个成员类型的转换函数的写法很少见。
 
-静默改变。
+## 库引言 [diff.cpp11.library] {#diff.cpp11.library}
 
-**改写难度**：需人工审查，但同时提供到类类型和到其首成员类型的转换函数的写法很少见。
+¶1 C++14 新增头文件 `<shared_mutex>`（[[headers]]）。项目里有同名头文件并用 `#include <...>` 包含时，可能拿到标准库的版本。
 
-## Clause [library]：库引言 {#diff.cpp11.library}
+## 输入/输出库 [diff.cpp11.input.output] {#diff.cpp11.input.output}
 
-### ¶1 新头文件 `<shared_mutex>`
-
-**受影响小节**：[[headers]]
-
-**改写难度**：容易。
-
-## Clause [input.output]：输入/输出库 {#diff.cpp11.input.output}
-
-### ¶1 不再定义 `gets`
-
-**受影响小节**：[[c.files]]
-
-**改动**：`<cstdio>` 不再声明 `gets`（C11 也已删除它）。
-
-**理由**：`gets` 无法限制读入长度，必然有缓冲区溢出的风险。
-
-**Clang 23 实测**：
-
-```text
-$ clang++ -std=c++11 ...
-warning: 'gets' is deprecated: This function is provided for compatibility reasons only. ... [-Wdeprecated-declarations]
-$ clang++ -std=c++14 ...
-error: no type named 'gets' in namespace 'std'
-```
-
-（C++11 下的警告来自 macOS SDK 的 C 头文件。）
-
-**改写难度**：容易。`fgets(buf, sizeof buf, stdin)`（注意它保留换行符）或 `std::getline`。
+¶1 C++14 不再定义 `gets`（[[c.files]]），C11 也已删除它。`gets` 无法限制读入的长度，输入一长就会写出缓冲区。改用 `fgets(buf, sizeof buf, stdin)`（注意它会保留换行符）或 `std::getline`。本机 `-std=c++11` 下有一条来自 macOS SDK 头文件的弃用警告，`-std=c++14` 下 `std::gets` 不存在。
 
 ## 小结
 
-| 条目 | 类型 | Clang 23 |
+| 条目 | 旧代码的结局 | Clang 23 |
 |---|---|---|
-| 数字分隔符 | 静默改变 | 已实现 |
-| 带大小的 `operator delete` | 非良构 | — |
-| `throw` 分支 | 静默改变 | 已实现并回溯 |
-| `constexpr` 成员函数不再隐式 `const` | 非良构 | 已实现，C++11 下有预警 |
-| 带默认成员初始化器的聚合 | 静默改变 | 已实现 |
-| `gets` | 非良构 | 已实现 |
+| 数字分隔符 | 宏展开结果改变 | 已实现 |
+| 带大小的 `operator delete` | 非良构 | 已实现 |
+| `throw` 分支 | 结果改变 | 已实现，C++11 模式同样处理 |
+| `constexpr` 成员函数不再隐式 `const` | 非良构 | 已实现，C++11 下警告 |
+| 带默认成员初始化器的聚合 | 结果改变 | 已实现 |
+| `gets` | 非良构 | 已删除 |
