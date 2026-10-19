@@ -565,3 +565,95 @@ figure.code code { font-size: inherit; background: none; border: 0; padding: 0; 
   .clause-grid, .topic-grid { grid-template-columns: minmax(0, 1fr); }
   .search-btn kbd { display: none; }
 }
+
+/* =========================================================================
+   Reading design v2: quieter text, margin ¶ numbers, cards for key points,
+   standard quotes and comparisons. Overrides the rules above.
+   ========================================================================= */
+.main { grid-template-columns: minmax(0, 740px) 210px; gap: 64px; padding-top: 44px; }
+.page-head { border-bottom: 0; margin-bottom: 36px; padding-bottom: 0; }
+.page-head h1 { font-size: 38px; margin-top: 6px; }
+.page-summary { font-size: 17.5px; line-height: 1.8; color: var(--ink-2); }
+
+.prose { font-size: 17px; line-height: 1.9; letter-spacing: .01em; }
+.prose p, .prose ul, .prose ol, .prose dl { margin-bottom: 1.15em; }
+.prose h2, .children h2, .related h2 {
+  font-size: 26px; margin: 2.6em 0 .9em; padding: 0 0 0 .7em; border: 0;
+  border-left: 4px solid var(--accent); line-height: 1.35;
+}
+.prose h3 { font-size: 20.5px; margin: 2em 0 .7em; }
+.prose h3::before { content: ""; display: inline-block; width: .45em; height: .45em; background: var(--accent); border-radius: 2px; margin-right: .55em; vertical-align: .18em; opacity: .75; }
+.prose strong { font-weight: 650; color: var(--ink); }
+.prose :not(pre) > code { font-size: .84em; padding: .08em .35em; border: 0; background: var(--surface-2); color: var(--ink); }
+
+/* paragraph numbers live in the left margin (like the printed standard) */
+.prose p, .prose li, .prose dd { position: relative; }
+.prose > p > .para:first-child, .prose > ul > li > .para:first-child, .prose > ol > li > .para:first-child {
+  position: absolute; left: -3.4em; top: .32em; width: 2.8em; text-align: right;
+  font-size: 12.5px; line-height: 1.4; font-weight: 600; color: var(--ink-3); font-family: var(--font-sans);
+}
+.prose > ul > li > .para:first-child, .prose > ol > li > .para:first-child { left: -4.9em; }
+.prose > p > .para:first-child:target, .prose li > .para:first-child:target { color: var(--accent); background: none; }
+.prose .para { color: var(--ink-3); font-size: .78em; font-weight: 600; }
+
+/* links to clauses: small pills instead of monospace runs */
+.xref.std { font-family: var(--font-sans); font-size: .8em; white-space: nowrap; padding: .05em .45em; border-radius: 5px;
+  background: color-mix(in srgb, var(--link) 9%, transparent); color: var(--link); border: 0; vertical-align: .05em; }
+.xref.std.ext { background: var(--surface-2); color: var(--ink-2); border: 0; }
+.xref.std:hover { text-decoration: none; background: color-mix(in srgb, var(--link) 18%, transparent); }
+.xref.paper { font-family: var(--font-sans); font-size: .85em; }
+
+/* key points card */
+.admonition.tldr { --c: var(--accent); background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--accent);
+  border-left-width: 1px; border-radius: 12px; padding: 1.1em 1.4em .4em; box-shadow: var(--shadow); margin: 0 0 2.4em; font-family: var(--font-sans); }
+.admonition.tldr > .admonition-title { font-size: 13px; letter-spacing: .12em; }
+.admonition.tldr > .admonition-title::before { content: "◆"; font-size: 10px; }
+.admonition.tldr ul { margin-bottom: .7em; padding-left: 1.2em; }
+.admonition.tldr li { margin: .35em 0; }
+
+/* standard text: quiet quotation card */
+.admonition.std { font-family: var(--font-sans); background: transparent; border: 0; border-left: 2px solid var(--line);
+  border-radius: 0; padding: .1em 0 .1em 1.1em; color: var(--ink-2); font-size: .94em; }
+.admonition.std > .admonition-title { font-size: 11.5px; letter-spacing: .14em; color: var(--ink-3); margin-bottom: .2em; }
+.admonition.std > .admonition-title::before { content: none; }
+.admonition.std em { color: var(--ink-2); }
+
+/* all other callouts: lighter cards */
+.admonition { border-left-width: 3px; border-radius: 10px; box-shadow: none; }
+
+/* side-by-side code comparison: <div class="compare" markdown="1"> two code blocks </div> */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 1.4em 0; }
+.compare > figure.code { margin: 0; }
+@media (max-width: 900px) { .compare { grid-template-columns: 1fr; } }
+
+/* fine print: <details class="fine" markdown="1"><summary>…</summary> … </details> */
+.prose details.fine { background: transparent; border: 0; border-top: 1px dashed var(--line); border-radius: 0; padding: .8em 0 0; color: var(--ink-2); font-size: .95em; }
+.prose details.fine > summary { font-weight: 500; color: var(--ink-3); font-size: .9em; list-style: none; }
+.prose details.fine > summary::before { content: "▸ "; }
+.prose details.fine[open] > summary::before { content: "▾ "; }
+
+/* definition lists as term cards */
+.prose dl { display: grid; gap: 10px; }
+.prose dl > dt { font-weight: 650; margin-top: .4em; }
+.prose dl > dd { margin: 0 0 0 0; padding: .6em .9em; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 8px; }
+
+/* tables */
+.prose table { border-radius: 10px; border: 1px solid var(--line); }
+.prose th, .prose td { border: 0; border-bottom: 1px solid var(--line-soft); }
+.prose th { background: var(--surface-2); font-size: 13.5px; letter-spacing: .02em; }
+.prose tr:nth-child(even) td { background: transparent; }
+
+/* page toc: quieter */
+.page-toc { border-left: 0; font-size: 12.5px; }
+.page-toc a.active { font-weight: 600; }
+
+@media (max-width: 1240px) {
+  .main { grid-template-columns: minmax(0, 740px); }
+}
+@media (max-width: 900px) {
+  .prose > p > .para:first-child, .prose > ul > li > .para:first-child, .prose > ol > li > .para:first-child {
+    position: static; display: inline; margin-right: .3em; }
+}
+.main { padding-left: 96px; }
+@media (max-width: 1240px) { .main { padding-left: 84px; } }
+@media (max-width: 900px) { .main { padding-left: 16px; } }

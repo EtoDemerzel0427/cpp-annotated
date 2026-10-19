@@ -69,7 +69,8 @@ VERDICTS = {
     "eb": ("⚠ erroneous", "warn"),
 }
 ADMONITION_TITLES = {
-    "std": "标准怎么说",
+    "tldr": "本节要点",
+    "std": "标准原文",
     "note": "注",
     "tip": "提示",
     "warning": "注意",
