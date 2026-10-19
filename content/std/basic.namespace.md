@@ -1,39 +1,48 @@
 ---
 title: 命名空间
-summary: 命名空间可以分多处定义；内联命名空间与库版本化/ABI；嵌套命名空间定义 a::inline b::c；无名命名空间等价于唯一名字加 using 指令，并带来内部链接；命名空间别名；using 指令的传递性，以及名字如同在最近公共外层命名空间中声明的查找规则
+summary: 命名空间怎样定义和反复扩展；using 指令让名字在哪一层可见；无名命名空间、内联命名空间和命名空间别名分别解决什么问题。
 status: done
 covers: basic.namespace.general, namespace.def, namespace.def.general, namespace.unnamed, namespace.alias, namespace.udir
 papers: N2535, N4230, P1094R2, N4266
 related: basic.scope.namespace, basic.lookup.unqual, basic.lookup.qual, basic.lookup.udir, basic.lookup.argdep, basic.link, namespace.udecl, module.interface, temp.expl.spec
 tags: 命名空间, 名字查找, 链接, ABI
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-命名空间（namespace）解决的是大型程序中的名字冲突：两个库都想定义 `log`、`vector`、`detail::impl`，命名空间让它们各自处在不同的作用域里。和类不同，命名空间是**开放**的，同一个命名空间可以在许多文件、许多位置反复打开并追加成员。
+!!! tldr
+    - 命名空间是开放的：同一个命名空间可以在许多文件里反复打开、追加成员。别名不能用来扩展命名空间。
+    - `using namespace N;` 不引入任何名字。在无限定查找中，`N` 的成员如同声明在同时包含这条指令和 `N` 的最近外层命名空间里，通常就是全局命名空间。
+    - 无名命名空间等价于一个本翻译单元独有的名字加一条 using 指令，其中的一切都具有内部链接，类型也不例外。
+    - 内联命名空间的成员在查找、ADL 和模板特化上都如同外层命名空间的成员。标准库靠它做 ABI 版本化，例如 libc++ 的 `std::__1`。
+    - `namespace A::inline B::C { }` 是嵌套命名空间定义的简写（C++20），第一段不能写 `inline`。
 
-本页覆盖 [basic.namespace] 整节：命名空间的一般性质（[basic.namespace.general]）、命名空间定义与内联命名空间（[namespace.def]）、无名命名空间（[namespace.unnamed]）、命名空间别名（[namespace.alias]）和 using 指令（[namespace.udir]）。与之密切相关的有：命名空间作用域（[[basic.scope.namespace]]）、限定名查找（[[basic.lookup.qual]]，尤其是 [[namespace.qual]]）、无限定名查找中 using 指令的作用（[[basic.lookup.unqual]]）、查找 using 指令和别名中的命名空间名（[[basic.lookup.udir]]）。using 声明是另一回事，见 [[namespace.udecl]]。
+## 命名空间是开放的 [basic.namespace.general]
 
-## 命名空间是什么（[basic.namespace.general]）
+两个库都想定义 `log`、`vector`、`detail::impl` 时，命名空间让它们各自处在不同的作用域里。和类不同，命名空间的定义可以分成许多段：
 
-¶1 规定，命名空间是一个可选具名的实体，其作用域可以包含任何种类实体的声明。通过命名空间的名字可以访问属于它的实体，即命名空间的成员。与其他实体不同，命名空间的定义**可以拆分**到一个或多个翻译单元、模块中的多个部分。
+```cpp run title="namespace-open.cpp" ok
+namespace lib { int a = 1; }
+namespace lib { int b = 2; }        // 扩展 lib，追加成员
 
-¶2（注）说明了命名空间与模块的关系：
+int main() { return lib::a + lib::b - 3; }
+```
 
-- 一个 *namespace-definition* 只要包含任何 *export-declaration*，它就是导出的；
-- 命名空间**永远不附属于具名模块**，名字也永远没有模块链接。
+¶1 命名空间是一个可以没有名字的实体，它的作用域里可以声明任何种类的实体。属于命名空间的实体叫做它的**成员**（member），通过命名空间的名字访问。命名空间的定义可以分散在多个翻译单元和多个模块里，这是其他实体都没有的性质。
+
+¶3 程序里还有一个**[[g:global-namespace|全局命名空间]]**（global namespace），所有不在任何命名空间里的声明都属于它（[[basic.scope.namespace]]）。它没有声明，因此名字查找找不到它：`::x` 中的 `::` 是语法的一部分，不是对某个名字的查找。全局命名空间也不是无名命名空间。
+
+¶2 命名空间不附属于任何具名模块，其中的名字也不会具有模块链接。只要命名空间定义里含有导出声明，这个定义就算导出的（[[module.interface]]）：
 
 ```cpp title="namespace-module.cpp"
 export module M;
 namespace N1 {}                  // N1 未导出
 export namespace N2 {}           // N2 导出
-namespace N3 { export int n; }   // N3 也导出（因为含导出声明）
+namespace N3 { export int n; }   // N3 也导出，因为含导出声明
 ```
 
-为什么命名空间不附属于模块？因为不同模块完全可能往同一个命名空间（比如 `std` 或公司的顶层命名空间）里添加成员；如果命名空间属于第一个声明它的模块，第二个模块就无法再打开它。
+不同的模块常常要往同一个命名空间（`std`、公司的顶层命名空间）里添加成员。如果命名空间属于第一个声明它的模块，别的模块就不能再打开它了。
 
-¶3 规定，存在一个[[g:global-namespace|全局命名空间]]（global namespace），它没有声明（[[basic.scope.namespace]]），属于全局作用域；它不是无名命名空间。注 2 指出，既然没有声明，名字查找就找不到它，`::x` 中的 `::` 是语法，不是查找。所以 [[namespace.alias#2]] 和 [[namespace.udir#1]] 都要求 *splice-specifier* 不得指代全局命名空间（反射可以得到 `^^::`，但不能用它来声明别名或 using 指令）。
-
-## 命名空间定义（[namespace.def.general]）
+## 定义与扩展 [namespace.def.general]
 
 ```text
 named-namespace-definition:
@@ -42,258 +51,66 @@ unnamed-namespace-definition:
     inline(opt) namespace attribute-specifier-seq(opt) { namespace-body }
 nested-namespace-definition:
     namespace enclosing-namespace-specifier :: inline(opt) identifier { namespace-body }
-enclosing-namespace-specifier:
-    identifier | enclosing-namespace-specifier :: inline(opt) identifier
 ```
 
-### 只能在命名空间作用域中（¶1）
+¶1 命名空间定义只能出现在命名空间作用域里，函数体内和类内都不行。
 
-¶1 规定，每个 *namespace-definition* 必须位于命名空间作用域（[[basic.scope.namespace]]）。函数体内、类内都不能定义命名空间。
-
-### 定义还是扩展？（¶2）
-
-¶2 规定，对具名命名空间定义 D，在 D 所在的命名空间 A 及 A 的内联命名空间集合中搜索其标识符：
-
-- 找到某个命名空间 N 的 *namespace-definition*：D **扩展**（extends）N，D 的目标作用域是 N 所属的作用域；
-- 什么都没找到：把这个标识符作为 *namespace-name* 引入 A。
-
-两个细节值得注意：
-
-1. 搜索范围包括 A 的内联命名空间集合。所以 `namespace std { inline namespace __1 { namespace ranges {} } }` 之后，在 `std` 中再写 `namespace ranges { ... }` 扩展的是 `std::__1::ranges`，而不是新建 `std::ranges`。内联命名空间能够透明地工作，这是关键之一。
-2. 找到的必须是命名空间定义。如果找到的是同名的变量、类或命名空间别名，就不是扩展，而这个新的命名空间名会与已有声明冲突，非良构。
+¶2 编译器遇到 `namespace X { ... }` 时，先在当前所在的命名空间（连同它的内联命名空间，见下文）里找名字 `X`。找到的是某个命名空间 N 的定义，这次定义就**扩展**（extend）N；什么都没找到，就引入一个新的命名空间名。找到的如果是别的东西，比如变量或命名空间别名，新名字就与它冲突：
 
 ```cpp title="namespace-extend.cpp" error
-namespace lib { inline namespace v2 { namespace detail { int a; } } }
-namespace lib { namespace detail { int b; } }   // 扩展 lib::v2::detail
-int x = lib::v2::detail::b;                       // OK
+namespace lib { int a; }
+namespace lib { int b; }       // OK：扩展 lib
 
 namespace Alias = lib;
-namespace Alias { }                               // error: Alias 是别名，不能被"扩展"
+namespace Alias { }            // error: Alias 是别名，不能扩展
 int Thing;
-namespace Thing { }                               // error: 与变量 Thing 冲突
+namespace Thing { }            // error: 与变量 Thing 冲突
 ```
 
-### 嵌套（¶3）
-
-¶3 指出，命名空间定义本身是一个声明，可以出现在命名空间体中，所以可以嵌套。名字查找由内向外进行：
+¶3 命名空间定义本身也是声明，所以可以嵌套。查找照常由内向外进行，并且只看已经出现的声明：
 
 ```cpp title="namespace-nested.cpp" ok
 namespace Outer {
     int i;
     namespace Inner {
-        void f() { i++; }    // Outer::i（Inner::i 还没声明）
+        void f() { i++; }    // Outer::i：Inner::i 还没有声明
         int i;
         void g() { i++; }    // Inner::i
     }
 }
-
 int main() {}
 ```
 
-`f` 中的 `i` 找到的是 `Outer::i`，因为在 `f` 的位置，`Inner::i` 还没有声明，而无限定名查找只看之前的声明（[[basic.lookup.unqual]]）。
-
-### 属性（¶5）
-
-¶5 规定，*named-namespace-definition* 中的属性属于所定义或扩展的命名空间。实际有用的主要是 `[[deprecated]]`（C++17，[[N4266]]）：
+¶5 命名空间定义里的属性属于被定义或被扩展的命名空间。实际有用的主要是 C++17 起允许的 `[[deprecated]]`（[[N4266]]），使用其中的成员时会得到弃用警告：
 
 ```cpp title="namespace-deprecated.cpp" ok
 namespace [[deprecated("use v2")]] v1 { inline void f() {} }
 namespace v2 { inline void f() {} }
 
-int main() {
-    v2::f();
-    // v1::f();   // 会产生弃用警告
-}
+int main() { v2::f(); }    // 写 v1::f() 会有弃用警告
 ```
 
-## 内联命名空间（¶4、¶6–¶7）
+## 命名空间别名 [namespace.alias]
 
-¶4 规定，命名空间定义前带 `inline` 时，该命名空间声明为[[g:inline-namespace|内联命名空间]]（inline namespace）。扩展时也可以写 `inline`，但前提是最初声明这个命名空间名的定义写了 `inline`。
-
-```cpp title="inline-reopen.cpp" error
-namespace N {}
-inline namespace N {}      // error: 原来不是内联的
-inline namespace M {}
-namespace M {}             // OK: 扩展时可以省略 inline（Clang 会警告）
-```
-
-¶6 列出了内联命名空间成员如同外层命名空间成员的四个具体方面：
-
-1. **ADL**：内联命名空间与其外层命名空间，只要其中一个加入关联命名空间集合，另一个也会加入（[[basic.lookup.argdep]]）；
-2. **无限定查找**：在外层命名空间中隐式插入一条指向内联命名空间的 using 指令，与无名命名空间的做法相同；
-3. **模板**：内联命名空间中的模板可以如同外层命名空间的成员一样部分特化、显式实例化、显式特化，在外层命名空间里写特化即可；
-4. **限定查找**：在外层命名空间中做限定查找时，即使外层命名空间中已有同名声明，也会包含内联命名空间的成员（[[namespace.qual]]）。
-
-**第 4 点与普通 using 指令的行为不同**：对 `using namespace X;`，限定查找 `N::name` 只有在 N 自身找不到 `name` 时才会去看 X；对内联命名空间，两者同时考虑。
-
-```cpp title="inline-namespace-lookup.cpp" error
-namespace N {
-    inline namespace V { int x; }
-    int x;
-}
-int a = N::x;              // error: 有歧义——N::x 与 N::V::x 同时被找到（¶6 第 4 点）
-
-namespace L {
-    inline namespace v1 { struct S {}; }
-    void f(S);
-}
-void t() {
-    L::S s;                // OK: 限定查找穿透内联命名空间
-    f(s);                  // OK: S 的关联命名空间 L::v1，连带 L，找到 L::f
-}
-```
-
-¶7 规定，这些性质是传递的：N 含内联命名空间 M，M 又含内联命名空间 O，那么 O 的成员可以如同 M 或 N 的成员一样使用。N 的[[g:inline-namespace-set|内联命名空间集合]]（inline namespace set）是 N 中所有内联命名空间的传递闭包。
-
-### 为什么需要内联命名空间：库版本化
-
-内联命名空间（C++11，[[N2535]]）是为库的版本演进设计的。设想库的第一版是这样的：
-
-```cpp
-namespace lib { struct Widget { int a; }; void use(Widget); }
-```
-
-第二版需要改变 `Widget` 的布局。如果直接改，老代码编译出的目标文件与新库链接时，ABI 会悄无声息地不匹配。用内联命名空间可以这样写：
-
-```cpp run title="versioning.cpp" ok
-namespace lib {
-    namespace v1 {
-        struct Widget { int a; };
-        inline int use(Widget w) { return w.a; }
-    }
-    inline namespace v2 {               // 当前默认版本
-        struct Widget { int a; long b; };
-        inline int use(Widget w) { return w.a + static_cast<int>(w.b); }
-        template<class T> struct Box { T t; };
-    }
-}
-
-template<> struct lib::Box<int> { int special; };   // 如同 lib 的成员一样特化（¶6 第 3 点）
-
-int main() {
-    lib::Widget w{1, 2};       // 实际上是 lib::v2::Widget
-    lib::v1::Widget old{3};    // 旧版本仍然可以显式使用
-    lib::Box<int> b{4};
-    return lib::use(w) + lib::v1::use(old) + b.special;
-}
-```
-
-用户源代码写 `lib::Widget`，不需要知道版本号；但修饰名中包含 `v2`（`lib::v2::Widget` 编码为 `N3lib2v26WidgetE`），所以链接老版本的目标文件时会得到**链接错误**，而不是没有任何提示的运行时崩溃。
-
-!!! impl "标准库实现中的内联命名空间"
-    - **libc++** 把几乎所有内容放在 `std::__1`（`_LIBCPP_ABI_NAMESPACE`，可配置）中。所以在 macOS 上 `std::string` 的修饰名中能看到 `NSt3__1...`。这让同一个进程里可以并存不同 ABI 版本的 libc++。
-    - **libstdc++** 在 GCC 5 的双 ABI 迁移中用内联命名空间 `std::__cxx11` 放置新的 `std::string`、`std::list` 等（C++11 要求 `std::string` 不能写时复制、`list::size()` 为 O(1)，必须改布局）。它还额外加了 GCC 的 `abi_tag` 属性，让返回这些类型的函数的修饰名也随之改变。
-    - 内联命名空间对 ADL 和特化透明，这正是标准库能用它而不破坏用户代码（例如用户对 `std::hash` 的特化）的原因。
-
-## 嵌套命名空间定义（¶8）
-
-¶8 规定，*nested-namespace-definition* `namespace E::I { B }` 等价于 `namespace E { inline(opt) namespace I { B } }`，当且仅当 `I` 前写了 `inline` 时才带 `inline`。由于 *enclosing-namespace-specifier* 本身也可以带 `inline`，递归展开即可。
-
-```cpp title="nested-namespace-def.cpp" error
-namespace A::inline B::C {     // C++20
-    int i;
-}
-// 等价于：namespace A { inline namespace B { namespace C { int i; } } }
-int j = A::C::i + A::B::C::i;  // OK: 两种写法都行
-
-namespace X::Y { }             // OK (C++17)
-inline namespace Z::W { }      // error: 嵌套命名空间定义的开头不能写 inline
-```
-
-C++17 引入 `namespace a::b::c`（[[N4230]]），但不允许其中任何一段是内联的；C++20（[[P1094R2]]）允许在除第一段以外的任何位置写 `inline`。第一段不能是内联的，因为在语法上，`inline namespace A::B` 中的 `inline` 修饰的是哪一段会有歧义；要让第一段内联，仍然得用传统写法。
-
-## 无名命名空间（[namespace.unnamed]）
-
-¶1 规定，*unnamed-namespace-definition* 的行为如同将它替换为：
-
-```text
-inline(opt) namespace unique { /* 空 */ }
-using namespace unique;
-namespace unique { namespace-body }
-```
-
-其中 `inline` 当且仅当原定义写了 `inline` 时出现；一个翻译单元中所有的 *unique* 都替换为同一个标识符，而这个标识符与程序中所有其他标识符都不同。属性属于 *unique*。
-
-这三行等价代码精确地定义了无名命名空间的全部行为：
-
-1. 第一行先声明命名空间，让第二行的 using 指令有可指代的对象；
-2. 第二行的 using 指令让成员在外层作用域可以无限定使用；
-3. 第三行放入实际内容；
-4. 同一 TU 中所有无名命名空间是同一个命名空间（可以反复打开）；不同 TU 中则各不相同。
-
-```cpp title="unnamed-namespace.cpp" error
-namespace { int i; }             // unique::i
-void f() { i++; }                // unique::i++
-
-namespace A {
-    namespace {
-        int i;                   // A::unique::i
-        int j;                   // A::unique::j
-    }
-    void g() { i++; }            // A::unique::i++
-}
-
-using namespace A;
-void h() {
-    i++;                         // error: unique::i 还是 A::unique::i？
-    A::i++;                      // OK: A::unique::i
-    j++;                         // OK: A::unique::j
-}
-```
-
-`h` 中的 `i++` 有歧义：`::unique::i` 和 `A::unique::i` 都经由 using 指令出现在全局命名空间中（见下文 ¶3 的规则），两者都不是函数，因而冲突。
-
-### 无名命名空间与内部链接
-
-[namespace.unnamed] 本身没有提到链接，但 [[basic.link#4]] 规定：**无名命名空间或其中（直接或间接）声明的命名空间具有内部链接**，其中声明的名字（变量、函数、类、枚举、模板等）随之具有内部链接。所以无名命名空间是表达本 TU 私有的标准写法，比 `static` 更通用，因为 `static` 不能用于类型。
-
-```cpp run title="unnamed-internal.cpp" ok
-namespace {
-    struct Helper { int v = 42; };      // 类型也是 TU 局部的
-    int compute() { return Helper{}.v; }
-}
-
-int main() { return compute() - 42; }
-```
-
-!!! impl "修饰名"
-    Itanium ABI 中无名命名空间编码为 `_GLOBAL__N_1` 这样的名字（GCC 和 Clang 都是）：例如上面的 `compute` 在 Clang 下修饰为 `_ZN12_GLOBAL__N_17computeEv`，并且是局部符号（`nm` 中显示为小写 `t`），不会参与跨 TU 的链接。内部链接还带来优化好处：编译器知道所有调用点，可以自由内联、删除未用函数、修改调用约定。
-
-!!! history "C++03 中的无名命名空间"
-    C++03 中无名命名空间的成员具有外部链接，只是名字唯一，其他翻译单元无法写出它。这导致一个奇怪的限制：模板实参必须具有外部链接，而 `static` 函数不行，无名命名空间中的函数却可以。C++03 还弃用了命名空间作用域对象上的 `static`，推荐用无名命名空间代替；C++11 把无名命名空间的成员改为内部链接，同时取消了对 `static` 的弃用。
-
-!!! pitfall "头文件中的无名命名空间"
-    在头文件中定义无名命名空间，每个包含它的 TU 都会得到一份独立的实体。对变量来说，这意味着每个 TU 有各自的副本；对头文件中的 `inline` 函数或模板来说，如果它们引用了无名命名空间中的实体，不同 TU 中的定义就引用了不同的实体，违反 ODR（[[basic.def.odr]]），属于 IFNDR。
-
-## 命名空间别名（[namespace.alias]）
-
-```text
-namespace-alias-definition:
-    namespace identifier = qualified-namespace-specifier ;
-    namespace identifier = splice-specifier ;
-```
-
-- ¶2：*splice-specifier*（C++26 反射）必须指代一个不是全局命名空间的命名空间；
-- ¶3：标识符成为一个[[g:namespace-alias|命名空间别名]]（namespace alias）；
-- ¶4：别名的底层实体（underlying entity，[[basic.pre]]）是所指的命名空间。注 1 指出，查找 *namespace-name* 时只考虑命名空间名（[[basic.lookup.udir]]）。
-
-```cpp title="namespace-alias.cpp" ok
+```cpp run title="namespace-alias.cpp" ok
 namespace very::long_::library_name::v3 { int x = 1; }
 namespace lib = very::long_::library_name::v3;
 
 int f() { return lib::x; }
-
 int g() {
-    namespace fs_alias = lib;     // 块作用域中也可以
-    return fs_alias::x;
+    namespace L = lib;            // 块作用域里也可以
+    return L::x;
 }
-
 int main() { return f() + g() - 2; }
 ```
 
-别名只是一个同义词，不是新的命名空间：不能用别名扩展命名空间（见上文 ¶2 的例子），也不能用别名再次定义别名为别的命名空间（同一作用域中别名的重声明必须指代同一个命名空间）。
+¶3 `namespace lib = ...;` 声明一个**[[g:namespace-alias|命名空间别名]]**（namespace alias）。
 
-## using 指令（[namespace.udir]）
+¶4 别名只是同义词，它指向的命名空间叫做它的底层实体（[[basic.pre]]）。所以不能用别名扩展命名空间（上一节的例子），同一作用域里重复声明同一个别名时也必须指向同一个命名空间。查找 `=` 右边的名字时只考虑命名空间名（[[basic.lookup.udir]]）。
+
+¶2 C++26 反射允许写 `namespace X = [: r :];`，这时 *splice-specifier* 必须指代一个命名空间，而且不能是全局命名空间。
+
+## using 指令 [namespace.udir]
 
 ```text
 using-directive:
@@ -301,32 +118,27 @@ using-directive:
     attribute-specifier-seq(opt) using namespace splice-specifier ;
 ```
 
-### 约束（¶1–¶2）
+¶4 **[[g:using-directive|using 指令]]**（using-directive）`using namespace N;` 不引入任何名字。它只改变后续无限定查找和限定查找的路径，让 `N` 的成员可以不带限定地使用。要把一个具体的名字引入当前作用域，用的是 using 声明 `using N::f;`（[[namespace.udecl]]）：
 
-- ¶1：*splice-specifier* 不得指代全局命名空间；*nested-name-specifier*、*namespace-name*、*splice-specifier* 不得是待决的，因为 using 指令影响名字查找，必须在模板定义时就确定；
-- ¶2：using 指令**不能出现在类作用域**，可以出现在命名空间作用域或块作用域。查找其中的 *namespace-name* 只考虑命名空间名。
+| | using 指令 `using namespace N;` | using 声明 `using N::f;` |
+|---|---|---|
+| 是否引入名字 | 否，只改变查找路径 | 是，`f` 成为当前作用域里的名字 |
+| 之后加入 `N` 的声明 | 能看到（第 6 段） | 看不到（[[namespace.udecl#9]]） |
+| 能否写在类里 | 否（第 2 段） | 能，用于基类成员 |
+| 与本作用域的同名声明 | 不冲突，使用时才可能有歧义 | 可能冲突 |
 
-```cpp title="udir-class.cpp" error
-namespace M { int i; }
-struct K {
-    using namespace M;     // error: 类作用域中不允许 using 指令
-};
-```
+### 名字出现在哪一层（¶3）
 
-为什么类里不行？类作用域的查找规则（[[class.member.lookup]]）基于在类及其基类中搜索声明，using 指令会让类的成员这一概念变得模糊：`K::i` 应该找到 `M::i` 吗？那 `M::i` 算不算 `K` 的成员？标准选择直接禁止。
-
-### 名字如同在最近公共外层命名空间中声明（¶3–¶4）
-
-¶3（注）中的这一句是 using 指令最核心、也最反直觉的规则：
+using 指令的效果取决于一条位置规则：
 
 !!! std
     During unqualified name lookup, the names appear as if they were declared in the nearest enclosing namespace which contains both the *using-directive* and the designated namespace.
 
-    在无限定名查找中，这些名字如同声明在同时包含该 using 指令和被指定命名空间的最近外层命名空间中。
+    在无限定查找中，这些名字如同声明在同时包含这条 using 指令和被指定命名空间的最近外层命名空间里。
 
-规范性的规则在 [[basic.lookup.unqual]]（活跃的 using 指令如何影响查找），这里只是总结。¶4（注）指出，**using 指令不引入任何名字**，它只改变查找的路径。
+¶3 是注，规范性的规则在 [[basic.lookup.unqual]]。函数里写 `using namespace std;` 时，同时包含这个函数和 `std` 的最近命名空间是全局命名空间，于是 `std` 的名字如同声明在全局命名空间里。它们不会比当前命名空间离使用点更近，当前命名空间里的同名实体照样能隐藏它们，局部变量更是如此。
 
-为什么是最近公共外层命名空间，而不是 using 指令所在的作用域？考虑下面的例子：
+标准的例子把几种情况放在了一起：
 
 ```cpp title="udir-nearest.cpp" error
 namespace A {
@@ -334,29 +146,25 @@ namespace A {
     namespace B {
         namespace C { int i; }
         using namespace A::B::C;
-        void f1() { i = 5; }        // OK: C::i "如同在 B 中声明"，在查找到 A::i 之前找到
+        void f1() { i = 5; }        // OK：C::i 如同在 B 中，先于 A::i 被找到
     }
     namespace D {
         using namespace B;
         using namespace C;
-        void f2() { i = 5; }        // error: 歧义——B::C::i 还是 A::i？
+        void f2() { i = 5; }        // error: 歧义，B::C::i 还是 A::i？
     }
-    void f3() { i = 5; }            // OK: A::i
+    void f3() { i = 5; }            // OK：A::i
 }
-void f4() { i = 5; }                // error: 哪个 i 都不可见
+void f4() { i = 5; }                // error: 两个 i 都不可见
 ```
 
-逐个分析如下。
+- `f1`：指令在 B 里，指向 `A::B::C`。同时包含 B 和 C 的最近命名空间是 B，所以 `C::i` 如同在 B 里。查找从 `f1` 向外走到 B 就找到了它，不会再看到 `A::i`。
+- `f2`：D 里的两条指令，`using namespace B;` 和 `using namespace C;`，公共外层命名空间都是 A。B 里那条指向 C 的指令也会传递过来（见下一小节）。于是 `C::i` 如同在 A 里，与 `A::i` 同层，两者都是变量，因此有歧义。
+- `f4`：全局命名空间里既没有 `i`，也没有 using 指令。
 
-- `f1`：using 指令在 B 中，指向 `A::B::C`。同时包含 B 和 C 的最近命名空间是 B，所以 `C::i` 如同声明在 B 中。查找从 `f1` 的块作用域向外进行，在 B 中（包括如同声明在 B 中的 `C::i`）找到之后就停止，不会看到 `A::i`。
-- `f2`：D 中有两条 using 指令。对 `using namespace B;`，同时包含 D 和 B 的最近命名空间是 A，B 的成员如同在 A 中；而 B 中还有 `using namespace C;`（传递，¶5），C 的成员也如同在 A 中。对 D 中的 `using namespace C;`，同时包含 D 和 C 的最近命名空间也是 A。于是 A 中同时有 `A::i` 和 `C::i`，两者都不是函数，因此有歧义。
-- `f4`：全局命名空间中没有 `i`，也没有任何 using 指令。
+### 传递性与之后的声明（¶5、¶6）
 
-这样设计，是为了让 using 指令的效果与被指定命名空间的成员在名字层级上的位置一致：它们不应比所在的命名空间本身离使用点更近。如果 `using namespace std;` 让 `std` 的成员如同在当前函数中声明，当前命名空间中的同名实体就会被遮蔽，这对写 `using namespace` 的人来说更加危险。
-
-### 传递性（¶5）
-
-¶5（注）指出，using 指令是**传递**的：如果一个作用域含有指向某命名空间的 using 指令，而那个命名空间自己又含有 using 指令，后者指向的命名空间也会纳入考虑。
+¶5 using 指令是传递的。被指定的命名空间里如果还有 using 指令，那些指令指向的命名空间也会纳入查找：
 
 ```cpp title="udir-transitive.cpp" error
 namespace M { int i; }
@@ -370,25 +178,37 @@ void f() {
 }
 ```
 
-注意这里并没有 `N::i` 遮蔽 `M::i` 的效果：N 中的 using 指令让 `M::i` 如同在全局命名空间中声明（同时包含 N 和 M 的最近命名空间）；`f` 中的 using 指令让 `N::i` 也如同在全局命名空间中声明。两者处于同一层，因此有歧义。如果直接在 N 中查找（`N::i` 的限定查找），则 N 自己的声明优先，using 指令的目标只在 N 本身找不到时才纳入考虑（[[namespace.qual]]）。
+这里 `N::i` 不会隐藏 `M::i`。N 里的指令让 `M::i` 如同在全局命名空间里，`f` 里的指令让 `N::i` 也如同在全局命名空间里，两者同层，所以有歧义。改成限定查找 `N::i` 就没有问题：限定查找先看 N 自己的声明，只有找不到时才去看 N 里 using 指令的目标（[[namespace.qual]]）。
 
-### 之后添加的声明（¶6）
-
-¶6（注）指出，在 using 指令之后加入被指定命名空间的声明，在它们出现之后也能通过该 using 指令找到。using 声明正好相反，它只引入声明时可见的那些声明（[[namespace.udecl#9]]）。
+¶6 using 指令之后才加入被指定命名空间的声明，在它们出现之后同样能通过这条指令找到：
 
 ```cpp title="udir-later.cpp" ok
 namespace A { void f(int) {} }
 using namespace A;
 namespace A { void f(char) {} }
 
-void g() { f('a'); }        // 调用 A::f(char)：using 指令能看到后来的声明
-
+void g() { f('a'); }        // 调用 A::f(char)
 int main() { g(); }
 ```
 
-### 冲突与重载（¶7–¶8）
+### 不能写在类里（¶1、¶2）
 
-¶7（注）指出，如果名字查找在两个不同的命名空间中找到某个名字的声明，而它们不声明同一个实体，又不全是函数或函数模板，使用这个名字就非良构（[[basic.lookup]]）。特别地，在不同命名空间中声明的变量、函数或枚举量的名字不会隐藏类或枚举的名字（同一作用域内同名变量隐藏类名的规则不跨命名空间生效）。
+¶2 using 指令可以出现在命名空间作用域和块作用域，但不能出现在类作用域：
+
+```cpp title="udir-class.cpp" error
+namespace M { int i; }
+struct K {
+    using namespace M;     // error: 类作用域里不允许 using 指令
+};
+```
+
+类作用域的查找规则是在类和它的基类里搜索成员（[[class.member.lookup]]）。如果允许 using 指令，`K::i` 是否应该找到 `M::i`、`M::i` 算不算 `K` 的成员，都说不清楚，所以标准直接禁止。
+
+¶1 指令里的命名空间名不能是待决的，也就是不能依赖模板参数，因为它要在模板定义时就确定查找路径。用 C++26 反射写 `using namespace [: r :];` 时，`r` 也不能指代全局命名空间。
+
+### 冲突与重载（¶7、¶8）
+
+¶7 无限定查找经由 using 指令在两个不同的命名空间里找到同一个名字时，如果两个声明不是同一个实体，又不全是函数，使用这个名字就是非良构的（[[basic.lookup]]）。在同一个作用域里，变量或函数的名字会隐藏同名的类；这条隐藏规则不跨命名空间生效。
 
 ```cpp title="udir-conflict.cpp" error
 namespace A {
@@ -405,15 +225,15 @@ using namespace A;
 using namespace B;
 
 void f() {
-    X(1);          // error: X 在两个命名空间中被找到
-    g();           // OK: A::g 和 B::g 是同一个 extern "C" 函数（[dcl.link]/7）
-    h();           // OK: 都是函数，重载决议选 A::h
+    X(1);          // error: 在两个命名空间里都找到了 X
+    g();           // OK：A::g 和 B::g 是同一个函数
+    h();           // OK：都是函数，重载决议选 A::h
 }
 ```
 
-`g()` 合法这一点值得留意：两个命名空间中的 `extern "C" int g()` 声明的是同一个实体（C 语言链接的函数没有命名空间概念，见 [[dcl.link#7]]），所以不冲突。
+`g()` 没有歧义，是因为 C 语言链接的函数不分命名空间，两处 `extern "C" int g()` 声明的是同一个函数（[[dcl.link#7]]）。
 
-¶8（注）指出，命名空间的考虑顺序以及 using 指令之间的关系**不影响重载决议**；即使两个签名相同的函数中，一个所在的命名空间经由 using 指令可以到达另一个所在的命名空间，也不会因此排除其中某一个。脚注 76 对比了类层次中的查找：类成员查找可以依据沿某条路径一个成员隐藏另一个来消解歧义（[[class.member.lookup]]），而 using 指令没有这种机制。
+¶8 命名空间被查找的先后、using 指令之间的关系都不影响重载决议。两个签名相同的函数分别在 D 和 E 里，即使 D 经由 using 指令能到达 E，D 的版本也不会因此优先：
 
 ```cpp title="udir-overload.cpp" error
 namespace D {
@@ -422,13 +242,12 @@ namespace D {
 }
 using namespace D;
 
-int d1;              // OK: 与 D::d1 不冲突（声明本身没问题）
+int d1;              // OK：声明本身不与 D::d1 冲突
 
 namespace E {
     int e;
     void f(int);
 }
-
 namespace D {        // 扩展 D
     int d2;
     using namespace E;
@@ -439,41 +258,189 @@ void f() {
     d1++;            // error: ::d1 还是 D::d1？
     ::d1++;          // OK
     D::d1++;         // OK
-    d2++;            // OK: D::d2
-    e++;             // OK: E::e
+    d2++;            // OK：D::d2
+    e++;             // OK：E::e
     f(1);            // error: D::f(int) 与 E::f(int) 有歧义
-    f('a');          // OK: D::f(char)
+    f('a');          // OK：D::f(char)
 }
 ```
 
-`f(1)` 有歧义：`D::f(int)` 和 `E::f(int)` 签名相同，标准不会因为 D 经由 using 指令能到达 E 就让 D 的版本优先。两者都进入候选集，重载决议无法区分。
+脚注 76 对比了类层次里的查找：在那里，沿某条继承路径一个成员隐藏另一个，可以消解歧义；经由 using 指令找到的名字没有这种机制。
 
-## 实现视角
+## 无名命名空间 [namespace.unnamed]
 
-!!! impl "命名空间在目标代码中"
-    - 命名空间只存在于修饰名中：`a::b::f()` 在 Itanium ABI 中编码为 `_ZN1a1b1fEv`。内联命名空间也照常编码（这正是它用于 ABI 版本化的原理）；无名命名空间编码为 `_GLOBAL__N_1`；命名空间别名完全不出现在修饰名中。
-    - 对于 using 指令的名字如同在最近公共外层命名空间中声明这条规则，实现通常这样处理：在查找到达每一层命名空间作用域时，额外检查在这一层生效的那些 using 指令的目标命名空间。Clang 的无限定查找实现就是按这个思路组织的：先收集所有活跃的 using 指令，为每条算出公共祖先命名空间，再在查找走到那一层时把目标命名空间一并搜索。
-    - `using namespace std;` 在头文件中的危害是确定的：它让所有包含该头文件的 TU 都在全局命名空间看到 `std` 的全部名字（包括未来版本新增的名字），新标准增加一个名字就可能让原本无歧义的代码变得歧义。
+```cpp run title="unnamed-internal.cpp" ok
+namespace {
+    struct Helper { int v = 42; };      // 类型也只属于本翻译单元
+    int compute() { return Helper{}.v; }
+}
+int main() { return compute() - 42; }
+```
+
+¶1 **[[g:unnamed-namespace|无名命名空间]]**（unnamed namespace）`namespace { body }` 的行为如同被替换成下面三行：
+
+```text
+inline(opt) namespace unique { /* 空 */ }
+using namespace unique;
+namespace unique { body }
+```
+
+`unique` 是编译器选的一个标识符：同一个翻译单元里的所有无名命名空间用同一个，它与程序里其他任何标识符都不同。`inline` 当且仅当原定义写了 `inline` 时出现，属性属于 `unique`。
+
+这三行决定了无名命名空间的全部行为。第一行先声明命名空间，让第二行的 using 指令有对象可指；第二行让成员可以在外层不带限定地使用；第三行放入内容。同一个翻译单元里的无名命名空间是同一个，可以反复打开；不同翻译单元里的各不相同。
+
+```cpp title="unnamed-namespace.cpp" error
+namespace { int i; }             // unique::i
+void f() { i++; }                // unique::i++
+
+namespace A {
+    namespace {
+        int i;                   // A::unique::i
+        int j;                   // A::unique::j
+    }
+    void g() { i++; }            // A::unique::i++
+}
+
+using namespace A;
+void h() {
+    i++;                         // error: unique::i 还是 A::unique::i？
+    A::i++;                      // OK：A::unique::i
+    j++;                         // OK：A::unique::j
+}
+```
+
+`h` 里的 `i++` 有歧义：按 using 指令的位置规则，`::unique::i` 和 `A::unique::i` 都如同声明在全局命名空间里。
+
+### 内部链接
+
+本节没有提到链接，规则在 [[basic.link#4]]：无名命名空间，以及直接或间接声明在其中的命名空间，具有内部链接，其中声明的变量、函数、类、模板也随之具有内部链接。内部链接的名字只在本翻译单元里可见，别的翻译单元里的同名声明是另一个实体。
+
+所以无名命名空间是表达本文件私有的标准写法。它比 `static` 更通用，因为 `static` 不能用在类型上。
+
+!!! impl "修饰名"
+    Itanium ABI（GCC、Clang 在 Linux 和 macOS 上使用的 C++ ABI）把无名命名空间编码为 `_GLOBAL__N_1`。上面的 `compute` 在本机 Clang 23 下的符号是 `_ZN12_GLOBAL__N_17computeEv`，`nm` 显示为小写 `t`，即局部符号，不参与跨翻译单元的链接。内部链接也方便优化：编译器知道所有调用点，可以放心地内联、删除没用到的函数。
+
+!!! pitfall "头文件里的无名命名空间"
+    每个包含该头文件的翻译单元都会得到一份独立的实体。如果头文件里的 `inline` 函数或模板用到了这些实体，各翻译单元里的定义引用的就是不同的实体，违反 ODR（[[basic.def.odr]]）。这种违规属于非良构、不要求诊断：编译器和链接器都可能不报告，运行结果没有保证。
+
+## 内联命名空间
+
+¶4 定义前带 `inline` 的命名空间是**[[g:inline-namespace|内联命名空间]]**（inline namespace）。扩展时可以写也可以省略 `inline`，但只有最初声明这个名字的定义写了 `inline`，后面才能写：
+
+```cpp title="inline-reopen.cpp" error
+namespace N {}
+inline namespace N {}      // error: N 原来不是内联的
+inline namespace M {}
+namespace M {}             // OK：扩展时可以省略 inline（Clang 会警告）
+```
+
+### 成员如同属于外层命名空间（¶6、¶7）
+
+¶6 内联命名空间的成员在大多数方面都可以当作外层命名空间的成员使用。具体有四点：
+
+1. ADL：内联命名空间和它的外层命名空间，只要一个加入了关联命名空间集合，另一个也随之加入（[[basic.lookup.argdep]]）。
+2. 无限定查找：外层命名空间里隐式插入一条指向它的 using 指令，与无名命名空间的做法相同。
+3. 模板：其中的模板可以在外层命名空间里部分特化、显式实例化和显式特化，就像它是外层命名空间的成员。
+4. 限定查找：查找 `外层::name` 时，即使外层命名空间自己就有 `name`，内联命名空间的成员也一并考虑（[[namespace.qual]]）。
+
+第 4 点与普通 using 指令不同。对普通 using 指令，`N::x` 先看 N 自己，N 里有 `x` 就停止；对内联命名空间，两者同时考虑：
+
+<div class="compare" markdown="1">
+
+```cpp error
+namespace N {
+  inline namespace V { int x; }
+  int x;
+}
+int a = N::x;  // error: 歧义
+```
+
+```cpp ok
+namespace N {
+  namespace V { int x; }
+  using namespace V;
+  int x;
+}
+int a = N::x;  // OK：N 自己的 x
+```
+
+</div>
+
+¶7 这些性质是传递的：N 含内联命名空间 M，M 又含内联命名空间 O，O 的成员就可以当作 M 或 N 的成员使用。N 里所有内联命名空间的传递闭包叫做 N 的**[[g:inline-namespace-set|内联命名空间集合]]**（inline namespace set）。
+
+上一节讲扩展时，编译器搜索的范围也包括这个集合。所以 `namespace std { inline namespace __1 { namespace ranges {} } }` 之后，在 `std` 里写 `namespace ranges { ... }` 扩展的是 `std::__1::ranges`，而不是新建一个 `std::ranges`。
+
+### 用途：库的版本化
+
+内联命名空间是 C++11 为库的版本演进加入的（[[N2535]]）。设想库的第二版要改变 `Widget` 的布局。如果直接修改，用旧头文件编译的目标文件和新库链接时，两边对 `Widget` 的理解不一样，却不会有任何提示。用内联命名空间可以这样写：
+
+```cpp run title="versioning.cpp" ok
+namespace lib {
+    namespace v1 {
+        struct Widget { int a; };
+        inline int use(Widget w) { return w.a; }
+    }
+    inline namespace v2 {               // 当前默认版本
+        struct Widget { int a; long b; };
+        inline int use(Widget w) { return w.a + static_cast<int>(w.b); }
+        template<class T> struct Box { T t; };
+    }
+}
+
+// 在 lib 里特化 v2 的模板（第 3 点）
+template<> struct lib::Box<int> { int special; };
+
+int main() {
+    lib::Widget w{1, 2};       // 实际上是 lib::v2::Widget
+    lib::v1::Widget old{3};    // 旧版本仍可显式使用
+    lib::Box<int> b{4};
+    return lib::use(w) + lib::v1::use(old) + b.special - 10;
+}
+```
+
+源代码里写 `lib::Widget`，不需要知道版本号；但修饰名里含有 `v2`（`lib::v2::Widget` 编码为 `N3lib2v26WidgetE`）。所以新旧目标文件混用时，得到的是链接错误，而不是运行时的布局错乱。
+
+!!! impl "标准库里的内联命名空间"
+    - libc++ 把几乎所有内容放在 `std::__1` 里（名字可通过 `_LIBCPP_ABI_NAMESPACE` 配置），所以 macOS 上 `std::string` 的修饰名里有 `NSt3__1`。
+    - libstdc++ 在 GCC 5 改变 `std::string`、`std::list` 布局时（C++11 禁止 `string` 写时复制，要求 `list::size()` 为常数时间），把新版本放进内联命名空间 `std::__cxx11`，并配合 GCC 的 `abi_tag` 属性，让返回这些类型的函数的修饰名也随之改变。
+    - 由于内联命名空间对 ADL 和模板特化透明，用户为 `std::hash` 写的特化不会因此失效。
+
+## 嵌套命名空间定义（¶8）
+
+¶8 `namespace E::I { B }` 等价于 `namespace E { namespace I { B } }`；如果 `I` 前写了 `inline`，里层就是内联命名空间。*enclosing-namespace-specifier* 里的各段也可以带 `inline`，递归展开即可：
+
+```cpp title="nested-namespace-def.cpp" error
+namespace A::inline B::C {     // C++20
+    int i;
+}
+// 等价于 namespace A { inline namespace B { namespace C { int i; } } }
+int j = A::C::i + A::B::C::i;  // OK：两种写法都行
+
+namespace X::Y { }             // OK（C++17）
+inline namespace Z::W { }      // error: 开头不能写 inline
+```
+
+C++17 引入 `namespace a::b::c`（[[N4230]]），不允许任何一段是内联的。C++20 的 [[P1094R2]] 允许除第一段以外的任何一段写 `inline`。第一段仍然不行，因为 `inline namespace A::B` 里的 `inline` 修饰哪一段会有歧义；要让第一段内联，只能用传统写法。
 
 ## 历史与演进
 
-!!! history "C++98 → C++26"
-    - **C++98**：命名空间、无名命名空间（成员仍是外部链接）、命名空间别名、using 指令；弃用命名空间作用域对象上的 `static`。
-    - **C++11**：内联命名空间（[[N2535]]）；无名命名空间成员改为内部链接，`static` 的弃用被撤销。
-    - **C++17**：嵌套命名空间定义 `namespace a::b::c`（[[N4230]]）；命名空间和枚举量可以带属性（[[N4266]]）。
-    - **C++20**：嵌套命名空间定义中可以写 `inline`（[[P1094R2]]）；引入模块，命名空间不附属于模块，含导出声明的命名空间定义视为导出。
-    - **C++26**：静态反射加入 `namespace X = [: r :];` 与 `using namespace [: r :];`，*splice-specifier* 不得指代全局命名空间。
+!!! history
+    - C++98 已有命名空间、无名命名空间、命名空间别名和 using 指令。当时无名命名空间的成员具有外部链接，只是名字别人写不出来。C++98 还弃用了命名空间作用域对象上的 `static`，推荐改用无名命名空间。
+    - C++11 加入内联命名空间（[[N2535]]）；无名命名空间的成员改为内部链接，`static` 的弃用随之撤销。
+    - C++17 加入 `namespace a::b::c`（[[N4230]]），命名空间可以带属性（[[N4266]]）。
+    - C++20 允许嵌套命名空间定义里写 `inline`（[[P1094R2]]）；模块加入后，命名空间被规定为不附属于模块。
+    - C++26 静态反射加入 `namespace X = [: r :];` 和 `using namespace [: r :];`。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "using 指令不会让名字离使用点更近"
-    在函数里写 `using namespace N;`，`N` 的成员并不如同在函数中声明，而是如同在 `N` 和当前位置的最近公共外层命名空间（通常是全局命名空间）中声明。因此当前命名空间中的同名实体会隐藏它们，局部变量当然也会。
+!!! pitfall "函数里的 using 指令让名字离使用点最近"
+    `N` 的成员如同声明在 `N` 和当前位置的最近公共外层命名空间里，通常是全局命名空间。当前命名空间和局部作用域里的同名实体都会隐藏它们。
 
-!!! pitfall "内联命名空间中的同名声明不会被外层声明隐藏"
-    `namespace N { inline namespace V { int x; } int x; }` 中 `N::x` 是歧义的，而对普通 using 指令则是 `N::x` 优先。
+!!! pitfall "外层的同名声明会隐藏内联命名空间的成员"
+    不会。`namespace N { inline namespace V { int x; } int x; }` 中 `N::x` 有歧义；换成普通 using 指令时，`N::x` 才是 N 自己的 `x`。
 
-!!! pitfall "无名命名空间放在头文件里"
-    每个 TU 得到独立的实体；如果 `inline` 函数或模板引用了这些实体，就违反 ODR。
+!!! pitfall "头文件里写 `using namespace std;` 只是风格问题"
+    它让所有包含该头文件的翻译单元在全局命名空间看到 `std` 的全部名字，包括以后标准新增的名字。标准库每加一个名字，都可能让原本没有歧义的代码变得有歧义。
 
 ## 思考题
 
@@ -504,37 +471,19 @@ void f() {
 <details markdown="1">
 <summary>答案</summary>
 
-- `int a = i;`（在 D 中）：`using namespace A;` 让 `A::i` 如同在全局命名空间中声明（同时包含 D 和 A 的最近命名空间）。从 D 向外依次查找 D、C、B，在 B 中找到 `B::i` 后停止。所以结果是 `B::i`，`A::i` 实际上被隐藏了。
-- `int l = k;`（在 C 中）：`using namespace D;` 让 D 的成员如同在 C 中声明（C 同时包含该指令和 D）。C 自己也有 `k`，于是 C 中同时有 `C::k` 和 `D::k`，两者都是变量，因此有歧义。
-- `int m = i;`：D 的成员如同在 C 中，但 D 里没有 `i`；D 中的 `using namespace A;` 经传递性生效，`A::i` 如同在全局命名空间中。查找 C → B，在 B 中找到 `B::i`，停止。
-- `int n = j;`：`D::j` 如同在 C 中，先于 B 被找到，所以是 `D::j`。
+- `int a = i;`（在 D 里）：`using namespace A;` 让 `A::i` 如同在全局命名空间里，因为同时包含 D 和 A 的最近命名空间是全局命名空间。查找依次走过 D、C、B，在 B 里找到 `B::i` 就停止，`A::i` 被隐藏。
+- `int l = k;`（在 C 里）：`using namespace D;` 让 D 的成员如同在 C 里。C 自己也有 `k`，于是 C 这一层同时有 `C::k` 和 `D::k`，两者都是变量，有歧义。
+- `int m = i;`：D 里没有 `i`；D 里的 `using namespace A;` 经传递生效，`A::i` 仍如同在全局命名空间里。查找 C、B，在 B 里找到 `B::i`。
+- `int n = j;`：`D::j` 如同在 C 里，先于 `B::j` 被找到。
 </details>
 
 !!! question "思考题 2"
-    为什么标准库实现可以把 `std::vector` 实际放在 `std::__1` 中，而用户写的 `template<> struct std::hash<MyType>` 仍然有效？如果把 `__1` 换成普通命名空间加 `using namespace __1;`，会出什么问题？
+    libc++ 把 `std::vector` 放在内联命名空间 `std::__1` 里。如果换成普通命名空间 `__1` 再在 `std` 里写 `using namespace __1;`，会出什么问题？
 
 <details markdown="1">
 <summary>答案</summary>
 
-按 ¶6 第 3 点，内联命名空间的成员可以如同外层命名空间的成员一样显式特化，所以用户惯常的写法 `namespace std { template<> struct hash<MyType> { ... }; }` 会当作 `std::__1::hash` 的特化。
+至少有两处不同。第一，ADL：`std::__1::vector<int>` 的关联命名空间只有 `std::__1`，不再连带 `std`，直接声明在 `std` 里的函数就不会被 ADL 找到。第二，限定查找：`std::name` 时如果 `std` 自己有同名声明，就不会再看 using 指令的目标。
 
-如果换成普通命名空间加 using 指令，在 C++11 的规则下这种写法是非良构的：当时 [temp.expl.spec] 要求不带限定的显式特化必须声明在模板最近的外层命名空间中；如果那个命名空间是内联的，则可以是它的外层命名空间集合中的任一个。对普通的 `std::__1`，只有在 `namespace std::__1 { ... }` 里面写才行，而用户代码不可能知道 `__1` 这个名字。这正是发明内联命名空间时要解决的问题之一（GCC 早先用非标准的 strong using 扩展做同样的事）。
-
-现行草案已经放宽了这条规则（[[temp.expl.spec#3]]：显式特化可以在主模板可以定义的任何作用域中声明，包括外层命名空间），所以单就特化而言差别变小了，Clang 23 也接受两种写法。但其他差别仍然存在：ADL 时 `std::__1` 中类型的关联命名空间只有 `std::__1`，不会连带 `std`；限定查找 `std::name` 时，若 `std` 自己有同名声明，就不再考虑 using 指令的目标。内联命名空间让这些方面都如同成员在外层命名空间中一样。
+用户在 `namespace std { ... }` 里写的特化原本也是问题：C++11 要求显式特化声明在模板所在的命名空间里，内联命名空间的外层也算，普通的 `__1` 的外层则不算。现行草案已放宽为在主模板可以定义的任何作用域里都能显式特化（[[temp.expl.spec#3]]），本机 Clang 23 对两种写法都接受，所以这一点的差别已经不大。
 </details>
-
-## 小结
-
-!!! summary "要点"
-    - 命名空间是开放的，可以跨 TU、跨模块多次扩展；命名空间不附属于模块。
-    - 内联命名空间：在 ADL、无限定查找、限定查找、模板特化中，其成员都如同外层命名空间的成员；用于 ABI 版本化（libc++ `std::__1`、libstdc++ `std::__cxx11`）。
-    - `namespace a::inline b::c`（C++20）；第一段不能 `inline`。
-    - 无名命名空间 = 唯一名字 + using 指令；其成员具有内部链接（[[basic.link]]）。
-    - using 指令：不引入名字；名字如同在最近公共外层命名空间中声明；传递；能看到后来添加的声明；不能出现在类中；不改变重载决议。
-
-| 机制 | 引入名字？ | 看到后来的声明？ | 能在类中？ | 典型用途 |
-|---|---|---|---|---|
-| using 指令 | 否 | 是 | 否 | 局部便利 |
-| using 声明（[[namespace.udecl]]） | 是 | 否 | 是（基类成员） | 精确引入、修改访问 |
-| 内联命名空间 | 隐式 using 指令 + 更多 | 是 | — | 版本化 |
-| 命名空间别名 | 是（别名本身） | — | 否 | 缩短长名字 |

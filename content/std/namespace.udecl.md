@@ -1,222 +1,21 @@
 ---
 title: using 声明
-summary: using 声明把查找到的一组声明绑定到一个名字上：引入命名空间成员、把基类成员带入派生类（并可修改访问）、继承构造函数、引入枚举量；只包含声明时可见的重载；冲突、重复、隐藏与覆盖规则；C++17 的包展开
+summary: using 声明把一次限定查找的结果绑定到当前作用域的一个名字上，用来引入命名空间成员、把基类成员带进派生类并修改访问级别、继承构造函数。
 status: done
 papers: P0136R1, P0195R2, P1099R5, P2169R4
-related: basic.lookup, basic.lookup.qual, class.member.lookup, class.inhctor.init, over.match.funcs, basic.scope.scope, class.access, basic.namespace, enum, temp.res
+related: basic.namespace, basic.lookup, basic.lookup.qual, class.member.lookup, class.inhctor.init, over.match.funcs, basic.scope.scope, class.access, enum, temp.res
 tags: 声明, 名字查找, 继承, 构造函数, 访问控制
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-[[g:using-declaration|using 声明]]（using-declaration）`using N::name;` 做的事情很明确：**在当前作用域中，让名字 `name` 指代在 `N` 中查找 `name` 所得到的那组声明**。它与 using 指令（`using namespace N;`，[[namespace.udir]]）有根本区别：
+!!! tldr
+    - `using N::f;` 让当前作用域里的 `f` 指代此刻在 `N` 中查找 `f` 得到的那组声明。之后再加入 `N` 的重载看不到。
+    - 在类里，using 声明只能命名基类成员或枚举量。它把基类的整个重载集并入派生类，而派生类自己声明的同签名函数会隐藏或覆盖其中对应的那个。
+    - using 声明所在的访问区段决定新名字的访问级别，这就是 `public: using Base::g;` 能把 protected 成员公开的原因。被命名的每个声明都必须可访问。
+    - `using Base::Base;` 继承构造函数：基类的构造函数参与派生类的构造，派生类自己的其他成员按默认方式初始化。
+    - 类成员（枚举量除外）不能在类外用 using 声明引入，静态成员也不行。
 
-| | using 声明 `using N::f;` | using 指令 `using namespace N;` |
-|---|---|---|
-| 是否引入名字 | 是：`f` 绑定到当前作用域 | 否：只改变查找路径 |
-| 看到之后添加的重载？ | 否（¶9） | 是 |
-| 能出现在类中？ | 是（命名基类成员或枚举量） | 否 |
-| 与本作用域同名声明 | 可能冲突（¶10） | 不冲突，只可能在使用时歧义 |
-
-using 声明有四种用途，本节的规则基本可以按用途分组：
-
-1. 引入命名空间成员：`using std::swap;`
-2. 把基类成员带进派生类：解除名字隐藏、修改访问级别（¶3、¶11、¶16）；
-3. 继承构造函数：`using Base::Base;`（¶2、¶13，细节在 [[class.inhctor.init]]）；
-4. 引入枚举量：`using Color::red;`，这也是 `using enum`（[[enum]]）的底层机制。
-
-## 语法与所命名的声明集合（¶1）
-
-```text
-using-declaration:      using using-declarator-list ;
-using-declarator-list:  using-declarator ...(opt)
-                      | using-declarator-list , using-declarator ...(opt)
-using-declarator:       typename(opt) nested-name-specifier unqualified-id
-```
-
-注意 *nested-name-specifier* 不是可选的，using 声明必须带限定（写成 `using ::x;` 也可以）。脚注 77 说明，一个带多个 *using-declarator* 的 using 声明（C++17）等价于一串各带一个声明符的 using 声明。
-
-按 ¶1，*using-declarator* 的组成名字是其 *nested-name-specifier* 和 *unqualified-id* 的组成名字。每个 *using-declarator* 命名通过限定名查找（[[basic.lookup.qual]]）找到的声明集合，但有三个例外：
-
-- 查找时本应丢弃的类和枚举声明（即类名被同名变量或函数隐藏的规则，[[basic.lookup]]）只是在检查歧义时忽略。换句话说，using 声明会把被隐藏的类名一起带上；
-- 返回类型待决的转换函数模板被忽略；
-- 某些函数被隐藏（见 ¶11）。
-
-¶1 后半段处理待决的情形。如果 *using-declarator* 的终止名是待决的（[[temp.dep.type]]），编译器在模板定义时不知道它是否命名构造函数。规则是：**当且仅当** *nested-name-specifier* 的终止名与 *unqualified-id* 相同时，视为命名构造函数（即 `using T::T;`、`using Base<U>::Base;` 这种形式）。如果实例化后发现判断错了，即视为非构造函数的结果命名了构造函数，或者反过来，程序非良构。
-
-```cpp title="udecl-dependent-ctor.cpp" error
-struct Base { Base(int) {} Base() {} };
-
-template<class T> struct X : T { using T::T; };      // 视为命名构造函数
-X<Base> x(1);                                         // OK
-
-template<class T> struct W : T { using T::Base; };   // 终止名 T ≠ Base：不视为构造函数
-W<Base> w;    // error: 实例化后 Base::Base 命名的是构造函数（Clang 的诊断说法不同，但同样拒绝）
-```
-
-## 继承构造函数（¶2）
-
-按 ¶2，如果 *using-declarator* 命名构造函数，它声明当前类**继承**（inherits）所指基类的那组构造函数声明。注 1 说明，否则 *unqualified-id* 就绑定到 *using-declarator* 上，名字查找遇到它时，会把它替换为它所命名的那些声明（[[basic.lookup]]）。如果命名的是一个枚举，其枚举量的名字不会随之绑定（要那样做请用 `using enum`）。
-
-C++17 起（[[P0136R1]]），继承构造函数的语义是：基类构造函数不会在派生类中复制成新的构造函数声明，只是在查找派生类构造函数、构建重载候选集时视为派生类的构造函数（¶13）。选中后，派生类中的其他子对象按默认方式初始化（[[class.inhctor.init]]）。
-
-```cpp run title="inherit-ctor.cpp" ok
-#include <string>
-#include <cstdio>
-
-struct Base {
-    Base(int n) : s(std::to_string(n)) {}
-    Base(const char* p) : s(p) {}
-    std::string s;
-};
-
-struct Derived : Base {
-    using Base::Base;      // 继承 Base(int) 和 Base(const char*)
-    int extra = 42;        // 用默认成员初始化器初始化
-};
-
-int main() {
-    Derived a(7), b("hi");
-    std::printf("%s %s %d\n", a.s.c_str(), b.s.c_str(), a.extra);   // 7 hi 42
-}
-```
-
-```cpp title="inherit-ctor-deleted.cpp" error
-struct P { P(int) {} };
-struct Q { Q(const char*) {} };
-
-template<class... Bs>
-struct M : Bs... {
-    using Bs::Bs...;       // C++17: 包展开，继承所有基类的构造函数
-};
-
-M<P, Q> m(1);              // error: 选中 P(int)，但 Q 子对象无法默认初始化 ⇒ 被删除
-```
-
-## 类成员中的 using 声明（¶3–¶8）
-
-### 必须命名基类成员或枚举量（¶3）
-
-按 ¶3，如果 using 声明是 *member-declaration*，它的每个 *using-declarator* 要么命名一个枚举量，要么其 *nested-name-specifier* 命名当前类的一个基类。命名构造函数时，必须是直接基类。如果所在类是类模板，则它必须派生自指定的基类，或者至少有一个待决基类（这时只能等实例化再检查）。
-
-```cpp title="udecl-member.cpp" error
-enum class button { up, down };
-
-struct B {
-    void f(char);
-    enum E { e };
-    union { int x; };
-};
-
-struct C { int f(); };
-
-struct S {
-    using button::up;         // OK (C++20): 命名枚举量，不需要是基类
-    button b = up;
-};
-
-struct D : B {
-    using B::f;               // OK: B 是 D 的基类
-    using B::e;               // OK: e 是基类 B 的枚举量
-    using B::x;               // OK: x 是基类 B 的匿名联合成员
-    using C::f;               // error: C 不是 D 的基类
-    void f(int) { f('c'); }   // 调用 B::f(char)
-    void g(int) { g('c'); }   // 递归调用 D::g(int)
-};
-
-template<typename... bases>
-struct X : bases... {
-    using bases::f...;        // C++17: 包展开
-};
-X<B, C> xx;                   // OK: 命名 B::f 和 C::f
-```
-
-`D::f(int)` 中的 `f('c')` 调用的是 `B::f(char)`。如果没有 `using B::f;`，`D::f` 会隐藏基类的所有 `f`（[[class.member.lookup]]），`f('c')` 只能调用 `D::f(int)`（`'c'` 转换为 `int`）。`using B::f;` 把基类的重载并入同一个重载集。`g` 没有对应的 using 声明，所以 `g('c')` 只能找到 `D::g`。
-
-### 注 2、注 3（¶4）
-
-- 析构函数没有名字，所以 using 声明无法引用基类析构函数；
-- 命名基类成员函数的 using 声明不会抑制派生类中特殊成员函数的隐式声明，即使签名相同。例如写了 `using Base::operator=;` 之后，派生类仍然有自己隐式声明的复制赋值运算符，它会隐藏（¶11）基类中同签名的那个。
-
-```cpp run title="udecl-special-members.cpp" ok
-#include <cstdio>
-
-struct Base {
-    Base& operator=(const Base&) { std::puts("Base::operator="); return *this; }
-    Base& operator=(int) { std::puts("Base::operator=(int)"); return *this; }
-};
-struct Derived : Base {
-    using Base::operator=;    // 引入 operator=(int)；operator=(const Base&) 也被引入
-};
-
-int main() {
-    Derived d1, d2;
-    d1 = 5;                   // Base::operator=(int)
-    d1 = d2;                  // Derived 的隐式复制赋值（它又调用 Base::operator=）
-}
-```
-
-### 不能命名 *template-id*、命名空间（¶5–¶6）
-
-按 ¶5，using 声明不能命名 *template-id*。它引入的是名字，所以引入模板本身就会带上它的所有特化：
-
-```cpp title="udecl-template-id.cpp" error
-struct A {
-    template<class T> void f(T);
-    template<class T> struct X { };
-};
-struct B : A {
-    using A::f<double>;   // error
-    using A::X<int>;      // error
-    using A::f;           // OK: 引入整个函数模板
-};
-```
-
-按 ¶6，using 声明不能命名命名空间（那是命名空间别名或 using 指令的工作）。
-
-### 类成员只能在类中引入（¶7）
-
-按 ¶7，命名类成员（枚举量除外）的 using 声明必须是 *member-declaration*。所以在块作用域或命名空间作用域写 `using X::s;`，即使 `s` 是静态成员，也非良构：
-
-```cpp title="udecl-class-member-outside.cpp" error
-struct X {
-    int i;
-    static int s;
-    enum { e };
-};
-
-void f() {
-    using X::i;    // error: 类成员，且这里不是成员声明
-    using X::s;    // error: 静态成员也不行
-    using X::e;    // OK: 枚举量例外
-}
-```
-
-为什么静态成员也不行？允许它会模糊类成员与命名空间成员的界限，还会引出访问控制上的问题（在类外用一个名字访问私有静态成员？）。需要短名字时，可以用引用或别名代替。
-
-### 同一个类中重复命名（¶8）
-
-按 ¶8，如果同一个声明被位于同一类作用域的两个 *using-declarator* 命名，程序非良构。
-
-```cpp title="udecl-duplicate.cpp" error
-struct C { int i; };
-struct D1 : C { };
-struct D2 : C { };
-
-struct D3 : D1, D2 {
-    using D1::i;     // OK: 等价于 using C::i
-    using D1::i;     // error: 重复
-    using D2::i;     // error: 重复——它也命名 C::i
-};
-```
-
-!!! impl "Clang 的偏差"
-    Clang 23 能诊断第二行 `using D1::i;`（报告重复声明），却接受第三行 `using D2::i;`。按 ¶8，`D2::i` 找到的同样是 `C::i` 这个声明，应当非良构。
-
-在块作用域和命名空间作用域中，同一个 using 声明可以重复出现（¶10 例 8 中的 `using A::x;` 写了两次），只有类作用域禁止这样做，这与类中不能重复声明成员的规则一致。
-
-## 只命名此刻可见的声明（¶9）
-
-¶9 是一条注：如果 *nested-name-specifier* 命名命名空间，using 声明不会命名在它之后才加入该命名空间的声明。所以之后添加的重载会被忽略；但默认实参、默认模板实参和模板特化（部分特化、显式特化）会被考虑，因为它们不是新的声明，而是对已有实体的补充。
+## 它做了什么
 
 ```cpp run title="udecl-snapshot.cpp" ok
 #include <cstdio>
@@ -234,39 +33,81 @@ namespace A {
 void foo() {
     f('a');              // f(int)：using 声明时 f(char) 还不存在
 }
-
 void bar() {
-    using A::f;          // 此时 A::f(int) 和 A::f(char) 都可见
+    using A::f;          // 此时 A::f(int) 和 A::f(char) 都已声明
     f('a');              // f(char)
 }
-
 int main() { foo(); bar(); }
 ```
 
-这条规则让 using 声明的含义在声明点就固定下来，与之后的代码顺序无关。using 声明比 using 指令更可预测，根源就在这里。
+**[[g:using-declaration|using 声明]]**（using-declaration）`using A::f;` 在当前作用域里引入名字 `f`。以后查找 `f` 找到这条 using 声明时，它就换成它所命名的那组声明（第 2 段注 1）。
 
-## 冲突规则（¶10）
+¶9 那组声明在 using 声明出现时就确定了。`foo` 里的 `f` 只能找到 `A::f(int)`，尽管调用时 `A::f(char)` 已经存在。默认实参、默认模板实参和模板特化是例外，之后添加的也会被考虑，因为它们不是新的声明，而是附在已有实体上的。
 
-¶10 有两部分。
+这正是它与 using 指令 `using namespace A;` 的区别：using 指令不引入名字，只改变查找路径，所以总能看到后来的声明（[[namespace.udir]]）。两者的对比表见 [[basic.namespace]]。
 
-第一部分：如果 using 声明命名的某个声明与同一目标作用域中的另一个声明 B 潜在冲突（[[basic.scope.scope]]），且其中一个对另一个可达，程序非良构。例外是 B 为名字无关声明（name-independent，C++26 的 `_`，[[P2169R4]]），并且 using 声明在 B 之前。
+using 声明主要有三种用途：
+
+1. 引入命名空间成员，例如 `using std::swap;`；
+2. 把基类成员带进派生类，以解除名字隐藏或修改访问级别；
+3. 继承构造函数，`using Base::Base;`。
+
+此外它也能引入枚举量，`using enum`（[[enum]]）就建立在这个机制上。
+
+## 语法与命名的声明（¶1）
+
+```text
+using-declaration:      using using-declarator-list ;
+using-declarator-list:  using-declarator ...(opt)
+                      | using-declarator-list , using-declarator ...(opt)
+using-declarator:       typename(opt) nested-name-specifier unqualified-id
+```
+
+*nested-name-specifier* 不是可选的，using 声明一定带限定，引入全局名字时写 `using ::x;`。C++17 起一条 using 声明可以有多个声明符，`using A::x, B::y;` 等价于逐个写（脚注 77），声明符后面还可以跟 `...` 做包展开（[[P0195R2]]）。
+
+¶1 每个声明符命名的，就是对它做限定名查找（[[basic.lookup.qual]]）得到的那组声明，只有三处调整：
+
+- 同一作用域里，变量或函数会隐藏同名的类或枚举，普通查找会丢掉被隐藏的那个类。using 声明不丢，它只在检查歧义时忽略它，所以被隐藏的类名会一起带过来（见下文冲突一节的 `struct g`）。
+- 返回类型待决的转换函数模板被忽略。
+- 派生类里对应的函数会隐藏基类函数，见第 11 段。
+
+在模板里引入待决的类型名，要在声明符前写 `typename`（[[temp.res]]）：
+
+```cpp title="udecl-typename.cpp" ok
+template<class T>
+struct Derived : T {
+    using typename T::value_type;   // 待决的类型名
+    using T::get;                   // 待决的非类型成员
+    value_type v{};
+};
+
+struct Base { using value_type = int; int get() const { return 1; } };
+
+int main() { Derived<Base> d; return d.get() - 1 + d.v; }
+```
+
+## 同一作用域里的冲突（¶10）
+
+¶10 有两条规则，都以[[basic.scope.scope|潜在冲突]]为基础。直观地说，两个声明在同一作用域里引入同一个名字，又不是同一个实体的重复声明，也不是可以共存的重载，它们就潜在冲突。
+
+第一条：using 声明命名的某个声明，与它所在作用域里的另一个声明 B 潜在冲突，并且其中一个对另一个可达，程序就非良构。唯一的例外是 C++26 的名字无关声明 `_`（[[P2169R4]]）：B 是名字无关声明，而且 using 声明写在 B 之前。
 
 ```cpp title="udecl-name-independent.cpp" error
 int _;
 void f() {
     int _;          // B：名字无关声明
     _ = 0;
-    using ::_;      // error: using 声明没有出现在 B 之前
+    using ::_;      // error: using 声明不在 B 之前
 }
 void g() {
-    using ::_;      // OK: 先于 B
-    int _;          // OK: 名字无关声明可以与之共存
+    using ::_;      // OK：先于 B
+    int _;          // OK：名字无关声明可以与它共存
 }
 ```
 
-第二部分：如果位于同一作用域的两个 using 声明所命名的声明潜在冲突、互相可达，且不全是函数或函数模板，程序非良构。注 5 指出，如果都是函数，using 声明本身没问题，但重载决议可能无法区分它们。
+第二条：同一作用域里两条 using 声明所命名的声明潜在冲突、互相可达，而且不全是函数或函数模板，程序就非良构。如果都是函数，using 声明本身没有问题，只是重载决议可能区分不了它们（注 5）。
 
-标准例 8 可以当作冲突规则的速查表：
+标准例 8 把这些情况都放在了一起：
 
 ```cpp title="udecl-conflicts.cpp" error
 namespace A {
@@ -275,48 +116,159 @@ namespace A {
     int g;
     void h();
 }
-
 namespace B {
     int i;
     struct g { };
     struct x { };
     void f(int);
     void f(double);
-    void g(char);                     // OK: 隐藏 struct g
+    void g(char);                     // OK：隐藏 struct g
 }
 
 void func() {
     int i;
     using B::i;                       // error: 与局部变量 i 冲突
     void f(char);
-    using B::f;                       // OK: 都是函数
+    using B::f;                       // OK：都是函数
     using A::f;                       // OK，但与 B::f(int) 签名相同
     f(1);                             // error: 歧义
-    static_cast<int(*)(int)>(f)(1);   // OK: 调用 A::f
-    f(3.5);                           // OK: B::f(double)
+    static_cast<int(*)(int)>(f)(1);   // OK：调用 A::f
+    f(3.5);                           // OK：B::f(double)
     using B::g;
-    g('a');                           // OK: B::g(char)
-    struct g g1;                      // OK: g1 的类型是 B::g（类名被一起带入）
+    g('a');                           // OK：B::g(char)
+    struct g g1;                      // OK：g1 的类型是 B::g
     using A::g;                       // error: 与 B::g 冲突
     void h();
-    using A::h;                       // error: 与局部函数声明 h() 冲突（签名相同、不是同一实体）
+    using A::h;                       // error: 与局部声明的 h 冲突
     using B::x;
-    using A::x;                       // OK: 隐藏 struct B::x
-    using A::x;                       // OK: 与上一个 using A::x 不冲突
+    using A::x;                       // OK：变量 A::x 隐藏 struct B::x
+    using A::x;                       // OK：重复命名同一个声明
     x = 99;                           // 给 A::x 赋值
     struct x x1;                      // x1 的类型是 B::x
 }
 ```
 
-有几点值得仔细看：
+- `using B::g;` 同时带来了函数 `B::g(char)` 和被它隐藏的类 `B::g`。之后 `g('a')` 找到函数，`struct g` 找到类。
+- `void h();` 声明的是全局的 `::h`，`using A::h;` 命名的是 `A::h`。两者签名相同，却是不同的实体，所以冲突。
+- 块作用域和命名空间作用域里可以重复写同一条 using 声明，比如这里的两次 `using A::x;`。类作用域里不行，见下文第 8 段。
 
-- `using B::g;` 同时带上了函数 `B::g(char)` 和被它隐藏的类 `B::g`（¶1 第一个例外）。之后 `g('a')` 找到函数，`struct g` 找到类。
-- `using A::h;` 与局部声明 `void h();` 冲突：两者签名相同，声明的却是不同的实体（一个是 `A::h`，另一个是全局 `::h`）。这正是潜在冲突：它们对应（correspond），却不是同一实体的重声明。
-- `using A::x;` 写了两次：同一个声明被重复命名，在块作用域中不算冲突。变量 `A::x` 隐藏类 `B::x`，这与同一作用域中变量隐藏同名类的普通规则一致。
+## 在类里使用
 
-## 隐藏与覆盖：派生类声明优先（¶11）
+### 只能命名基类成员或枚举量（¶3）
 
-按 ¶11，如果把某个基类成员函数（模板）视为 C 的成员时，它与 C 中某个函数（模板）声明对应（[[basic.scope.scope]]，即同名、同参数类型列表、同 cv/引用限定等），类 C 中的 *using-declarator* 所命名的集合就不包括它。换句话说，**派生类自己声明的同签名函数会隐藏（或覆盖）using 声明引入的那个**，而不会冲突。
+```cpp title="udecl-member.cpp" error
+enum class button { up, down };
+
+struct B {
+    void f(char);
+    enum E { e };
+    union { int x; };
+};
+struct C { int f(); };
+
+struct S {
+    using button::up;         // OK（C++20）：枚举量不需要来自基类
+    button b = up;
+};
+
+struct D : B {
+    using B::f;               // OK：B 是 D 的基类
+    using B::e;               // OK：基类 B 的枚举量
+    using B::x;               // OK：基类 B 的匿名联合成员
+    using C::f;               // error: C 不是 D 的基类
+    void f(int) { f('c'); }   // 调用 B::f(char)
+    void g(int) { g('c'); }   // 递归调用 D::g(int)
+};
+
+template<typename... bases>
+struct X : bases... {
+    using bases::f...;        // C++17：包展开
+};
+X<B, C> xx;                   // OK：命名 B::f 和 C::f
+```
+
+¶3 作为类成员的 using 声明，每个声明符要么命名枚举量，要么它的 *nested-name-specifier* 命名当前类的一个基类。命名构造函数时必须是直接基类。在类模板里，类必须派生自所指定的基类，或者至少有一个待决基类，这时检查推迟到实例化。
+
+`D::f(int)` 里的 `f('c')` 调用的是 `B::f(char)`。没有 `using B::f;` 的话，`D::f` 会隐藏基类所有名为 `f` 的函数（[[class.member.lookup]]），`f('c')` 只能把 `'c'` 转换成 `int` 去调用 `D::f(int)`。`g` 就是这种情况。
+
+### 类成员只能在类里引入（¶7）
+
+¶7 命名类成员（枚举量除外）的 using 声明必须是成员声明。在块作用域或命名空间作用域里写 `using X::s;`，即使 `s` 是静态成员，也是非良构的：
+
+```cpp title="udecl-class-member-outside.cpp" error
+struct X {
+    int i;
+    static int s;
+    enum { e };
+};
+
+void f() {
+    using X::i;    // error: 类成员，而这里不是成员声明
+    using X::s;    // error: 静态成员也不行
+    using X::e;    // OK：枚举量例外
+}
+```
+
+需要短名字时，可以改用引用，例如 `auto& s = X::s;`。
+
+### 其他限制（¶4–¶6、¶8）
+
+¶5 using 声明不能命名 *template-id*。它引入的是名字，引入模板时它的所有特化都随之而来：
+
+```cpp title="udecl-template-id.cpp" error
+struct A {
+    template<class T> void f(T);
+    template<class T> struct X { };
+};
+struct B : A {
+    using A::f<double>;   // error
+    using A::X<int>;      // error
+    using A::f;           // OK：引入整个函数模板
+};
+```
+
+¶6 using 声明不能命名命名空间，那是命名空间别名和 using 指令的事（[[basic.namespace]]）。第 4 段注 2 指出，析构函数没有名字，所以 using 声明也无法引用基类的析构函数。
+
+¶8 同一个声明被同一个类作用域里的两个声明符命名，程序非良构：
+
+```cpp title="udecl-duplicate.cpp" error
+struct C { int i; };
+struct D1 : C { };
+struct D2 : C { };
+
+struct D3 : D1, D2 {
+    using D1::i;     // OK：等价于 using C::i
+    using D1::i;     // error: 重复
+    using D2::i;     // error: 重复，它命名的也是 C::i
+};
+```
+
+!!! impl "Clang 的偏差"
+    本机 Clang 23 只诊断第二行 `using D1::i;`，接受了第三行 `using D2::i;`。按第 8 段，`D2::i` 找到的同样是 `C::i` 这个声明，应当非良构。
+
+¶4 注 3：命名基类成员函数的 using 声明不会阻止派生类隐式声明特殊成员函数，即使签名相同。写了 `using Base::operator=;` 之后，派生类仍然有自己的复制赋值运算符：
+
+```cpp run title="udecl-special-members.cpp" ok
+#include <cstdio>
+
+struct Base {
+    Base& operator=(const Base&) { std::puts("Base::operator=(const Base&)"); return *this; }
+    Base& operator=(int) { std::puts("Base::operator=(int)"); return *this; }
+};
+struct Derived : Base {
+    using Base::operator=;    // 两个 Base::operator= 都被引入
+};
+
+int main() {
+    Derived d1, d2;
+    d1 = 5;                   // Base::operator=(int)
+    d1 = d2;                  // Derived 隐式的复制赋值，它再调用 Base::operator=
+}
+```
+
+`d1 = d2` 的候选里有 `Derived::operator=(const Derived&)` 和引入的 `Base::operator=(const Base&)`。前者是精确匹配，后者要做派生类到基类的转换，所以选前者。程序两次输出的分别来自 `operator=(int)` 和隐式复制赋值内部对基类的调用。
+
+## 派生类的声明优先（¶11、¶12）
 
 ```cpp run title="udecl-hide-override.cpp" ok
 #include <cstdio>
@@ -333,18 +285,14 @@ struct B {
 struct D : B {
     using B::f;
     void f(int) override { std::puts("D::f(int)"); }   // 覆盖 B::f(int)
-
     using B::g;
     void g(char) { std::puts("D::g(char)"); }          // 新的重载
-
     using B::h;
     void h(int) { std::puts("D::h(int)"); }            // 隐藏 B::h(int)
-
     using B::i;
     void i(this B&) { std::puts("D::i(this B&)"); }    // 不对应 B::i
-
     using B::j;
-    void j(this D&) { std::puts("D::j(this D&)"); }    // 对应 B::j（视为 D 的成员时），隐藏它
+    void j(this D&) { std::puts("D::j(this D&)"); }    // 对应 B::j，隐藏它
 };
 
 int main() {
@@ -353,49 +301,23 @@ int main() {
     p->f('a');   // B::f(char)
     p->g(1);     // B::g(int)
     p->g('a');   // D::g(char)
-    p->i();      // 标准：B::i()——作为 D 的成员，其隐式对象参数是 D&，比 B& 更好（Clang 23 实际调用 D::i）
+    p->i();      // 标准：B::i()；Clang 23 实际调用 D::i
     p->j();      // D::j(this D&)
 }
 ```
 
-`i` 与 `j` 两行展示了 C++23 显式对象参数（[[dcl.fct]]）与 using 声明的交互。判断是否对应时，基类成员函数视为 C 的成员，它的隐式对象参数类型是 `D&`。`j(this D&)` 的显式对象参数也是 `D&`，两者对应，于是 `B::j` 被隐藏；`i(this B&)` 的对象参数是 `B&`，不对应，两者并存，重载决议中 `B::i`（对象参数视为 `D&`，见 ¶12）是更好的匹配。
+¶11 派生类 C 里的 using 声明所命名的集合，不包括这样的基类成员函数：把它当作 C 的成员看时，它与 C 自己声明的某个函数**对应**（correspond，[[basic.scope.scope]]），即同名、同参数类型列表、同样的 cv 和引用限定。所以派生类的同签名函数会隐藏基类的版本（是虚函数时就是覆盖），两者不冲突。
+
+¶12 注 6：构建重载候选集时，using 声明引入的函数被当作派生类的直接成员，它的隐式对象参数被视为派生类的引用，而不是基类的引用（[[over.match.funcs]]）。函数的类型不变，在其他方面它仍是基类的成员，例如 `&D::g` 的类型是 `void (B::*)(int)`。
+
+如果隐式对象参数仍然是 `B&`，派生类自己的成员在对象参数上总是更好的匹配，引入的函数就永远处于劣势，并入同一个重载集也就没有意义了。
+
+`i` 和 `j` 两行展示了这两段与 C++23 显式对象参数（[[dcl.fct]]）的交互。`B::j` 当作 D 的成员时，对象参数是 `D&`，与 `j(this D&)` 对应，所以被隐藏。`B::i` 与 `i(this B&)` 不对应，两者都是候选。按第 12 段，`B::i` 的对象参数视为 `D&`，对 `D` 左值是恒等转换；`D::i` 要做派生类到基类的转换，所以标准例 9 说调用的是 `B::i`。
 
 !!! impl "Clang 与标准例子不一致"
-    截至 Clang 23，运行上面的程序时 `p->i()` 打印的是 `D::i(this B&)`，与标准例 9（明确写着调用 `B::i`）不一致。按 ¶12，`B::i` 的对象参数视为 `D&`，实参 `*p` 是 `D` 左值，属于恒等转换；而 `D::i` 需要派生类到基类的转换，应当落败。
-
-¶11 的例子后半段讲继承构造函数的冲突：
-
-```cpp title="udecl-ctor-ambiguity.cpp" error
-struct B1 { B1(int); };
-struct B2 { B2(int); };
-
-struct D1 : B1, B2 {
-    using B1::B1;
-    using B2::B2;
-};
-D1 d1(0);           // error: 歧义——B1(int) 与 B2(int)
-
-struct D2 : B1, B2 {
-    using B1::B1;
-    using B2::B2;
-    D2(int);        // OK: 隐藏 B1(int) 和 B2(int)
-};
-D2 d2(0);           // OK: 调用 D2::D2(int)
-```
-
-## 重载决议中的待遇（¶12–¶13）
-
-¶12 是一条注：为构建重载候选集，派生类中 using 声明命名的函数视为派生类的直接成员，特别是隐式对象参数视为派生类的引用，而不是基类的引用（[[over.match.funcs]]）。这不影响函数的类型；在其他方面它仍然是基类的成员（例如取地址 `&D::g` 得到的是 `void (B::*)(int)`）。
-
-为什么要这样？如果隐式对象参数仍是 `B&`，派生类自己的成员（对象参数 `D&`）在对象参数上永远是更好的匹配，using 声明引入的函数在重载中就始终处于劣势，这违背了把它们并入同一重载集平等竞争的初衷。
-
-按 ¶13，在查找派生类构造函数（[[class.qual]]）或构建候选集（[[over.match.ctor]]、[[over.match.copy]]、[[over.match.list]]）时，using 声明命名的构造函数视为派生类的构造函数。注 7 说明，选中后，除了来源基类之外的所有子对象都隐式初始化（[[class.inhctor.init]]）；在两者本来会有歧义时，派生类构造函数有时会优先（[[over.match.best]] 的一条决胜规则）。
+    本机 Clang 23 运行上面的程序时，`p->i()` 打印的是 `D::i(this B&)`，与标准例 9 不符。
 
 ## 访问控制（¶14、¶16）
-
-按 ¶14，如果 *using-declarator* 不命名构造函数，它所命名的每一个声明都必须可访问；命名构造函数时不做访问检查。
-
-按 ¶16，using 声明具有 *member-declaration* 通常的可访问性，这就是用 using 声明修改访问级别的依据。而通过 using 声明纳入考虑的基类构造函数，其可访问性与用它构造基类对象时的可访问性相同，using 声明本身的访问级别被忽略。
 
 ```cpp title="udecl-access.cpp" error
 class A {
@@ -408,21 +330,15 @@ protected:
 };
 
 class B : public A {
-    using A::f;       // error: A::f(char) 不可访问（重载集中的每一个都必须可访问）
+    using A::f;       // error: A::f(char) 不可访问
 public:
-    using A::g;       // OK: B::g 是 A::g 的 public 同义词
+    using A::g;       // OK：B::g 是 A::g 的 public 同义词
 };
-
-class Base3 { protected: Base3(int); };
-struct Der3 : Base3 {
-    using Base3::Base3;   // 继承的构造函数保持 protected 的可访问性
-};
-Der3 d3(1);               // error: 在此处构造 Base3 不可访问
 ```
 
-`using A::f;` 失败的原因很微妙：它命名的是整个重载集 `{f(char), f(int)}`，其中 `f(char)` 是 private 的。using 声明无法只挑其中一个引入。
+¶14 不命名构造函数时，声明符命名的每个声明都必须可访问。`using A::f;` 命名的是整个重载集 `{f(char), f(int)}`，其中 `f(char)` 是 private 的，而 using 声明没法只挑其中一个。
 
-修改访问是 using 声明最常见的用途之一：把 protected 成员提升为 public（如上 `g`），或者在私有继承中有选择地把某些基类成员重新公开：
+¶16 using 声明和其他成员声明一样，具有它所在区段的访问级别。这是用它修改访问级别的依据：把 protected 成员公开（上面的 `g`），或者在私有继承时有选择地公开一部分接口：
 
 ```cpp run title="udecl-private-inherit.cpp" ok
 #include <vector>
@@ -442,13 +358,13 @@ int main() {
     s.push_back(2);
     s.pop_back();
     return s.back() == 1 ? 0 : 1;
-    // s.begin();   // error: begin 仍然是 private 继承来的
+    // s.begin();   // error: begin 仍是私有继承来的
 }
 ```
 
-## using 声明不能消解继承歧义（¶15）
+## 不能消解继承歧义（¶15）
 
-¶15 是一条注：*using-declarator* 指代的是基类成员，而不是某个基类子对象的成员，所以不能用它来解决因重复继承产生的歧义：
+¶15 注 8：声明符指代的是基类的成员，而不是某个基类子对象的成员，所以 using 声明不能用来消解重复继承造成的歧义：
 
 ```cpp title="udecl-ambiguous-base.cpp" error
 struct A { int x(); };
@@ -468,59 +384,115 @@ int f(D* d) {
 }
 ```
 
-`using C::x;` 把 `A::x()` 和 `C::x(int)` 带进 D。名字查找没有问题，重载决议选中 `A::x()`；但调用它需要把 `D*` 转换为 `A*`，而 D 有两个 A 子对象（经由 B 和经由 C），所以转换有歧义（[[class.member.lookup]]、[[conv.ptr]]）。using 声明里没有“经由 C 的那个 A”这样的概念。
+`using C::x;` 把 `A::x()` 和 `C::x(int)` 带进 D，重载决议选中 `A::x()`。调用它要把 `D*` 转换成 `A*`，而 D 里有两个 A 子对象，一个经由 B，一个经由 C，转换有歧义（[[conv.ptr]]）。using 声明里没有经由 C 的那个 A 这种说法。
 
-## `typename` 与待决名
+## 继承构造函数（¶2、¶13、¶1）
 
-*using-declarator* 前的 `typename` 用于在模板中引入待决的类型名（[[temp.res]]）：
+```cpp run title="inherit-ctor.cpp" ok
+#include <string>
+#include <cstdio>
 
-```cpp title="udecl-typename.cpp" ok
-template<class T>
-struct Derived : T {
-    using typename T::value_type;   // 引入待决类型名
-    using T::get;                   // 引入待决成员（非类型）
-    value_type v{};
+struct Base {
+    Base(int n) : s(std::to_string(n)) {}
+    Base(const char* p) : s(p) {}
+    std::string s;
 };
 
-struct Base { using value_type = int; int get() const { return 1; } };
+struct Derived : Base {
+    using Base::Base;      // 继承 Base(int) 和 Base(const char*)
+    int extra = 42;        // 由默认成员初始化器初始化
+};
 
-int main() { Derived<Base> d; return d.get() - 1 + d.v; }
+int main() {
+    Derived a(7), b("hi");
+    std::printf("%s %s %d\n", a.s.c_str(), b.s.c_str(), a.extra);   // 7 hi 42
+}
 ```
 
-## 实现视角
+¶2 声明符命名构造函数时，这条 using 声明表示当前类**继承**（inherit）基类的那组构造函数。第 13 段规定，查找派生类的构造函数（[[class.qual]]）或构建构造用的候选集（[[over.match.ctor]] 等）时，这些构造函数被当作派生类的构造函数。
 
-!!! impl "编译器如何表示 using 声明"
-    - Clang 中 using 声明表示为 `UsingDecl`，它为每个被命名的声明创建一个 `UsingShadowDecl`（影子声明）放在当前作用域中；名字查找找到影子声明后再解引用到目标。继承构造函数则用 `ConstructorUsingShadowDecl` 表示，并在选中时按需合成一个隐式的派生类构造函数（inheriting constructor）。GCC 的实现思路类似。
-    - 继承构造函数在 Itanium ABI 中有专门的修饰：继承的构造函数编码为 `CI1` / `CI2` 加上基类类型，而不是普通的 `C1` / `C2`。
-    - ¶9 的快照语义在实现上是自然而然的：`UsingDecl` 在声明时就固定了影子声明的列表；而默认实参、特化挂在原实体上，所以能被看到。
+选中一个继承来的构造函数后，来源基类用它初始化，其他基类和成员都按默认方式隐式初始化（[[class.inhctor.init]]）。其他子对象无法默认初始化时，这个构造函数就是被删除的：
+
+```cpp title="inherit-ctor-deleted.cpp" error
+struct P { P(int) {} };
+struct Q { Q(const char*) {} };
+
+template<class... Bs>
+struct M : Bs... {
+    using Bs::Bs...;       // C++17：继承所有基类的构造函数
+};
+
+M<P, Q> m(1);              // error: 选中 P(int)，但 Q 无法默认初始化，构造函数被删除
+```
+
+派生类自己声明了同签名的构造函数时，它按第 11 段隐藏继承来的版本。两个基类提供同签名的构造函数时，直接使用会有歧义：
+
+```cpp title="udecl-ctor-ambiguity.cpp" error
+struct B1 { B1(int); };
+struct B2 { B2(int); };
+
+struct D1 : B1, B2 {
+    using B1::B1;
+    using B2::B2;
+};
+D1 d1(0);           // error: 歧义，B1(int) 还是 B2(int)
+
+struct D2 : B1, B2 {
+    using B1::B1;
+    using B2::B2;
+    D2(int);        // OK：隐藏 B1(int) 和 B2(int)
+};
+D2 d2(0);           // OK：调用 D2::D2(int)
+```
+
+访问控制对构造函数另有规定。第 14 段规定，命名构造函数时不做访问检查，否则基类只要有一个 private 构造函数，整组就都无法继承。第 16 段规定，继承来的构造函数的可访问性，与用它构造基类对象时相同，using 声明所在的区段被忽略：
+
+```cpp title="inherit-ctor-access.cpp" error
+class Base3 { protected: Base3(int) {} };
+struct Der3 : Base3 {
+    using Base3::Base3;   // 写在 public 区段也不会公开它
+};
+Der3 d3(1);               // error: 在这里用 Base3(int) 构造基类不可访问
+```
+
+¶1 后半段处理模板里的情形。声明符的终止名（最后一个组成名字）待决时，编译器在模板定义时无法知道它是否命名构造函数。规则是：当且仅当 *nested-name-specifier* 的终止名与 *unqualified-id* 相同，也就是 `using T::T;`、`using Base<U>::Base;` 这种形式，才视为命名构造函数。实例化后发现判断错了，程序非良构：
+
+```cpp title="udecl-dependent-ctor.cpp" error
+struct Base { Base(int) {} Base() {} };
+
+template<class T> struct X : T { using T::T; };      // 视为命名构造函数
+X<Base> x(1);                                         // OK
+
+template<class T> struct W : T { using T::Base; };   // T 与 Base 不同：不视为构造函数
+W<Base> w;    // error: 实例化后 Base::Base 命名的是构造函数
+```
+
+本机 Clang 23 同样拒绝 `W<Base>`，只是诊断的角度不同：它报告待决的 using 声明解析成了类型（`Base` 的注入类名）却没有写 `typename`。
 
 ## 历史与演进
 
-!!! history "C++98 → C++26"
-    - C++98：using 声明，包括在类中引入基类成员和修改访问。
-    - C++11：继承构造函数 `using Base::Base;`（最初的语义是在派生类中隐式声明一组对应的构造函数，有许多边缘问题）。
-    - C++17：重新定义继承构造函数的语义（[[P0136R1]]）：不再生成派生类构造函数声明，而是让基类构造函数在查找时可见，在重载决议中视为派生类的构造函数；修正了默认实参、可变参数构造函数、模板构造函数等问题。using 声明中的包展开与多个声明符（[[P0195R2]]）。
-    - C++20：using 声明可以命名枚举量（包括在类中命名非基类的枚举量）、`using enum`（[[P1099R5]]）。
-    - C++26：名字无关声明 `_`（[[P2169R4]]）与 using 声明的交互（¶10 第一部分的例外）。
+!!! history
+    - C++98 已有 using 声明，包括在类里引入基类成员和修改访问级别。
+    - C++11 加入继承构造函数。最初的语义是在派生类里隐式声明一组对应的构造函数，在默认实参、可变参数构造函数等方面有不少问题。
+    - C++17 重新定义了继承构造函数（[[P0136R1]]）：不再生成派生类的构造函数声明，而是让基类的构造函数在查找和重载决议中当作派生类的构造函数。同年加入了多个声明符和包展开（[[P0195R2]]）。
+    - C++20 允许 using 声明命名不属于基类的枚举量，并加入 `using enum`（[[P1099R5]]）。
+    - C++26 加入名字无关声明 `_`（[[P2169R4]]），第 10 段的例外即源于此。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "以为 using 声明会随重载一起更新"
-    不会。`using A::f;` 之后再往 `A` 中添加的 `f` 重载对它不可见（¶9）。如果头文件中先 `using`，再包含另一个扩展 `A::f` 的头文件，就会出现有时能调用、有时不能调用的情况。
+!!! pitfall "using 声明会随着重载的增加自动更新"
+    不会。`using A::f;` 之后加入 `A` 的 `f` 对它不可见（第 9 段）。如果头文件里先写了 using 声明，再包含另一个扩展 `A::f` 的头文件，能不能调用到新重载就取决于包含顺序。
 
-!!! pitfall "想用 using 声明公开基类的某一个重载"
-    做不到。它总是引入整个重载集，并且集合中每一个都必须可访问（¶14）。只想公开一个，就写转发函数。
+!!! pitfall "可以只公开基类的某一个重载"
+    做不到。using 声明总是引入整个重载集，而且其中每个都必须可访问（第 14 段）。只想公开一个，就写一个转发函数。
 
-!!! pitfall "继承构造函数不会初始化派生类自己的成员"
-    除来源基类外的子对象都是默认初始化的（[[class.inhctor.init]]）。派生类新增的 `int` 成员如果没有默认成员初始化器，值就是不确定的（C++26 中是错误值）。
-
-!!! pitfall "`using Base::operator=;` 不会替代派生类的复制赋值"
-    派生类仍有隐式声明的复制/移动赋值，它们隐藏基类同签名的版本（¶4 注 3、¶11）。
+!!! pitfall "继承构造函数会初始化派生类自己的成员"
+    除来源基类外，其他子对象都按默认方式初始化（[[class.inhctor.init]]）。派生类新增的 `int` 成员如果没有默认成员初始化器，读到的是不确定值，C++26 起是错误值。
 
 ## 思考题
 
 !!! question "思考题 1"
-    下面哪些行是良构的？
+    下面哪些行是良构的？`f(1.5)` 调用的是哪个函数？
 
     ```cpp
     namespace N { void f(int); }
@@ -535,34 +507,17 @@ int main() { Derived<Base> d; return d.get() - 1 + d.v; }
 <details markdown="1">
 <summary>答案</summary>
 
-- `f(1.5)`：良构，但调用的是 `N::f(int)`（`1.5` 转换为 `int`）：using 声明只命名了声明时可见的 `f(int)`（¶9）。开 `-Wconversion` 可能会给警告。
-- `using S::s;`：非良构。命名类成员（枚举量除外）的 using 声明必须是成员声明（¶7），静态成员也不例外。
+- `f(1.5)` 良构，但调用的是 `N::f(int)`，`1.5` 被转换成 `int`。using 声明只命名了它出现时已有的 `f(int)`（第 9 段）。
+- `using S::s;` 非良构。命名类成员（枚举量除外）的 using 声明必须是成员声明（第 7 段），静态成员也不例外。
 </details>
 
 !!! question "思考题 2"
-    为什么 ¶14 规定命名构造函数时不做访问检查，而 ¶16 又说继承构造函数的可访问性与基类中一致？两条规则合起来想达到什么效果？
+    `struct B { void f(); }; struct D : B { using B::f; void f(); };` 中，D 的 `f` 与 `B::f` 是什么关系？把 D 里的声明改成 `void f() const;` 呢？
 
 <details markdown="1">
 <summary>答案</summary>
 
-`using Base::Base;` 命名的是基类的全部构造函数，其中通常有 private 的（例如私有的辅助构造函数）。如果像普通成员那样要求每个都可访问，几乎所有类的构造函数都无法继承。因此 ¶14 对构造函数放弃了整个集合可访问的检查；¶16 则保证可访问性既不提升也不降低：基类中 private 的构造函数在派生类中也不能从外部调用，protected 的仍然只能在能构造基类的地方使用，using 声明的位置（在 public 还是 private 部分）被忽略。合起来的效果是，继承构造函数原样保留基类中的可访问性。
+第一种：`B::f` 当作 D 的成员时与 `D::f()` 对应，按第 11 段它不在 using 声明命名的集合里，也就是被 `D::f` 隐藏了。两者既不冲突，也不是同一个函数的重复声明。
+
+第二种：`f() const` 与 `B::f()` 的 cv 限定不同，不对应，两者都在重载集里。对非 const 的 `D` 对象调用 `f()` 选中 `B::f`，因为它的对象参数视为 `D&`（第 12 段），比 `const D&` 更好；对 const 对象调用则选中 `D::f() const`。
 </details>
-
-!!! question "思考题 3"
-    `struct B { void f(); }; struct D : B { using B::f; void f(); };` 中 D 的 `f` 是重声明、冲突还是隐藏？如果把 D 中的声明改成 `void f() const;` 呢？
-
-<details markdown="1">
-<summary>答案</summary>
-
-第一种：`B::f` 视为 D 的成员时与 `D::f()` 对应（同名、同参数、同 cv），按 ¶11，它被排除在 using 声明命名的集合之外，即被 `D::f` 隐藏，既不冲突，也不是重声明。第二种：`void f() const` 与 `B::f()` 的 cv 限定不同，不对应，两者并存于重载集中；对非 const 的 `D` 对象调用 `f()` 选中 `B::f`（对象参数视为 `D&`，¶12，比 `const D&` 更好），对 const 对象调用选中 `D::f() const`。
-</details>
-
-## 小结
-
-!!! summary "要点"
-    - using 声明在声明点对限定名查找的结果做一次快照，绑定到一个名字；之后添加的重载不会进入（默认实参和特化会）。
-    - 在类中只能命名基类成员或枚举量；命名构造函数时必须是直接基类，表示继承构造函数。
-    - 派生类自己声明的对应函数会隐藏/覆盖 using 声明带进来的基类函数（¶11），不冲突。
-    - 重载决议中，using 声明引入的成员函数的隐式对象参数视为派生类引用（¶12）。
-    - 访问控制方面，普通成员要求整个集合可访问，using 声明本身的访问级别决定新名字的访问级别；构造函数不做检查，可访问性与基类一致。
-    - 不能命名 *template-id*、命名空间、析构函数；类成员（除枚举量）不能在类外 using。
