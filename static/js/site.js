@@ -110,14 +110,7 @@
     });
     sidebar.appendChild(tabs);
     if (tab === "lang" || tab === "lib" || tab === "annex") {
-      var hide = store("hideEmpty") === "1";
-      var f = el("label", { class: "sb-filter" }, '<input type="checkbox"' + (hide ? " checked" : "") + "> 只显示已有笔记的条款");
-      f.querySelector("input").addEventListener("change", function (e) {
-        store("hideEmpty", e.target.checked ? "1" : "0");
-        sidebar.classList.toggle("sb-hide-empty", e.target.checked);
-      });
-      sidebar.classList.toggle("sb-hide-empty", hide);
-      sidebar.appendChild(f);
+      sidebar.classList.remove("sb-hide-empty");
       sidebar.appendChild(el("div", { class: "sb-legend" },
         '<span><i class="dot"></i>独立成页</span><span><i class="dot hollow"></i>在上级条款页中讲解</span>'));
       var nodes = NAV.clauses.filter(function (c) { return NAV.groups[c.i] === tab; });
