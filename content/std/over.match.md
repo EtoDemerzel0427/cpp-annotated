@@ -1,174 +1,135 @@
 ---
 title: 重载决议
-summary: 重载决议的总纲：在七种语境下构造候选函数集，筛出可行函数，再按隐式转换序列选出唯一的最佳可行函数；访问控制与 deleted 都在选定之后才检查。
-status: draft
+summary: 重载决议的总纲：七种语境各自列出候选函数，再统一地筛出可行函数、选出唯一的最佳函数；访问控制和 = delete 在选定之后才检查。
+status: done
 covers: over.match.general
 related: over.match.funcs, over.match.viable, over.match.best, over.best.ics, over.ics.rank, topics/overload-resolution-walkthrough
 tags: 重载决议
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-[[over.match]] 是第 12 章的核心。它的总则 [[over.match.general]] 只有四段，却规定了整个算法的框架：在哪些场合要做重载决议、按什么步骤做、结果意味着什么。之后的子条款分别填充每一步的细节：
+!!! tldr
+    - 重载决议分三步：列出候选函数，筛出可行函数，按隐式转换序列选出唯一的最佳可行函数。
+    - 七种语境（普通调用、函数对象调用、运算符、构造函数、两类转换函数、引用绑定）列候选的方式各不相同，后两步完全一样。
+    - 没有可行函数，或者没有一个比其他所有都好（歧义），调用就非良构。
+    - 访问控制和 `= delete` 不参与选择：选中的函数不可访问或已删除时，程序非良构，不会改选次优的函数。
+    - 可用候选指决议成功、且选中的是内建运算符或未删除、可访问的函数，这个术语主要服务于预置比较。
 
-| 步骤 | 子条款 | 本站页面 |
-|---|---|---|
-| 构造候选函数与实参列表 | [over.match.funcs] | [[over.match.funcs]]、[[over.match.oper]]、[[over.match.class.deduct]] |
-| 筛选可行函数 | [over.match.viable] | [[over.match.viable]] |
-| 选出最佳可行函数 | [over.match.best] | [[over.match.best]] |
-| 隐式转换序列及其排序 | [over.best.ics]、[over.ics.rank] | [[over.best.ics]]、[[over.ics.rank]] |
-
-读这一节前最好先熟悉名字查找（[[basic.lookup]]）：重载决议只在查找交给它的集合上工作。
-
-## 重载决议是什么（¶1）
-
-¶1 重载决议是一种机制：给定一组将作为调用实参的表达式，以及一组按调用语境可以调用的**候选函数**（candidate functions），从中选出最佳的那个。选择依据有：
-
-- 实参的个数；
-- 实参与候选函数形参类型列表的匹配程度；
-- （对非静态成员函数）对象与对象形参的匹配程度；
-- 候选函数的某些其他属性，比如是不是模板、约束强弱、是不是改写候选，见 [[over.match.best#2]] 的决胜规则。
-
-注 1 是整节最值得记住的一句提醒：
-
-!!! std
-    "The function selected by overload resolution is not guaranteed to be appropriate for the context."
-
-    重载决议选出的函数不保证适合该语境。
-
-换句话说，重载决议是**纯粹基于类型**的比较。选出最佳函数之后，才检查它能否使用，包括访问控制、是否被删除、默认实参是否唯一、窄化等。如果它不合格，不会改选次优的函数，而是整个程序非良构。
-
-## 七种语境（¶2）
-
-¶2 标准列出了重载决议介入的七种语境。每种语境以自己的方式确定候选函数集与实参列表：
-
-| # | 语境 | 典型代码 | 候选集定义 |
-|---|---|---|---|
-| 2.1 | 函数调用语法中指名的函数 | `f(x)`、`obj.m(x)` | [[over.call.func]] |
-| 2.2 | 对类对象使用函数调用语法：`operator()`，或转换到函数指针/函数引用的转换函数 | `fn(x)`，其中 `fn` 是对象 | [[over.call.object]] |
-| 2.3 | 表达式中的运算符 | `a + b`、`a == b`、`!a` | [[over.match.oper]] |
-| 2.4 | 类对象的默认初始化或直接初始化时调用构造函数 | `T t(1, 2);`、`T t;` | [[over.match.ctor]] |
-| 2.5 | 类对象拷贝初始化中的用户定义转换 | `T t = u;`（`u` 不是 `T` 或其派生类） | [[over.match.copy]] |
-| 2.6 | 用类类型表达式初始化非类类型对象时的转换函数 | `int i = obj;` | [[over.match.conv]] |
-| 2.7 | 引用直接绑定到转换函数结果 | `int& r = obj;` | [[over.match.ref]] |
-
-此外还有两个衍生的语境使用同一套机制：列表初始化（[[over.match.list]]，分两阶段挑选构造函数）和类模板实参推导（[[over.match.class.deduct]]，在推导指引上做一次假想的构造函数重载决议）。取函数地址（[[over.over]]）则不是重载决议，它按目标类型做匹配，规则不同。
-
-一旦候选集和实参列表确定，**选择过程在所有语境下都相同**：
-
-- ¶2.8 首先，从候选函数中挑出**可行函数**（viable functions）：实参个数合适、约束满足、每个实参都存在到对应形参的隐式转换序列（[[over.match.viable]]）。
-- ¶2.9 然后，根据每个实参到对应形参所需的**隐式转换序列**（implicit conversion sequence，ICS），选出**最佳可行函数**（[[over.match.best]]）。
-
-候选、可行、最佳这三步是整章的主线。任何一个具体问题都能拆成这三个子问题。
+## 三步：候选、可行、最佳（¶1–¶2）
 
 ```cpp run ok
 #include <cstdio>
-void f(int)    { std::puts("f(int)"); }
-void f(double) { std::puts("f(double)"); }
-void f(int, int) { std::puts("f(int,int)"); }
+void f(int)         { std::puts("f(int)"); }
+void f(double)      { std::puts("f(double)"); }
+void f(int, int)    { std::puts("f(int,int)"); }
 void f(const char*) { std::puts("f(const char*)"); }
 
 int main() {
-  f('a');
-  // 候选：4 个 f（名字查找找到的全部）
-  // 可行：f(int)       —— char→int 是整型提升（Promotion）
-  //       f(double)    —— char→double 是浮点-整型转换（Conversion）
-  //       f(int,int)   —— 个数不符，不可行
-  //       f(const char*) —— char 无法隐式转换为指针，不可行
-  // 最佳：f(int)，因为 Promotion 优于 Conversion
+  f('a');   // 打印 f(int)
 }
 ```
 
-## 成功、失败与访问检查（¶3）
+调用 `f('a')` 时，名字查找找到四个 `f`，它们都是**候选函数**（[[g:candidate-function|candidate functions]]）。`f(int, int)` 形参个数不对，`f(const char*)` 无法从 `char` 转换过去，被排除；剩下的 `f(int)` 和 `f(double)` 是**可行函数**（[[g:viable-function|viable functions]]）。`char → int` 是整型提升，`char → double` 是浮点-整型转换，提升更好，所以 `f(int)` 是**最佳可行函数**。
 
-¶3 若存在唯一的最佳可行函数，重载决议成功并以它为结果；否则失败，调用非良构。失败有两种情形：
+¶1 重载决议从一组候选函数里选出最适合给定实参列表的那一个。依据是实参个数、实参与形参类型的匹配程度、（对非静态成员函数）对象与对象形参的匹配程度，以及候选函数的其他一些性质，比如是不是模板、约束的强弱，见 [[over.match.best#2]] 的决胜规则。
 
-- 无可行函数（no viable function）：候选集为空，或者没有一个候选可行；
-- 歧义（ambiguous）：有可行函数，但没有一个比其余所有都好。
+¶2 下面七种语境要做重载决议，每种语境用自己的方式确定候选函数和实参列表：
 
-成功之后，如果最佳可行函数在使用它的语境中不可访问，程序非良构。
+| | 语境 | 例子 | 候选从哪里来 |
+|---|---|---|---|
+| ¶2.1 | 函数调用语法中指名的函数 | `f(x)`、`obj.m(x)` | [[over.call.func]] |
+| ¶2.2 | 用调用语法调用类对象：`operator()`，或转换成函数指针、函数引用的转换函数 | `fn(x)`，`fn` 是对象 | [[over.call.object]] |
+| ¶2.3 | 表达式中的运算符 | `a + b`、`!a` | [[over.match.oper]] |
+| ¶2.4 | 默认初始化或直接初始化类对象时的构造函数 | `T t(1, 2);` | [[over.match.ctor]] |
+| ¶2.5 | 复制初始化类对象时的用户定义转换 | `T t = u;`（`u` 不是 `T` 类型） | [[over.match.copy]] |
+| ¶2.6 | 用类类型表达式初始化非类类型对象时的转换函数 | `int i = obj;` | [[over.match.conv]] |
+| ¶2.7 | 引用直接绑定到转换函数的结果 | `int& r = obj;` | [[over.match.ref]] |
 
-```cpp
+列表初始化（[[over.match.list]]）和类模板实参推导（[[over.match.class.deduct]]）也复用这套机制。取重载函数的地址（[[over.over]]）不是重载决议，它按目标类型匹配，规则不同。
+
+候选函数和实参列表确定之后，选择过程在所有语境中都相同：
+
+- ¶2.8 先筛出**可行函数**：实参个数合适、约束满足、每个实参都有到对应形参的隐式转换序列（[[over.match.viable]]）；
+- ¶2.9 再根据每个实参所需的**隐式转换序列**（[[g:implicit-conversion-sequence|implicit conversion sequence]]，把实参转换成形参类型所经过的步骤）选出**最佳可行函数**（[[over.match.best]]）。
+
+## 选中之后：访问控制与删除（¶3）
+
+¶3 存在唯一的最佳可行函数时，重载决议成功，结果就是它。否则重载决议失败，调用非良构。失败有两种：没有任何可行函数，或者有可行函数但没有一个比其他所有都好，后者就是**歧义**。
+
+决议成功后，如果选中的函数在使用处不可访问，程序非良构。
+
+```cpp error
 class C {
   void f(int);          // private
 public:
   void f(double);
 };
 void use(C& c) {
-  c.f(1.0);             // OK：选中 public 的 f(double)
-  c.f(1);               // error: 选中 f(int)（精确匹配），但它是 private 的
+  c.f(1.0);             // OK: 选中 f(double)
+  c.f(1);               // error: 选中 f(int)，但它是 private 的
 }
 ```
 
-`c.f(1)` 失败的原因不是没有合适的函数（`f(double)` 完全可以接受 `1`），而是重载决议先不考虑访问性选出了 `f(int)`，然后访问检查失败。这是 C++ 有意的设计：
+`f(double)` 完全能接受 `1`，但重载决议不考虑访问权限，先选中精确匹配的 `f(int)`，再做访问检查，失败。¶1 的注 1 说的就是这一点：重载决议选出的函数不保证在当前语境下能用。
 
-!!! note "为什么访问控制不参与重载决议？"
-    如果 `private` 成员会从候选集中消失，那么同一个调用在类内和类外会选中不同的函数，类的作者把一个成员从 `public` 改成 `private`，就可能静默改变外部代码的行为。C++ 让访问控制只能拒绝选择、不能改变选择：访问性的改变只会导致编译错误，不会让行为悄悄变化。这个原则（access control doesn't affect overload resolution）自 C++98 起一直不变。
+这样设计是为了让访问控制只能拒绝选择，不能改变选择。如果 `private` 成员从候选里消失，同一个调用在类内和类外就会选中不同的函数；类的作者把一个成员改成 `private`，可能悄悄改变外部代码调用的函数。现在这种改动最多导致编译错误。
 
-被删除的函数（[[dcl.fct.def.delete]]）同理：它们是候选，可以被选中，选中之后对它的引用才非良构。正因为如此，`= delete` 才能用来禁止某些转换：
+被删除的函数（[[dcl.fct.def.delete]]）同理：它们照常参与重载决议，被选中后才报错。`= delete` 能用来禁止某些转换，靠的就是这一点：
 
-```cpp
+```cpp error
 void take(double);
-void take(int) = delete;   // 不让 int 静默转成 double
+void take(int) = delete;   // 不让 int 悄悄转成 double
 void use() {
   take(1.0);               // OK
   take(1);                 // error: 选中被删除的 take(int)
-  take(1.0f);              // OK：float→double 是提升，float→int 是转换
+  take(1.0f);              // OK: float → double 是提升，优于 float → int
 }
 ```
 
-如果被删除的函数不参与重载决议，`take(1)` 会悄悄调用 `take(double)`，`= delete` 就失去了意义。
+如果被删除的函数不参与决议，`take(1)` 就会调用 `take(double)`，`= delete` 也就没有意义了。
 
-!!! lawyer "例外：被定义为删除的默认移动操作"
-    [[over.match.funcs#9]] 规定：隐式定义为删除的预置移动构造/移动赋值不是候选。这是有意的特殊处理，否则一个不可移动的成员会让整个类在右值上选中已删除的移动构造而报错，而不是回退到拷贝构造。见 [[over.match.funcs]]。
+!!! lawyer "例外：被定义为删除的预置移动操作"
+    [[over.match.funcs#9]] 规定，预置的移动构造函数或移动赋值运算符被定义为删除时，在任何语境中都不是候选。否则，一个含不可移动成员的类在用右值初始化时会选中已删除的移动构造函数并报错，而不是退回到复制构造函数。
 
 ## 可用候选（¶4）
 
-¶4 定义了术语**可用候选**（[[g:usable-candidate|usable candidate]]）：重载决议成功，且选出的候选要么不是函数（即内建运算符候选，[[over.built]]），要么是未被删除且可访问的函数。
+¶4 如果重载决议成功，并且选中的候选要么不是函数（即内建运算符候选，[[over.built]]），要么是未被删除且在决议处可访问的函数，就说结果是一个**可用候选**（[[g:usable-candidate|usable candidate]]）。
 
-这个术语是为 C++20 的预置比较运算符准备的：[[class.compare.default]] 根据 `a @ b` 是否 *usable*，决定一个 `= default` 的 `operator==`/`operator<=>` 是正常定义还是定义为删除；[[class.compare.secondary]] 用它来决定 `operator<` 等次级比较运算符的预置定义是否可用。它把决议成功与选中的函数确实能用合并成一个判定，避免在多处重复不是 deleted、可以访问之类的措辞。
+这个术语供 C++20 的预置比较使用。预置的 `==` 要逐个成员做 `==`，如果某个成员的 `==` 不是可用候选，外层的 `= default` 不报错，而是被定义为删除（[[class.compare]]）：
 
 ```cpp run ok
-#include <compare>
 struct NoEq {
   bool operator==(const NoEq&) const = delete;
 };
 struct S {
   NoEq m;
-  bool operator==(const S&) const = default;   // m == m 不是 usable → 本函数被定义为删除
-                                               // （Clang 对此给出 -Wdefaulted-function-deleted 警告）
+  bool operator==(const S&) const = default;   // 被定义为删除
 };
-template<class T> concept EqComparable = requires(const T& a, const T& b) { a == b; };
-static_assert(!EqComparable<S>);   // S 的 == 存在但被删除：表达式无效
+template<class T>
+concept EqComparable = requires(const T& a, const T& b) { a == b; };
+static_assert(!EqComparable<S>);
 int main() {}
 ```
 
-## 实现视角
+Clang 对 `S::operator==` 给出 `-Wdefaulted-function-deleted` 警告，说明它被隐式定义为删除。
 
-!!! impl
-    - 主流编译器都按候选、可行、最佳三步实现，但为了诊断质量，会保留所有不可行候选的失败原因：Clang 的 "candidate function not viable: no known conversion from … to …"、GCC 的 "candidate: … / no known conversion for argument 1 from … to …"，都是在逐个说明候选集中每个成员为何被排除。读懂这类诊断，本质上就是读懂 [[over.match.viable]]。
-    - [[over.match.best]] 的脚注描述了一个线性算法（锦标赛加二次验证），Clang 的 `OverloadCandidateSet::BestViableFunction` 正是这样实现的：先遍历一次，找出不比任何对手差的候选，再遍历一次，验证它确实比所有其他候选都好。
-
-## 历史与演进
+!!! impl "编译器的实现"
+    Clang 和 GCC 都按候选、可行、最佳三步实现，并记录每个不可行候选被排除的原因。诊断里的 "candidate function not viable: no known conversion from ... to ..." 就是在逐个解释候选为什么不可行。选最佳函数时，Clang 先遍历一遍找出一个不比任何对手差的候选，再遍历一遍确认它确实比所有其他候选都好，这正是 [[over.match.best]] 脚注描述的线性算法。
 
 !!! history
-    - C++98：七种语境、三步算法、访问检查在决议之后，这些都已经确立，整体框架此后基本不变。
-    - C++11：加入列表初始化（[[over.match.list]]）、引用限定符、被删除函数参与决议、隐式删除的移动操作不是候选。
-    - C++17：加入类模板实参推导（[[over.match.class.deduct]]）。
-    - C++20：加入约束（不满足则不可行，更受约束则胜出）、运算符改写候选（`==`/`!=`/`<=>`），并为预置比较引入 ¶4 的可用候选。
-    - C++23：显式对象形参；[[P1787R6]] 重写了查找与对应声明，¶2.2 的措辞也随之调整。
-    - C++26：{{c++26}} 反射的 *splice-expression* 可以指定候选集（见 [[over.call.func]]）。
+    三步算法、七种语境、访问检查在决议之后，这些在 C++98 就已确立。之后各版本只是往里添加内容：C++11 的列表初始化、引用限定符、被删除的函数；C++17 的类模板实参推导；C++20 的约束、`==`/`<=>` 的改写候选和 ¶4 的可用候选；C++23 的显式对象形参。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "以为 private/deleted 会让编译器改选次优函数"
-    不会。最佳函数不合格，程序就非良构。若要让某个重载对外不可见，需要让它在名字查找阶段就看不到（例如放在别的作用域），或者用约束让它在可行性阶段被排除。
+!!! pitfall "private 或 deleted 会让编译器改选次优的函数"
+    不会。最佳函数不合格，程序就非良构。要让某个重载在外部不参与竞争，得让名字查找找不到它（例如放进别的作用域），或者用约束让它在可行性阶段就被排除。
 
-!!! pitfall "把歧义理解成有两个可行函数"
-    有多少个可行函数都没关系，只要有一个比其余所有都好。歧义指的是没有唯一的最佳者，通常是 A 在某个实参上更好、B 在另一个实参上更好（见 [[over.match.best#3]] 的 `Fcn` 例子）。
+!!! pitfall "有两个可行函数就是歧义"
+    可行函数有多少个都没关系，只要有一个比其余的都好。歧义指没有唯一的最佳者，典型情况是 A 在第一个实参上更好、B 在第二个实参上更好（见 [[over.match.best#3]] 的例子）。
 
 ## 思考题
 
-!!! question "1. 下面的调用选中哪个函数？程序良构吗？"
+!!! question "1. 下面两处调用各选中哪个函数？程序良构吗？"
     ```cpp nocheck
     struct S {
       void g(long);
@@ -183,22 +144,13 @@ int main() {}
 <details markdown="1">
 <summary>答案</summary>
 
-两处都选中 `S::g(int)`（精确匹配胜过 int→long 的整型转换）。在 `S::call` 内部它可访问，良构；在 `h` 中不可访问，非良构。这正好演示了访问性不影响选择：如果访问性参与决议，`h` 里会静默调用 `g(long)`。
+两处都选中 `S::g(int)`：`int → int` 精确匹配，胜过 `int → long` 的整型转换。在 `S::call` 里它可访问，良构；在 `h` 里不可访问，非良构（¶3）。如果访问权限参与决议，`h` 里会悄悄调用 `g(long)`。
 </details>
 
-!!! question "2. 为什么 [[over.match.general]] 要专门定义 usable candidate，而不直接说重载决议成功？"
+!!! question "2. 为什么要专门定义可用候选，而不直接说重载决议成功？"
 
 <details markdown="1">
 <summary>答案</summary>
 
-因为在预置比较运算符的语境下，决议成功但选中了 deleted 或不可访问的函数，必须算作不可用，从而让外层的 `= default` 函数定义为删除，而不是让整个程序非良构。普通调用中这两种情况都是错误，没必要区分；但 [[class.compare.default]] 需要一个不直接报错的判定，所以引入了这个术语。另外，内建运算符候选不是函数，谈不上 deleted 或访问性，定义中也专门把它排除在外。
+普通调用中，选中已删除或不可访问的函数直接就是错误，不需要单独的术语。但预置比较需要一个不直接报错的判定：成员的比较选中了已删除的函数时，外层的 `= default` 应当被定义为删除，而不是让整个程序非良构。内建运算符候选不是函数，谈不上删除和访问权限，所以定义里单独把它列为可用。
 </details>
-
-## 小结
-
-!!! summary
-    - 重载决议在名字查找给出的候选集上，按候选、可行、最佳三步选出唯一的函数。
-    - 七种语境各自定义候选集和实参列表；选择过程统一。
-    - 失败分为无可行函数和歧义两种，都非良构。
-    - 选定之后才检查访问性、是否删除；它们只能让程序非良构，不会改变选择。
-    - 可用候选指决议成功，且结果是内建运算符或未删除、可访问的函数；这个术语服务于预置比较。
