@@ -1,188 +1,150 @@
 ---
 title: lambda 表达式
-summary: lambda 表达式如何生成闭包类型与闭包对象：调用运算符的属性（const/mutable/static/constexpr/consteval、泛型、显式对象参数）、向函数指针的转换、特殊成员函数，以及捕获的全部规则：隐式与显式、按值与按引用、init-capture、*this、odr-usable 与悬垂。
-status: draft
+summary: 一个 lambda 表达式定义一个无名的闭包类并创建它的对象：调用运算符的性质（const、mutable、static、constexpr、泛型、显式对象参数），捕获什么、怎样捕获、捕获后名字指向哪里，以及向函数指针的转换和特殊成员函数。
+status: done
 covers: expr.prim.lambda.general, expr.prim.lambda.closure, expr.prim.lambda.capture
 papers: P0018R3, P0170R1, P0588R1, P0428R2, P0624R2, P0315R4, P0780R2, P0806R2, P1091R3, P1381R1, P1102R2, P1169R4, P0847R7, P2173R1, P2036R3
 related: expr.prim.id, basic.def.odr, basic.scope.lambda, dcl.fct, dcl.spec.auto, class.copy.ctor, depr.capture.this, temp.variadic
 tags: lambda, 闭包, 捕获, odr-use, 泛型编程
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-lambda 表达式是 C++ 中就地定义函数对象的语法。标准描述它的方式很值得学习：它不引入新的运行时概念，而是规定一个 lambda 表达式等价于（a）定义一个独一无二的类，即[[g:closure-type|**闭包类型**]]（closure type），并（b）创建该类的一个 prvalue 对象，即[[g:closure-object|**闭包对象**]]（closure object）。假想编译器替你写出了这个类，lambda 的几乎所有性质都可以由此推出：
+!!! tldr
+    - 每个 lambda 表达式都定义一个独一无二的无名类（闭包类型），并创建这个类的一个对象（闭包对象）；按值捕获的变量成为它的数据成员。
+    - 调用运算符默认是 `const` 成员函数；`mutable` 去掉 const，`static` 让它成为静态成员函数，满足条件时它自动是 `constexpr`。
+    - 写了 `[=]` 或 `[&]` 时，lambda 体里潜在求值地引用了哪些外层局部变量，就隐式捕获哪些，由语法决定，不看是否真的 odr-use；`[=]` 隐式捕获的 `this` 是指针，不是对象的副本，已弃用。
+    - 读一个常量的值不算 odr-use，所以不捕获也能用；取地址、绑定引用就必须捕获。
+    - 只有没有捕获、没有显式对象参数的 lambda 能转换为函数指针（泛型 lambda 得到一个转换函数模板）；C++20 起无捕获的闭包类型还可以默认构造和赋值。
+
+## lambda 是一个类加一个对象
 
 ```cpp
 void demo() {
   int n = 10;
   auto add = [n](int x) { return x + n; };
-
-  // 大致等价于：
-  class __Closure {
-    int __n;                                   // 按值捕获 → 一个无名非静态数据成员
-  public:
-    __Closure(int n) : __n(n) {}               // （仅为示意：闭包实际上没有这样的构造函数）
-    auto operator()(int x) const { return x + __n; }   // 默认 const
-  };
-  auto add2 = __Closure{n};
 }
 ```
 
-本页对应标准的三个子条款：
-
-- [expr.prim.lambda.general]：文法、lambda 说明符（`mutable`/`constexpr`/`consteval`/`static`）、返回类型推导、泛型 lambda。
-- [expr.prim.lambda.closure]：闭包类型有哪些成员和性质、何时可转换为函数指针、特殊成员函数。
-- [expr.prim.lambda.capture]：捕获，包括哪些实体被捕获、如何捕获、捕获之后名字指什么、何时初始化。
-
-需要的前置知识有：odr-use 与 odr-usable（[[basic.def.odr#10]]），这是理解捕获的关键；lambda 作用域（[[basic.scope.lambda]]）；显式对象参数（[[dcl.fct]]）；占位符类型推导（[[dcl.spec.auto]]）。
-
-## 文法总览（[expr.prim.lambda.general]）
-
-一个 lambda 表达式的完整形态（C++26）：
-
-```text
-[ 捕获 ] <模板形参>  requires-clause  属性  ( 形参 )  说明符  noexcept  属性  -> 返回类型  requires-clause  契约  { 函数体 }
-  ①        ②           ③            ④      ⑤       ⑥       ⑦       ⑧       ⑨           ⑩            ⑪      ⑫
-```
-
-除了 ① 和 ⑫，其余全部可选。有几个细节值得注意：
-
-- ② 模板形参列表 {{c++20}}：`[]<class T>(T a) {}`。
-- ④ 位于 lambda 声明符之前的属性 {{c++23}} 作用于调用运算符本身（如 `[] [[nodiscard]] () { ... }`）；⑧ 位于声明符中的属性作用于调用运算符的类型（¶7）。
-- ⑤ 形参列表可以省略。C++23 起，即使有说明符、`noexcept`、尾置返回类型，也可以省略 `()`：`[] mutable { }`、`[] noexcept { }` 都合法（C++20 中必须写 `[]() mutable { }`）。
-- ⑪ 契约说明符 {{c++26}}：`[](int x) pre(x > 0) { ... }`。
-
-### 闭包对象（¶1–2）
-
-¶1 lambda 表达式提供了一种简洁的方式来创建简单的函数对象。¶2 lambda 表达式是一个 prvalue，其结果对象叫做闭包对象。因为它是 prvalue，在 `auto f = [] {};` 中，由于强制复制消除（[[dcl.init]]），`f` 就是那个闭包对象本身，不涉及拷贝或移动。
-
-### 属性的歧义（¶3）
-
-¶3 一个 *requires-clause* 可能以 *attribute-specifier-seq* 结尾（例如 `requires T::operator int [[attr]]`，其中 `[[attr]]` 可以看成转换函数 id 的一部分），这与 lambda 声明符之前的属性冲突。标准规定一律当作 lambda 的属性。注释指出，这类歧义情形本来就没有合法的语义（约束表达式的类型不会是 `bool`），所以这个选择不会破坏任何有意义的程序。
-
-### lambda 说明符的组合规则（¶4）
-
-¶4 *lambda-specifier-seq* 中：
-
-- 每个说明符至多出现一次；`constexpr` 与 `consteval` 不能同时出现；
-- 如果有显式对象参数，就不能有 `mutable` 或 `static`（`mutable` 表示调用运算符不是 const，这一点改由 `self` 的类型表达；`static` 则与存在对象参数相矛盾）；
-- `mutable` 与 `static` 不能同时出现；
-- 有 `static` 时不能有任何捕获（静态成员函数没有对象，无从访问捕获成员）。
-
-```cpp error
-auto e1 = [](int) constexpr consteval {};   // error: constexpr 与 consteval 不能共存
-auto e2 = [](this auto) mutable {};         // error: 显式对象参数 + mutable
-auto e3 = [](this auto) static {};          // error: 显式对象参数 + static
-auto e4 = [](int) mutable static {};        // error: mutable + static
-void f() {
-  int x = 0;
-  auto e5 = [x](int) static { return x; };  // error: static lambda 不能有捕获
-}
-```
-
-### 返回类型（¶5）
-
-¶5 lambda 的形参子句就是其声明符中的形参子句（没有声明符时为空）。**没有尾置返回类型时，视为 `-> auto`**，于是返回类型按 [[dcl.spec.auto]] 从 `return` 语句推导。这意味着：
-
-- 多个 `return` 推导出的类型必须一致；
-- `return {1, 2};` 无法推导（花括号初始化列表不能推导 `auto` 返回类型）；
-- 推导结果永远不是引用（`auto` 会退化）；要返回引用，需要写 `-> auto&`、`-> decltype(auto)` 等。
+标准没有为 lambda 引入新的运行时概念。它规定 `[n](int x) { return x + n; }` 做两件事：定义一个无名的类，并创建这个类的一个对象。编译器替你写出的类大致是这样（仅为示意，真正的闭包类型没有这样的构造函数，成员也没有名字）：
 
 ```cpp
-void f() {
-  auto x1 = [](int i) { return i; };       // OK：返回 int
-  auto x2 = [] { return { 1, 2 }; };       // error: 不能从花括号初始化列表推导返回类型
-  int j;
-  auto x3 = [&]() -> auto&& { return j; }; // OK：返回 int&
-}
+class __Closure {
+  int __n;                                            // 按值捕获的 n
+public:
+  __Closure(int n) : __n(n) {}
+  auto operator()(int x) const { return x + __n; }    // 默认是 const
+};
+auto add = __Closure{n};
 ```
 
-!!! history "C++11 的返回类型推导"
-    在 C++11 中，没有尾置返回类型的 lambda 只有在函数体仅由一条 `return 表达式;` 构成时才推导返回类型，否则返回 `void`。C++14 统一为普通函数的 `auto` 返回类型推导规则。
+lambda 的大多数性质都可以从这个模型推出来。
 
-### 泛型 lambda（¶6）
+lambda 表达式是一个纯右值（[[expr.prim.lambda.general#2]]），它的结果对象叫做**闭包对象**（[[g:closure-object|closure object]]）。因为是纯右值，`auto f = [] {};` 里的 `f` 就是那个闭包对象本身，没有拷贝或移动（[[dcl.init]]）。
 
-¶6 当且仅当一个 lambda 有泛型形参类型占位符（`auto` 形参，[[dcl.spec.auto]]）或者有模板形参列表时，它是[[g:generic-lambda|**泛型 lambda**]]（generic lambda）。注意 `[](this auto self, int i)` 也是泛型 lambda，因为显式对象参数 `this auto` 本身就是一个 `auto` 占位符。
-
-```cpp ok
-auto x = [](int i, auto a) { return i; };           // 泛型：auto 形参
-auto y = [](this auto self, int i) { return i; };   // 泛型：this auto
-auto z = []<class T>(int i) { return i; };          // 泛型：模板形参列表（T 无法推导，调用需写 z.operator()<int>(0)）
-```
-
-## 闭包类型（[expr.prim.lambda.closure]）
-
-### 独一无二的无名类（¶1–3）
-
-¶1 lambda 表达式的类型（也就是闭包对象的类型）是一个独一无二的、无名的、非联合体的类类型，叫做闭包类型。独一无二是字面意义上的：**每个 lambda 表达式都有自己的类型**，即使两段代码逐字相同；同一个 lambda 表达式在模板的不同实例化中也会产生不同的类型。
-
-¶2 闭包类型在其复合语句（函数体）结束之前是不完整的。所以在 lambda 体内，不能对闭包类型做 `sizeof` 之类需要完整类型的操作（不过 lambda 体内本来也无法直接命名闭包类型，除非借助 `this auto self` 的 `decltype(self)`）。
-
-¶3 闭包类型声明在包含该 lambda 表达式的最小的块作用域、类作用域或命名空间作用域中。注释说明，这决定了 ADL 的关联命名空间和关联类（[[basic.lookup.argdep]]），而形参类型不影响关联命名空间。
+lambda 表达式的类型叫做**闭包类型**（[[g:closure-type|closure type]]），是一个独一无二的无名非联合类类型（[[expr.prim.lambda.closure#1]]）。独一无二是字面意义上的：两个逐字相同的 lambda 也是两个类型。
 
 ```cpp run ok
 #include <type_traits>
 
 auto a = [] { return 1; };
 auto b = [] { return 1; };
-static_assert(!std::is_same_v<decltype(a), decltype(b)>);   // 每个 lambda 一个类型
+static_assert(!std::is_same_v<decltype(a), decltype(b)>);
 
-using T1 = decltype([] {});     // C++20：lambda 可以出现在未求值操作数中
+using T1 = decltype([] {});   // C++20 起 lambda 可以出现在未求值操作数中
 using T2 = decltype([] {});
-static_assert(!std::is_same_v<T1, T2>);                     // 依然各不相同
+static_assert(!std::is_same_v<T1, T2>);
 
-int main() { }
+int main() {}
 ```
 
-### 不是聚合、不是 final、结构化类型（¶4）
+闭包类型声明在包含这个 lambda 的最小的块作用域、类作用域或命名空间作用域里。这决定了实参依赖查找（ADL）时它关联哪些命名空间（[[expr.prim.lambda.closure#3]]、[[basic.lookup.argdep]]）。
 
-¶4 闭包类型：
+## 文法 [expr.prim.lambda.general]
 
-- 不是聚合（[[dcl.init.aggr]]），所以不能用 `{...}` 聚合初始化来伪造一个闭包对象并填入捕获成员；
-- 不是 final，可以从闭包类型派生，这正是常见的 `overloaded` 惯用法的基础；
-- 当且仅当没有 *lambda-capture* 时是结构化类型（structural type，[[temp.param]]），所以无捕获的 lambda 可以作为非类型模板实参。
+一个 lambda 依次由这些部分组成，除了开头的 `[捕获]` 和最后的函数体，都可以省略：
 
-!!! std
-    The closure type is not an aggregate type and is not final; it is a structural type if and only if the lambda has no *lambda-capture*.
+```text
+[捕获]  <模板形参> requires子句  属性  (形参)  说明符  noexcept  属性  -> 返回类型  requires子句  契约  { 函数体 }
+```
 
-    闭包不是聚合、不是 final；无捕获时是结构化类型，可作 NTTP。
+- `<模板形参>` {{c++20}}：`[]<class T>(T a) {}`。
+- `(形参)` 之前的属性 {{c++23}} 作用于调用运算符本身，例如 `[] [[nodiscard]] () { return 1; }`；`(形参)` 之后的属性作用于调用运算符的类型。
+- 说明符是 `mutable`、`constexpr`、`consteval`、`static` 中的若干个。
+- 没有形参时 `()` 可以省略。C++23 起，即使后面有说明符、`noexcept` 或尾置返回类型也能省略：`[] mutable {}` 合法，C++20 要写 `[]() mutable {}`。
+- 契约 {{c++26}}：`[](int x) pre(x > 0) { … }`。
 
-```cpp run ok
-#include <cstdio>
-#include <string>
-#include <type_traits>
-#include <variant>
+¶4 说明符的组合有几条限制：每个说明符最多出现一次；`constexpr` 和 `consteval` 不能同时出现；`mutable` 和 `static` 不能同时出现；有显式对象参数（`this auto self`）时不能写 `mutable` 或 `static`；写了 `static` 就不能有任何捕获。
 
-template<class... Fs> struct overloaded : Fs... { using Fs::operator()...; };  // 从闭包类型派生
-
-template<auto F> int call() { return F(); }      // 无捕获 lambda 作为 NTTP（C++20）
-
-int main() {
-  static_assert(!std::is_aggregate_v<decltype([] {})>);
-  static_assert(!std::is_final_v<decltype([] {})>);
-
-  std::variant<int, std::string> v = std::string("hi");
-  std::visit(overloaded{[](int i) { std::printf("int %d\n", i); },
-                        [](const std::string& s) { std::printf("str %s\n", s.c_str()); }}, v);
-
-  std::printf("%d\n", call<[] { return 42; }>());
+```cpp error
+auto e1 = [](int) constexpr consteval {};   // error: constexpr 与 consteval 不能共存
+auto e2 = [](this auto) mutable {};         // error: 显式对象参数与 mutable
+auto e3 = [](this auto) static {};          // error: 显式对象参数与 static
+auto e4 = [](int) mutable static {};        // error: mutable 与 static
+void f() {
+  int x = 0;
+  auto e5 = [x](int) static { return x; };  // error: static lambda 不能有捕获
 }
 ```
 
-¶4 的后半给了实现很大的自由：实现可以用与下文描述不同的方式定义闭包类型，只要除了以下三点之外不改变可观察行为：
+这些限制都来自上面的类模型。`mutable` 的作用是让调用运算符不再是 const，有显式对象参数时这一点改由 `self` 的类型表达；静态成员函数没有对象，也就无从访问捕获成员。
 
-- (4.1) 闭包类型的大小和/或对齐；
-- (4.2) 是否可平凡复制（trivially copyable）；
-- (4.3) 是否是标准布局类。
+## 调用运算符
 
-但实现不得向闭包类型添加右值引用类型的成员。
+### 返回类型 [expr.prim.lambda.general]
 
-换言之，**不要指望** `sizeof(lambda)`、`std::is_trivially_copyable_v<闭包>`、`std::is_standard_layout_v<闭包>` 的结果在不同编译器之间一致。按引用捕获在实践中通常实现为存一个指针（或者对多个引用捕获只存一个栈帧指针），这些做法都是允许的。
+¶5 没有尾置返回类型时，lambda 视为写了 `-> auto`，返回类型按 [[dcl.spec.auto]] 从 `return` 语句推导。所以多个 `return` 推导出的类型必须一致，`return {1, 2};` 无法推导，推导结果也不会是引用。要返回引用，写 `-> auto&` 或 `-> decltype(auto)`。
 
-### 函数调用运算符（¶5–9）
+```cpp error
+void f() {
+  auto x1 = [](int i) { return i; };       // OK：返回 int
+  auto x2 = [] { return { 1, 2 }; };       // error: 不能从花括号列表推导返回类型
+  int j;
+  auto x3 = [&]() -> auto&& { return j; }; // OK：返回 int&
+}
+```
 
-¶5 闭包类型有一个 public、inline 的函数调用运算符（非泛型 lambda）或函数调用运算符模板（泛型 lambda），其形参与返回类型来自 lambda 的形参子句与尾置返回类型。模板形参列表就是写出的那个，再加上由 `auto` 形参生成的发明模板形参，所以它是一个简写函数模板（[[dcl.fct]]）。`<...>` 之后的 *requires-clause* 成为模板的 requires-clause；声明符末尾的 *requires-clause* 成为尾置 requires-clause。调用运算符是闭包类型的直接成员。
+C++11 中，只有函数体只含一条 `return 表达式;` 的 lambda 才推导返回类型，其余返回 `void`。C++14 改为与普通函数的 `auto` 返回类型相同的规则。
 
-标准的例子展示了泛型 lambda 的嵌套与包展开（`[=](auto&&... ts)` 中的 `ts` 是函数形参包，内层的 `[=]` 隐式按值捕获整个包），以及用显式对象参数实现递归：
+### const、mutable、static [expr.prim.lambda.closure]
+
+¶5 闭包类型有一个 public、inline 的函数调用运算符。形参和返回类型来自 lambda 的形参列表和返回类型。¶7 规定了它是哪一种成员函数：
+
+| lambda 写法 | 调用运算符 |
+|---|---|
+| `[]() { }` | 非静态成员函数，`const` |
+| `[]() mutable { }` | 非静态成员函数，非 const |
+| `[]() static { }` {{c++23}} | 静态成员函数 |
+| `[](this auto&& self) { }` {{c++23}} | 显式对象成员函数，cv 和引用由 `self` 的类型决定 |
+
+调用运算符从来不是 `virtual`，也不是 `volatile`。lambda 上写的 `noexcept` 和契约都作用于调用运算符。
+
+¶7 还规定，满足以下任一条件时调用运算符是 constexpr 函数：写了 `constexpr` 或 `consteval`，或者它本身满足 constexpr 函数的要求（[[dcl.constexpr]]）。后者意味着 C++17 起大多数 lambda 不用标注就能在常量表达式里调用。写了 `consteval` 的是立即函数，只能在编译期调用。
+
+```cpp run ok
+auto ID = [](auto a) { return a; };
+static_assert(ID(3) == 3);                          // 隐式 constexpr
+
+auto ce = [](int i) consteval { return i + 1; };    // 立即函数
+static_assert(ce(1) == 2);
+
+auto sl = [](int i) static { return i * 2; };       // C++23
+static_assert(decltype(sl)::operator()(3) == 6);    // 不需要对象就能调用
+
+int main() {}
+```
+
+调用运算符是 constexpr 函数，不代表每次调用都是常量表达式。¶8 的例子里，`auto two = monoid(2);` 中的 `two` 不是 constexpr 变量，调用 `two()` 要读取它的捕获成员，所以 `static_assert(two() == 2)` 非良构。
+
+!!! tip "static lambda 有什么用"
+    无捕获 lambda 的非静态 `operator()` 仍然要接收一个对象参数，哪怕这个对象是空的。`static` 让调用运算符成为真正的静态函数，省掉这个参数；转换为函数指针时（见下文）也直接得到它的地址，不需要中间的转发函数。
+
+### 泛型 lambda 与显式对象参数
+
+¶6 lambda 有 `auto` 形参或者有模板形参列表时，叫做**泛型 lambda**（[[g:generic-lambda|generic lambda]]）。`[](this auto self, int i)` 也是泛型 lambda，因为 `this auto` 也是一个 `auto` 形参（[expr.prim.lambda.general]）。
+
+按 [[expr.prim.lambda.closure#5]]，泛型 lambda 的调用运算符是一个成员函数模板，模板形参由写出的 `<…>` 和每个 `auto` 形参生成的模板形参组成。`<…>` 之后的 *requires-clause* 和形参列表之后的 *requires-clause* 都成为这个模板的约束。
+
+标准例 1 演示了泛型 lambda 的嵌套、形参包的捕获，以及用显式对象参数写递归：
 
 ```cpp run ok
 #include <iostream>
@@ -190,164 +152,41 @@ int main() {
 
 int main() {
   auto vglambda = [](auto printer) {
-    return [=](auto&&... ts) {                       // ts 是函数形参包
+    return [=](auto&&... ts) {                   // ts 是函数形参包
       printer(std::forward<decltype(ts)>(ts)...);
-      return [=]() { printer(ts...); };              // 隐式按值捕获 printer 和整个包 ts
+      return [=]() { printer(ts...); };          // 隐式按值捕获 printer 和整个包 ts
     };
   };
   auto p = vglambda([](auto v1, auto v2, auto v3) { std::cout << v1 << v2 << v3; });
   auto q = p(1, 'a', 3.14);    // 输出 1a3.14
   q();                         // 再次输出 1a3.14
 
-  auto fact = [](this auto self, int n) -> int {     // C++23：显式对象参数实现递归
+  auto fact = [](this auto self, int n) -> int {
     return (n <= 1) ? 1 : n * self(n - 1);
   };
-  std::cout << '\n' << fact(5) << '\n';              // 120
+  std::cout << '\n' << fact(5) << '\n';         // 120
 }
 ```
 
-!!! note "为什么递归 lambda 需要 deducing this"
-    在 C++23 之前，lambda 体内没有办法命名自己：闭包类型无名，`this` 指的是外层对象（¶16）。常见的变通办法是用 `std::function` 自引用（有类型擦除的开销），或者用 Y 组合子（`auto fact = [](auto& self, int n) {...}; fact(fact, 5);`）。有了显式对象参数，`self` 直接就是闭包对象本身。
+C++23 之前，lambda 体里没有办法指代 lambda 自己：闭包类型没有名字，`this` 指的是外层对象（见下一节）。显式对象参数 `self` 就是闭包对象本身。
 
-¶6 如果 lambda 有捕获，其显式对象参数的类型（实例化之后）只能是：(6.1) 闭包类型本身，(6.2) 公开且无歧义地派生自闭包类型的类，或 (6.3) 指向这些类型（可带 cv）的引用。原因是，在调用运算符体内访问捕获，本质上是访问 `self` 的闭包成员；如果 `self` 是一个与闭包无关的类型（例如能从任何东西构造的 `C`），这些访问就无从谈起。无捕获的 lambda 不访问任何成员，所以不受此限。
+[[expr.prim.lambda.closure#6]] 规定，有捕获的 lambda，其显式对象参数的类型只能是闭包类型、公开且无歧义地派生自闭包类型的类，或者指向这些类型的引用。访问捕获就是访问 `self` 的成员，`self` 的类型与闭包无关时这无从谈起。
 
-```cpp
+```cpp error
 struct C {
-  template <typename T> C(T);       // 可以从任何类型构造
+  template <typename T> C(T);   // 可以从任何类型构造
 };
 
 void func(int i) {
-  int x = [=](this auto&&) { return i; }();   // OK：self 推导为闭包类型的引用
-  int y = [=](this C) { return i; }();        // error: 有捕获，但对象参数类型 C 与闭包无关
-  int z = [](this C) { return 42; }();        // OK：无捕获，C 可以从闭包构造
+  int x = [=](this auto&&) { return i; }();   // OK
+  int y = [=](this C) { return i; }();        // error: 有捕获，C 与闭包类型无关
+  int z = [](this C) { return 42; }();        // OK：无捕获
 }
 ```
 
-¶7 调用运算符的属性：
+### 函数体不在闭包类型的作用域里 [expr.prim.lambda.closure]
 
-| lambda 写法 | 调用运算符 |
-|---|---|
-| `[]() static { }` {{c++23}} | 静态成员函数（模板） |
-| `[]() { }` | 非静态，`const` |
-| `[]() mutable { }` | 非静态，非 const |
-| `[](this auto&& self) { }` {{c++23}} | 显式对象成员函数（无 cv，由 `self` 的类型决定） |
-
-此外，调用运算符永远不是 `virtual`，也不是 `volatile`。`noexcept` 说明与契约说明符作用于调用运算符。声明符中的属性属于调用运算符的类型；声明符之前的属性属于调用运算符本身。
-
-constexpr 是隐式的：如果写了 `constexpr`/`consteval`，或者调用运算符满足 constexpr 函数的要求（*constexpr-suitable*，[[dcl.constexpr]]），它就是 constexpr 函数，C++17 起无需显式标注。`consteval` 让它成为立即函数。
-
-```cpp run ok
-#include <type_traits>
-
-auto ID = [](auto a) { return a; };
-static_assert(ID(3) == 3);                              // 隐式 constexpr
-
-constexpr auto sq = [](int i) { return i * i; };
-static_assert(sq(4) == 16);
-
-auto ce = [](int i) consteval { return i + 1; };        // 立即函数
-static_assert(ce(1) == 2);
-
-auto sl = [](int i) static { return i * 2; };           // C++23 static lambda
-static_assert(decltype(sl)::operator()(3) == 6);        // 无需对象即可调用
-
-int main() { }
-```
-
-```cpp error
-auto ID = [](auto a) { return a; };
-struct NonLiteral {
-  NonLiteral(int n) : n(n) { }   // 非 constexpr 构造函数
-  int n;
-};
-static_assert(ID(NonLiteral{3}).n == 3);   // error: NonLiteral{3} 不是常量表达式
-```
-
-!!! tip "static lambda 的价值"
-    无捕获 lambda 的非静态 `operator()` 仍需要一个（空的）对象参数，把它传给标准算法时，即使经过优化，也可能多出一个无用的寄存器参数；在 `std::function` 等类型擦除包装器中也需要保留对象。`static` 让调用运算符成为真正的静态函数，函数指针转换（¶11）直接返回指向它的指针，不需要额外的转发函数。
-
-¶8 是一个关于 constexpr lambda 的长例子，要点在最后几行：
-
-```cpp
-auto monoid = [](auto v) { return [=] { return v; }; };
-constexpr auto one = monoid(1);
-auto two = monoid(2);                          // 不是 constexpr 变量
-static_assert(add(one)(one)() == two());       // error: two() 读取了非 constexpr 对象的成员
-static_assert(add(one)(one)() == monoid(2)()); // OK
-```
-
-`two` 的调用运算符是 constexpr 函数，但调用它需要对 `two` 的捕获成员做左值到右值转换，而 `two` 不是 constexpr 对象。函数是 constexpr 的，并不意味着对它的任何调用都是常量表达式。
-
-¶9（注释）调用运算符可以用类型约束、`<...>` 后的 requires-clause、尾置 requires-clause 三种方式加约束，与普通函数模板完全一致（[[temp.constr.decl]]）。
-
-### 契约与隐式捕获 {{c++26}}（¶10）
-
-¶10 对于被 lambda `L` 隐式捕获的局部实体，如果它的全部潜在引用都出现在 `L` 的调用运算符的函数契约断言中，或者 `L` 体内的 `contract_assert` 中，程序非良构。注释说明了设计意图：给现有程序添加契约断言不应导致额外的捕获。否则，加一句 `contract_assert(i > 0)` 就可能改变闭包的大小、布局，甚至延长或改变对象的生命周期语义。解决办法是显式捕获，或者在别处也引用该实体。
-
-### 转换为函数指针（¶11–15）
-
-¶11 满足以下全部条件的闭包类型有一个到函数指针的转换函数：
-
-- 非泛型；
-- 无捕获；
-- 无显式对象参数；
-- 约束（若有）被满足。
-
-转换的目标是指向具有 C++ 语言链接的函数的指针，形参与返回类型与调用运算符相同；调用运算符为 non-throwing 时，目标是指向 noexcept 函数的指针。转换返回的值：
-
-- 如果调用运算符是静态的，就是指向调用运算符本身的指针；
-- 否则是指向某个函数 `F` 的指针，调用 `F` 的效果如同在一个默认构造的闭包对象上调用调用运算符。调用运算符是 constexpr（立即）函数时，`F` 也是 constexpr（立即）函数。
-
-为什么必须无捕获？函数指针只是一个地址，没有地方存放捕获的状态。为什么排除显式对象参数？因为那时调用运算符的第一个参数是闭包对象自身，函数指针的签名无法自然地表达这一点。
-
-```cpp run ok
-int (*fp)(int) = [](int i) { return i; };             // 隐式转换
-void (*fnp)() noexcept = []() noexcept {};            // noexcept 函数指针
-auto p = +[](int i) { return i * 2; };                // 一元 + 强制转换，p 的类型是 int(*)(int)
-
-int main() { return fp(0) + p(0); }
-```
-
-¶12–13 泛型无捕获 lambda 有一个转换函数模板，其发明模板形参列表与调用运算符模板相同；函数指针的返回类型如同对调用运算符模板对应特化的返回类型取 `decltype`。注释 5 用一个等价的类说明它的行为：转换函数模板从目标函数指针类型推导模板实参，然后实例化调用运算符得到返回类型。标准的例子很好地展示了推导的边界：
-
-```cpp
-void f1(int (*)(int))   { }
-void f2(char (*)(int))  { }
-void g(int (*)(int))    { }     // #1
-void g(char (*)(char))  { }     // #2
-void h(int (*)(int))    { }     // #3
-void h(char (*)(int))   { }     // #4
-
-auto glambda = [](auto a) { return a; };
-void test() {
-  f1(glambda);                  // OK：T 推导为 int，返回 int，匹配
-  f2(glambda);                  // error: T = int 时返回 int，不是 char
-  g(glambda);                   // error: #1 与 #2 都可行，歧义
-  h(glambda);                   // OK：只有 #3 可行
-}
-int& (*fpi)(int*) = [](auto* a) -> auto& { return *a; };   // OK
-```
-
-¶14 转换函数模板特化所返回的值，规则与 ¶11 平行：静态时指向调用运算符模板的特化，否则指向一个转发函数。注释 6 提醒，这会触发泛型 lambda 函数体的隐式实例化。
-
-¶15 转换函数（模板）是 public、constexpr、非 virtual、非 explicit、const、non-throwing 的。因为它总是 constexpr，所以可以在常量表达式中完成转换；但能否在常量表达式中调用所得的函数指针，取决于对应的调用运算符是否是 constexpr 函数：
-
-```cpp
-auto Fwd = [](int (*fp)(int), auto a) { return fp(a); };
-auto C  = [](auto a) { return a; };
-static_assert(Fwd(C, 3) == 3);    // OK
-
-auto NC = [](auto a) { static int s; return a; };   // 含 static 局部变量 → 不可能是 constexpr
-static_assert(Fwd(NC, 3) == 3);   // error: 不是常量表达式
-```
-
-### 函数体的作用域（¶16）
-
-¶16 lambda 的复合语句成为调用运算符的函数体，**但它不在闭包类型的作用域内**。这条简短的规定影响很大：
-
-- 在 lambda 体内，名字查找不会找到闭包类型的成员，不能写 `operator()` 来调用 lambda 自身（会找到外层类的 `operator()`）；
-- `this` 指向外层对象（[[expr.prim.this#2]]：lambda 不引入类作用域）；
-- 捕获产生的成员是无名的，在体内只能通过原变量名间接访问（由捕获的变换规则实现，见 [expr.prim.lambda.capture] ¶11）。
+¶16 lambda 的函数体成为调用运算符的函数体，但它不在闭包类型的作用域里。所以在 lambda 体里，名字查找找不到闭包类型的成员；`this` 指向外层的对象（[[expr.prim.this]]）；写 `operator()` 找到的是外层类的 `operator()`。
 
 ```cpp ok
 struct S1 {
@@ -355,234 +194,130 @@ struct S1 {
   int operator()(int);
   void f() {
     [=, this]() -> int {
-      return operator()(this->x + y);   // 即 S1::operator()(this->x + (*this).y)；this 的类型是 S1*
+      return operator()(this->x + y);   // 即 S1::operator()(this->x + (*this).y)
     };
   }
 };
 ```
 
-另外，除了 `consteval` 块（{{c++26}}）的情形，lambda 体开头会隐式定义 `__func__`（[[dcl.fct.def.general]]），其内容由实现定义（Clang 给出 `"operator()"`）。
+除了 `consteval` 块（{{c++26}}）的函数体，lambda 体开头都会隐式定义 `__func__`（[[dcl.fct.def.general]]），内容由实现定义，Clang 和 GCC 给出 `"operator()"`。
 
-### 特殊成员函数（¶17–19）
+## 捕获 [expr.prim.lambda.capture]
 
-¶17 闭包类型的特殊成员：
+¶1 lambda 体通过捕获来使用外层作用域里的局部实体。**局部实体**（[[g:local-entity|local entity]]，[[basic.pre]]）指自动存储期的变量、结构化绑定，以及成员函数里的 `*this`。全局变量和静态局部变量不是局部实体，不能也不需要捕获，直接用名字就行。
 
-| | 有捕获 | 无捕获 |
-|---|---|---|
-| 默认构造函数 | 无 | 预置（defaulted）{{c++20}} |
-| 拷贝/移动构造函数 | 预置 | 预置 |
-| 拷贝赋值运算符 | 弃置（deleted） | 预置 {{c++20}} |
-| 移动赋值运算符 | 不声明（因而赋值总是落到弃置的拷贝赋值上） | 预置 {{c++20}} |
-
-注释 7 指出，这些函数照常隐式定义，因此可能被定义为弃置。例如按值捕获了一个 `std::unique_ptr`，拷贝构造函数就是弃置的，闭包只能移动。
-
-C++20 之前，所有闭包类型的默认构造函数和拷贝赋值运算符都规定为弃置。C++20 让无捕获 lambda 可以默认构造和赋值，再加上 lambda 可以出现在未求值操作数中，就可以把 lambda 的类型当作比较器、删除器传给模板：
-
-```cpp run ok
-#include <cstdio>
-#include <memory>
-#include <set>
-
-int main() {
-  using Cmp = decltype([](int a, int b) { return a > b; });
-  std::set<int, Cmp> s{1, 3, 2};          // set 默认构造 Cmp —— C++20 起无捕获闭包可默认构造
-  std::printf("%d\n", *s.begin());        // 3
-
-  std::unique_ptr<int, decltype([](int* p) { delete p; })> up(new int(1));
-  static_assert(sizeof(up) == sizeof(int*));   // 空删除器不占空间（实现通常如此）
-}
-```
-
-¶18 闭包类型有一个隐式声明的析构函数。
-
-¶19 闭包类型的成员不得被显式实例化、显式特化，也不得在友元声明中被命名。闭包类型是实现细节，只能通过 lambda 表达式本身与它交互。
-
-## 捕获（[expr.prim.lambda.capture]）
-
-### 文法
+### 捕获列表的写法（¶2–¶5）
 
 ```text
-lambda-capture:  capture-default | capture-list | capture-default , capture-list
-capture-default: &  |  =
-simple-capture:  x  |  x...  |  &x  |  &x...  |  this  |  *this
-init-capture:    x = e  |  ...x = e  |  &x = e  |  &...x = e    （初始化器也可以是 (e) 或 {e}）
+[=]  [&]                     默认捕获（capture-default）
+[x]  [&x]  [this]  [*this]   简单捕获，x 可以带 ...（包展开）
+[x = e]  [&r = e]            init-capture，也可以写 ...x = e
 ```
 
-¶1 lambda 体可以通过捕获来引用外围作用域的局部实体。
+¶2 有几条防止冗余的规则：默认捕获是 `&` 时，简单捕获不能再带 `&`；默认捕获是 `=` 时，简单捕获只能是 `&x`、`this` 或 `*this`；同一个名字或 `this` 不能出现两次。
 
-### 捕获列表的形式约束（¶2）
-
-¶2
-
-- 默认捕获为 `&` 时，简单捕获中的标识符不能再带 `&`（`[&, &i]` 是冗余的，因而禁止）；
-- 默认捕获为 `=` 时，简单捕获只能是 `&x`、`this` 或 `*this`（`[=, i]` 是冗余的，因而禁止）；
-- 除 init-capture 的初始化器内部之外，同一标识符或 `this` 不能出现两次。
-
-注释 1 指出，`[&, this]` 是冗余的，但为了与 C++14 兼容仍然接受。而 `[=, this]` 是 C++20 引入的写法，用来替代已弃用的 `[=]` 隐式捕获 `this`。
-
-```cpp
+```cpp error
 struct S2 { void f(int i); };
 void S2::f(int i) {
   [&, i]{ };        // OK
   [&, this, i]{ };  // OK，等价于 [&, i]
-  [&, &i]{ };       // error: 默认为 & 时 i 前面不能再有 &
+  [&, &i]{ };       // error: 默认是 & 时 i 前不能再有 &
   [=, *this]{ };    // OK
-  [=, this]{ };     // OK，等价于 [=]（且不触发弃用）
+  [=, this]{ };     // OK，等价于 [=]，但不会触发弃用警告
   [i, i]{ };        // error: i 重复
   [this, *this]{ }; // error: this 出现两次
 }
 ```
 
-### 哪里可以有捕获（¶3–5）
+`[&, this]` 是冗余的，为了与 C++14 兼容仍然接受（注 1）。`[=, this]` 是 C++20 加入的写法，用来明确表达按引用捕获 `*this`。
 
-¶3 只有以下情形的 lambda 才能有默认捕获或简单捕获：
+¶3 只有当 lambda 的最内层外围作用域是块作用域（在函数体里），或者它位于默认成员初始化器里、或位于契约断言里时，才能有默认捕获或简单捕获。命名空间作用域的 lambda 不能写 `[=]`、`[&]` 或 `[x]`，那里没有局部实体。init-capture 不受这条限制，命名空间作用域的 `auto counter = [i = 0]() mutable { return i++; };` 是合法的。
 
-- (3.1) 最内层外围作用域是块作用域（函数体内）；
-- (3.2) 位于默认成员初始化器中，最内层外围作用域是对应的类作用域；
-- (3.3) {{c++26}} 位于契约断言中，最内层外围作用域是契约断言作用域。
+¶4 简单捕获里的名字必须指代局部实体，`this` 和 `*this` 都指代局部实体 `*this`。被简单捕获指名的实体称为被**显式捕获**（[[g:explicitly-captured|explicitly captured]]）。¶5 捕获的名字不能与 lambda 的形参或模板形参同名：`[x](int x) {}` 非良构。
 
-命名空间作用域的 lambda 不能写 `[=]`、`[&]` 或 `[x]`，因为那里没有可以捕获的局部实体。但 init-capture 不受此限：`auto counter = [i = 0]() mutable { return i++; };` 在命名空间作用域完全合法。
+### 先要知道：odr-use 与 odr-usable
 
-¶4 简单捕获中的标识符必须指代一个局部实体（[[basic.pre]]：自动存储期变量、结构化绑定、`*this` 等）；`this` 和 `*this` 指代局部实体 `*this`。由简单捕获指名的实体称为[[g:explicitly-captured|**显式捕获**]]的实体。
+捕获规则建立在 [[basic.def.odr]] 的两个概念上。
 
-所以全局变量、静态局部变量不能捕获，也无需捕获：
+**odr-use**（[[g:odr-use]]）大致是指以需要这个变量本身存在的方式使用它：取地址、绑定引用、读取一个非常量的值。读取一个常量的值（`const int N = 10;` 中的 `N` 用作数组长度、参与算术）不算 odr-use，编译器直接用它的值。
 
-```cpp
-int g;
-void f() {
-  static int s;
-  auto l1 = [g] {};    // error: g 不是局部实体
-  auto l2 = [] { return g + s; };   // OK：直接引用，无需捕获
-}
-```
+一个局部实体在某处是 **odr-usable**（[[g:odr-usable]]）的，要求它的声明与这个位置之间没有隔着函数形参作用域或类作用域（例如局部类的成员函数），并且隔着的每个 lambda 都捕获了它。在不是 odr-usable 的地方 odr-use 一个局部实体，程序非良构（[[basic.def.odr#10]]）。lambda 要捕获才能使用外层变量，依据就在这里。
 
-¶5 捕获的标识符不能与 lambda 的形参同名，也不能与 lambda 的模板形参同名：
+### 隐式捕获（¶7）
 
-```cpp
-void f() {
-  int x = 0;
-  auto g = [x](int x) { return 0; };                // error: 形参与捕获同名
-  auto h = [y = 0]<typename y>(y) { return 0; };    // error: 模板形参与捕获同名
-}
-```
+写了默认捕获 `[=]` 或 `[&]` 时，哪些实体被捕获？¶7 先定义表达式**潜在引用**哪些局部实体：
 
-### init-capture（¶6）
+- (7.1) 命名一个局部实体的 *id-expression* 潜在引用它；命名非静态成员（且不是在取成员指针）的 *id-expression* 潜在引用 `*this`，即使重载决议最后选中的是静态成员函数（注 3）；
+- (7.2) `this` 潜在引用 `*this`；
+- (7.3) 一个 lambda 表达式潜在引用它的简单捕获所指名的实体，这样外层 lambda 就能感知内层 lambda 的显式捕获。
 
-¶6 init-capture 位于 lambda 的 lambda 作用域（[[basic.scope.lambda]]）中。不带 `...` 的 init-capture 如同声明并显式捕获一个形如 `auto init-capture;` 的变量，但有两点不同：
-
-- (6.1) 如果按值捕获，闭包中的非静态数据成员与那个变量是同一个对象的两种称呼，其生命周期就是成员的生命周期，不会有额外的拷贝与析构；
-- (6.2) 如果按引用捕获（`[&r = x]`），那个引用变量的生命周期在闭包对象的生命周期结束时结束。
-
-注释 2 指出，这使 `[x = std::move(x)]` 成为可能：等号右边的 `x` 必须绑定到外围的声明，因为 init-capture 的名字在初始化器中尚不可见（这一点与普通变量 `int x = x;` 不同）。
-
-```cpp run ok
-#include <cstdio>
-
-int main() {
-  int x = 4;
-  auto y = [&r = x, x = x + 1]() -> int {   // r 引用外部 x；内部 x 是 5
-    r += 2;
-    return x + 2;
-  }();                                      // 外部 x 变为 6，y 初始化为 7
-  std::printf("%d %d\n", x, y);
-
-  auto counter = [i = 0]() mutable -> decltype(i) { return i++; };   // 返回 int
-  counter();
-  std::printf("%d\n", counter());           // 1
-}
-```
-
-注意 `decltype(i)` 出现在尾置返回类型中。init-capture 的名字在那里已经可见（lambda 作用域包含整个声明符），这是 C++23 的规则（[[P2036R3]]）。
-
-### 什么被隐式捕获（¶7）
-
-这是捕获规则的核心。¶7 先定义了**潜在引用**（potentially references）：
-
-- (7.1) 命名局部实体的 id 表达式潜在引用该实体；命名一个或多个非静态类成员、且不构成成员指针的 id 表达式潜在引用 `*this`（注释 3：即使重载决议最终选中了静态成员函数也是如此）；
-- (7.2) `this` 表达式潜在引用 `*this`；
-- (7.3) lambda 表达式潜在引用它的简单捕获所指名的局部实体（这样外层 lambda 就能感知内层的显式捕获）。
-
-然后：
+然后是隐式捕获的定义：
 
 !!! std
     If an expression potentially references a local entity within a scope in which it is odr-usable, and the expression would be potentially evaluated if the effect of any enclosing `typeid` expressions were ignored, the entity is said to be *implicitly captured* by each intervening *lambda-expression* with an associated *capture-default* that does not explicitly capture it.
 
-    如果在实体 odr-usable 的作用域中潜在引用它，且（忽略 typeid 后）潜在求值，它就被每个带默认捕获、且未显式捕获它的中间 lambda 隐式捕获。
+也就是说，表达式在某处潜在引用一个局部实体，这个实体在那里 odr-usable，并且表达式会被**潜在求值**（[[g:potentially-evaluated|potentially evaluated]]，不在 `sizeof`、`decltype` 这类未求值操作数里），那么中间每个带默认捕获、又没有显式捕获它的 lambda 都**隐式捕获**（[[g:implicitly-captured|implicitly captured]]）它。
 
-逐项拆解这句话：
+这个定义有三处值得注意。
 
-1. 潜在求值：`sizeof(x)`、`decltype(x)` 中的 `x` 不会触发捕获。
-2. 忽略 typeid：`typeid(a + x)` 是否求值，取决于操作数是否为多态类类型的 glvalue，在泛型 lambda 中可能直到实例化才知道。为了让捕获集合在定义时就能确定，标准规定一律当作求值来处理，宁可多捕获，也不少捕获。
-3. 条件是潜在引用，而不是 odr-use（这就是[[g:implicitly-captured|隐式捕获]]的定义）。注意这里**不要求 odr-use**。设 `const int x = 17;`，在 `[=]{ f(x); }` 中，如果 `f` 按值接收 `int`，`x` 并未被 odr-use（常量的左值到右值转换，[[basic.def.odr#5]]），但依然被隐式捕获。原因是对泛型 lambda 而言，是否 odr-use 可能要到实例化（选中哪个重载）时才知道。标准例子的注释说，实现可以把未被 odr-use 的捕获优化掉。
-4. 捕获集合由语法决定：注释 4 强调，即使表达式位于被丢弃的语句（`if constexpr` 的假分支）中，实体也会被捕获。
-
-!!! history "从 odr-use 到潜在引用"
-    C++11/14 的隐式捕获规则以 odr-use 为基础，并为泛型 lambda 另设了一条复杂的特殊规则（在可能 odr-use 的表达式中也要捕获）。C++20 通过 [[P0588R1]]（简化隐式 lambda 捕获）改为基于语法的规则：只要潜在引用且潜在求值就捕获，不再追问是否真的 odr-use。此后的措辞又引入潜在引用、odr-usable 等术语，整理成现在的样子。
+第一，它不要求 odr-use。泛型 lambda 里同一个表达式是不是 odr-use，可能要等实例化、选定了重载才知道；捕获集合却要在定义 lambda 时就确定下来，所以标准只看语法。标准例 4：
 
 ```cpp ok
 #include <typeinfo>
 
-void f(int, const int (&)[2] = {});         // #1
-void f(const int&, const int (&)[1]);       // #2
+void f(int, const int (&)[2] = {});   // #1：按值接收
+void f(const int&, const int (&)[1]); // #2：按引用接收，会 odr-use
 
 void test() {
   const int x = 17;
   auto g = [](auto a) {
-    f(x);                       // OK：调用 #1（按值），x 未被 odr-use → 无需捕获，也没有默认捕获
+    f(x);              // OK：调用 #1，不是 odr-use，没有默认捕获也能用
   };
   auto g1 = [=](auto a) {
-    f(x);                       // OK：调用 #1，x 被（语法上）隐式捕获；实现可优化掉
+    f(x);              // OK：调用 #1，x 被隐式捕获；实现可以把这个捕获优化掉
   };
   auto g2 = [=](auto a) {
     int selector[sizeof(a) == 1 ? 1 : 2]{};
-    f(x, selector);             // OK：捕获 x；视 a 的类型可能调用 #1 或 #2（#2 按引用接收，会 odr-use）
+    f(x, selector);    // OK：捕获 x，根据 a 的类型调用 #1 或 #2
   };
   auto g3 = [=](auto a) {
-    typeid(a + x);              // 无论 a + x 是否为未求值操作数，都捕获 x
+    typeid(a + x);     // 无论 a + x 是否被求值，都捕获 x
   };
 }
 ```
+
+第二，忽略 `typeid`。`typeid(e)` 是否求值 `e`，取决于 `e` 是不是多态类类型的左值，在泛型 lambda 里可能要实例化后才知道。标准一律按求值处理，宁可多捕获。
+
+第三，捕获集合由语法决定，即使表达式位于 `if constexpr` 被丢弃的分支里，实体也会被捕获（注 4）：
 
 ```cpp ok
 template<bool B>
 void f(int n) {
   [=](auto a) {
     if constexpr (B && sizeof(a) > 4) {
-      (void)n;                  // 无论 B 与 sizeof(int) 如何，都会捕获 n
+      (void)n;         // 无论 B 和 sizeof(int) 是多少，都捕获 n
     }
   }(0);
 }
 ```
 
-!!! warning "隐式捕获 this 的弃用 {{deprecated}}"
-    ¶7 末尾规定，默认捕获是 `=` 时，隐式捕获 `*this`（按引用）**已弃用**（[[depr.capture.this]]）。原因是 `[=]` 让人误以为所有东西都被复制了，而成员访问 `x` 实际上是 `this->x`，复制的是指针，对象本身并没有被复制。如果 lambda 比对象活得久，就会悬垂。C++20 起推荐写 `[=, this]`（明确按引用）或 `[=, *this]`（真正复制对象）。
+!!! warning "`[=]` 隐式捕获 this 已弃用 {{deprecated}}"
+    ¶7 最后一句规定，默认捕获是 `=` 时隐式捕获 `*this` 已弃用（[[depr.capture.this]]）。在成员函数里，`[=] { x = n; }` 中的 `x` 是 `this->x`，被捕获的是指针 `this`，对象本身没有被复制。`[=]` 让人以为一切都复制了，lambda 活得比对象久时就会悬垂。C++20 起应写 `[=, this]`（明确按引用）或 `[=, *this]`（复制整个对象）。Clang 对旧写法给出 `-Wdeprecated-this-capture` 警告。
 
-```cpp ok
-struct X {
-  int x;
-  void foo(int n) {
-    auto f = [=]() { x = n; };          // 弃用：x 是 this->x，并非副本（Clang 会警告）
-    auto g = [=, this]() { x = n; };    // 推荐的替代写法
-  }
-};
-```
+### 被捕获就是被 odr-use（¶8–¶9）
 
-### 捕获即 odr-use（¶8–9）
+¶8 被捕获（显式或隐式）的实体被这个 lambda 表达式 odr-use。注 5 由此推出：显式捕获一个在此处不是 odr-usable 的实体，程序非良构。
 
-¶8 被捕获（显式或隐式）的实体被该 lambda 表达式 odr-use。注释 5 由此推出：如果显式捕获一个不是 odr-usable 的实体，程序非良构（[[basic.def.odr#10]]）。
+捕获就这样沿着嵌套的 lambda 一层层向外传播。标准例 6 的前半：
 
-直观地说，如果局部实体的声明点与使用点之间隔着一个没有捕获它的 lambda 作用域，或者隔着一个函数形参作用域或类作用域（嵌套函数、局部类），它就不是 odr-usable 的。在不是 odr-usable 的地方 odr-use 局部实体是非良构的。lambda 必须捕获才能使用外部变量，规范上的依据就在这里。
-
-标准的例子（有删节）值得逐行理解：
-
-```cpp
+```cpp error
 void f1(int i) {
   int const N = 20;
   auto m1 = [=]{
     int const M = 30;
     auto m2 = [i]{
-      int x[N][M];              // OK：N、M 未被 odr-use（常量，作为数组边界只取值）
-      x[0][0] = i;              // OK：i 被 m2 显式捕获，被 m1 隐式捕获（经由 ¶7.3）
+      int x[N][M];         // OK：N、M 未被 odr-use
+      x[0][0] = i;         // OK：i 被 m2 显式捕获，被 m1 隐式捕获
     };
   };
   struct s1 {
@@ -591,11 +326,11 @@ void f1(int i) {
       int m = n*n;
       int j = 40;
       auto m3 = [this,m] {
-        auto m4 = [&,j] {       // error: j 在此处不是 odr-usable（m3 没有捕获它，也没有默认捕获）
-          int x = n;            // error: n 被 odr-use，但因 m3 的阻隔不是 odr-usable
-          x += m;               // OK：m 被 m4 隐式捕获、被 m3 显式捕获
-          x += i;               // error: i 被局部类 s1 与成员函数 work 的作用域阻隔
-          x += f;               // OK：this 被 m4 隐式捕获、被 m3 显式捕获
+        auto m4 = [&,j] {  // error: m3 没有捕获 j，j 在这里不是 odr-usable
+          int x = n;       // error: 同理，n 被 m3 阻隔
+          x += m;          // OK：m 被 m4 隐式捕获，被 m3 显式捕获
+          x += i;          // error: i 被局部类 s1 和成员函数 work 的作用域阻隔
+          x += f;          // OK：this 被 m4 隐式捕获，被 m3 显式捕获
         };
       };
     }
@@ -603,162 +338,78 @@ void f1(int i) {
 }
 ```
 
-`m2` 那一行说明了 ¶7.3 的作用：内层 lambda 显式捕获 `i`，这个 lambda 表达式本身就潜在引用 `i`，从而外层带 `[=]` 的 `m1` 隐式捕获了 `i`。捕获就这样沿着嵌套层层向外传播。
+`m2` 那一行用到了 ¶7.3：`m2` 显式捕获 `i`，于是 lambda 表达式 `m2` 本身潜在引用 `i`，外层带 `[=]` 的 `m1` 就隐式捕获了 `i`。
 
-`*this` 同理：
+¶9 注 6 补充，局部实体在默认实参里不是 odr-usable 的，所以默认实参里的 lambda 不能捕获任何局部实体；init-capture 可以有，只要它的初始化器不引用局部变量。
 
-```cpp
-struct s2 {
-  double ohseven = .007;
-  auto f() {
-    return [this] {
-      return [*this] {
-        return ohseven;         // OK：内层复制了外层所指的对象
-      };
-    }();
-  }
-  auto g() {
-    return [] {
-      return [*this] { };       // error: 外层 lambda 没有捕获 *this
-    }();
-  }
-};
-```
+### 按值捕获（¶10–¶11）
 
-¶9（注释）局部实体在默认实参中不是 odr-usable 的（[[basic.def.odr#10]]：被函数形参作用域阻隔），所以默认实参里的 lambda 不能隐式或显式捕获任何局部实体；但可以有 init-capture，只要其初始化器满足默认实参的限制（[[dcl.fct.default]]：不能引用局部变量）。
+¶10 下面两种情形是**按值捕获**（[[g:captured-by-copy|captured by copy]]）：默认捕获是 `=` 时隐式捕获的实体（`*this` 除外），以及显式捕获时没有用 `&` 和 `this` 写法的实体。
 
-```cpp
-void f2() {
-  int i = 1;
-  void g1(int = ([i]{ return i; })());          // error: 不能捕获
-  void g2(int = ([i]{ return 0; })());          // error: 即使不用也不能捕获
-  void g3(int = ([=]{ return i; })());          // error: 隐式捕获 i
-  void g4(int = ([=]{ return 0; })());          // OK：什么都没捕获
-  void g5(int = ([]{ return sizeof i; })());    // OK：未求值，不需要捕获
-  void g6(int = ([x=1]{ return x; })());        // OK：init-capture，初始化器不涉及局部变量
-  void g7(int = ([x=i]{ return x; })());        // error: 初始化器引用了局部变量 i
-}
-```
+每个按值捕获的实体在闭包类型里对应一个无名的非静态数据成员，它的类型是：
 
-### 按值捕获（¶10–11）
+- 实体是对象的引用时，是被引用的类型，也就是复制被引用的对象；
+- 实体是函数的引用时，是指向该函数类型的左值引用，函数无法复制；
+- 否则就是实体本身的类型，包括 `const`。
 
-¶10 在以下情形，一个实体是[[g:captured-by-copy|**按值捕获**]]（captured by copy）的：
+匿名联合的成员不能按值捕获。
 
-- (10.1) 它被隐式捕获，默认捕获是 `=`，且实体不是 `*this`（`[=]` 隐式捕获的 `*this` 是按引用的，这正是弃用的原因）；或
-- (10.2) 它被显式捕获，且捕获形式不是 `this`、`&x`、`&x...`、`&x = e`。
-
-对每个按值捕获的实体，闭包类型中声明一个无名的非静态数据成员，其类型为：
-
-- 如果实体是对象的引用：被引用的类型（捕获引用就是复制被引用的对象）；
-- 如果实体是函数的引用：指向该函数类型的左值引用（函数无法复制）；
-- 否则：实体的类型（**`const` 会被保留**）。
-
-匿名联合体的成员不能按值捕获。
-
-!!! pitfall "按值捕获保留 const，mutable 也救不了"
+!!! pitfall "按值捕获保留 const，mutable 也去不掉"
     ```cpp
     const std::string s = "x";
-    auto l = [s]() mutable { s += "y"; };   // error: 成员类型是 const std::string
+    auto l = [s]() mutable { s += "y"; };   // error: 成员的类型是 const std::string
     ```
-    同理，在 `const` 成员函数中写 `[*this]() mutable { v = 1; }` 也不行：`*this` 的类型是 `const X`，复制出的成员也是 `const X`。要得到可修改的副本，可以用 init-capture：`[s = s]() mutable { s += "y"; }`（init-capture 按 `auto` 推导，丢掉顶层 const）。
+    `mutable` 只让调用运算符不再是 const，成员本身的 `const` 仍在。要一个可修改的副本，用 init-capture `[s = s]`：它按 `auto` 推导，去掉了顶层 const。
 
-¶11 在 lambda 体中，每个指代按值捕获实体、且构成 odr-use 的 id 表达式，都变换为对闭包中对应无名数据成员的访问。注释 7 是关键：**不构成 odr-use 的 id 表达式指代原实体，永远不是闭包成员**，但它仍可能引起隐式捕获。如果 `*this` 按值捕获，每个 odr-use `*this` 的表达式都改为引用对应的成员。
+¶11 lambda 体里，对按值捕获实体的每个 odr-use 都改写成对闭包中对应成员的访问。不构成 odr-use 的使用指代的是原来的那个实体，从来不是闭包成员（注 7）。
 
 ```cpp ok
 void f(const int*);
 void g() {
   const int N = 10;
   [=] {
-    int arr[N];     // OK：不是 odr-use，指代外部那个自动变量 N（读取其常量值）
-    f(&N);          // OK：取地址是 odr-use，导致 N 被捕获；&N 指向闭包中的成员
+    int arr[N];   // 不是 odr-use：指代外层的 N，只读它的常量值
+    f(&N);        // 取地址是 odr-use：N 被捕获，&N 指向闭包里的成员
   };
 }
 ```
 
-lambda 中可以直接使用常量而无需捕获，规范依据就是这条规则：`const int N = 10; [] { return N; }` 良构，因为对 `N` 的使用是对常量的左值到右值转换，不是 odr-use；但 `[] { const int& r = N; }` 非良构，因为绑定引用是 odr-use。
+所以没有任何捕获的 lambda 也可以使用常量的值，但不能取它的地址或绑定引用：
 
 ```cpp error
+#include <algorithm>
+
 void f(int n) {
-  [] { n = 1; };                        // error: n 未被捕获，在此处不是 odr-usable
+  [] { n = 1; };                         // error: n 未被捕获
   const int N = 10;
-  [] { return N; };                     // OK：不是 odr-use
-  [] { const int& r = N; (void)r; };    // error: 绑定引用是 odr-use，N 需要被捕获
+  [] { return N; };                      // OK：读常量的值，不是 odr-use
+  [] { return std::max(N, 1); };         // error: max 按 const int& 接收，绑定引用是 odr-use
 }
 ```
 
-### 按引用捕获（¶12–13）
+### 按引用捕获（¶12–¶13）
 
-¶12 被捕获但不是按值捕获的实体是[[g:captured-by-reference|**按引用捕获**]]的。是否为按引用捕获的实体在闭包中声明额外的无名数据成员，是未指定的 {{unspec}}；如果声明了，它们必须是字面类型。位域和匿名联合体成员不能按引用捕获（没有办法形成指向它们的引用）。
-
-标准的例子说明了要求字面类型的意图：按引用捕获的 lambda 要能在常量表达式中使用。
+¶12 被捕获、但不是按值捕获的实体是**按引用捕获**（[[g:captured-by-reference|captured by reference]]）的。闭包类型是否为它们声明数据成员是未指定的 {{unspec}}；如果声明了，必须是字面类型，这保证按引用捕获的 lambda 也能在常量表达式里使用：
 
 ```cpp ok
 static_assert([](int n) { return [&n] { return ++n; }(); }(3) == 4);
 ```
 
-¶13 在 lambda 体中 odr-use 一个按引用捕获的引用时，它指代该引用所绑定的实体，而不是那个引用本身。注释 8 指出，因此按引用捕获的引用是否有效，取决于被引用对象的生命周期，而不是引用变量的生命周期：
+位域和匿名联合的成员不能按引用捕获，因为无法形成指向它们的引用。
+
+¶13 lambda 体里使用一个按引用捕获的引用时，指代的是这个引用所绑定的对象，而不是引用本身。所以这样的捕获是否有效，看的是那个对象的生命周期（注 8）：
 
 ```cpp ok
 auto h(int& r) {
   return [&] {
-    ++r;            // 在 h 返回后仍然有效——只要 r 所绑定的对象还活着
+    ++r;   // h 返回后仍然有效，只要 r 绑定的对象还活着
   };
 }
 ```
-
-有了这条规则，按引用捕获引用形参是一种安全的常见写法，而按引用捕获局部对象则不安全。
-
-### 嵌套 lambda 的捕获（¶14）
-
-¶14 如果内层 lambda `m2` 捕获了一个实体，而直接外层的 lambda `m1` 也捕获了它：
-
-- (14.1) 如果 `m1` 按值捕获，`m2` 捕获的是 `m1` 闭包中对应的数据成员；如果 `m1` 不是 mutable，该成员视为 const；
-- (14.2) 如果 `m1` 按引用捕获，`m2` 捕获的是 `m1` 所捕获的同一个实体。
-
-标准的例子会输出 `123234`，值得手动推一遍：
-
-```cpp run ok
-#include <iostream>
-
-int main() {
-  int a = 1, b = 1, c = 1;
-  auto m1 = [a, &b, &c]() mutable {
-    auto m2 = [a, b, &c]() mutable {
-      std::cout << a << b << c;    // 输出 123，推导见下文
-      a = 4; b = 4; c = 4;
-    };
-    a = 3; b = 3; c = 3;
-    m2();
-  };
-  a = 2; b = 2; c = 2;
-  m1();
-  std::cout << a << b << c << '\n';
-}
-```
-
-推导过程如下。`m1` 创建时复制 `a = 1`（成员 `m1.a`），按引用持有 `b`、`c`。之后外部变量都赋值为 2。调用 `m1()` 时，在 `m1` 体内创建 `m2`：`m2` 按值捕获 `a`（即 `m1.a`，此时为 1）和 `b`（`m1` 按引用捕获了外部的 `b`，所以 `m2` 复制外部 `b` 的当前值 2），按引用捕获 `c`（即外部的 `c`）。随后 `m1.a = 3`、外部 `b = 3`、外部 `c = 3`。调用 `m2()` 输出 `m2.a`(1)、`m2.b`(2)、外部 `c`(3)，即 `123`；接着修改的是 `m2` 自己的副本以及外部的 `c = 4`。最后输出外部的 `a`(2)、`b`(3)、`c`(4)，即 `234`。
-
-### 成员的声明顺序与初始化（¶15–16）
-
-¶15 闭包中非静态数据成员的声明顺序是未指定的 {{unspec}}，但显式捕获对应的成员按与捕获列表一致的顺序声明。
-
-¶16 按值捕获的实体用来直接初始化对应的成员；init-capture 的成员（以及不对应成员的引用变量）按其初始化器初始化（可能是拷贝初始化，也可能是直接初始化）；数组成员的元素按下标递增的顺序直接初始化。这些初始化在求值 lambda 表达式时进行，顺序与成员的声明顺序（部分未指定）以及显式捕获的顺序一致。注释 9 指出，这保证了析构顺序与构造顺序相反。
-
-```cpp ok
-#include <utility>
-#include <vector>
-
-void f(std::vector<int>&& v) {
-  [size = v.size(), own = std::move(v)] {};   // size 先于 own 初始化，因此拿到的是原始大小
-}
-```
-
-!!! note "显式捕获的顺序保证"
-    显式捕获按书写顺序初始化，有了这一保证，`[a = x.get(), b = std::move(x)]` 这类依赖顺序的写法才可靠。隐式捕获的成员之间，以及它们与显式捕获之间的相对顺序仍然未指定，因此不要让隐式捕获的副作用依赖顺序（通常也没有副作用，隐式捕获只是复制）。
 
 ### 悬垂（¶17）
 
-¶17（注释）如果非引用实体被按引用捕获（隐式或显式），在该实体的生命周期结束之后调用闭包的调用运算符，很可能导致未定义行为。之所以说"很可能"，是因为只有真正访问那个已经不存在的对象时才是 UB（[[basic.life]]）；如果调用路径不触及它，就没有问题。
+¶17 注 10：一个不是引用的实体被按引用捕获，在它的生命周期结束后再调用闭包，很可能导致未定义行为。说"很可能"，是因为只有真的访问了那个不存在的对象才是 UB（[[basic.life]]）。
 
 ```cpp run ub
 #include <cstdio>
@@ -771,15 +422,87 @@ std::function<int()> make() {
 
 int main() {
   auto f = make();
-  std::printf("%d\n", f());        // UB: local 的生命周期已结束
+  std::printf("%d\n", f());        // UB: local 已经不存在
 }
 ```
 
-用 `-fsanitize=address` 并设置 `ASAN_OPTIONS=detect_stack_use_after_return=1` 运行，AddressSanitizer 会报告 `stack-use-after-return`。
+本机用 `-fsanitize=address` 编译、设置 `ASAN_OPTIONS=detect_stack_use_after_return=1` 运行，AddressSanitizer 报告 `stack-use-after-return`。闭包只在当前作用域内同步使用时，`[&]` 安全且高效；一旦闭包被返回、存储或交给别的线程，就只应按值捕获，或者只按引用捕获确定活得更久的对象。
 
-### 包展开（¶18）
+### init-capture（¶6）
 
-¶18 带 `...` 的简单捕获（`args...`、`&args...`）是包展开；带 `...` 的 init-capture（`...xs = std::move(args)`、`&...rs = args`）是声明了一个 init-capture 包的包展开 {{c++20}}。
+¶6 init-capture `[x = e]` 如同声明一个变量 `auto x = e;` 并显式捕获它；`[&r = e]` 如同 `auto& r = e;`。它位于 lambda 的 lambda 作用域里（[[basic.scope.lambda]]），与普通变量相比有两点不同：按值时，这个变量和闭包里的成员是同一个对象，没有额外的拷贝和析构；按引用时，这个引用变量的生命周期在闭包对象的生命周期结束时结束。
+
+注 2 指出，这使 `[x = std::move(x)]` 成为可能：等号右边的 `x` 指的是外层的变量，因为 init-capture 的名字在自己的初始化器里还不可见（这一点与普通变量 `int x = x;` 不同）。
+
+```cpp run ok
+#include <cstdio>
+
+int main() {
+  int x = 4;
+  auto y = [&r = x, x = x + 1]() -> int {   // r 引用外部 x；内部 x 是 5
+    r += 2;
+    return x + 2;
+  }();                                      // 外部 x 变为 6，y 初始化为 7
+  std::printf("%d %d\n", x, y);             // 6 7
+
+  auto counter = [i = 0]() mutable -> decltype(i) { return i++; };   // 返回 int
+  counter();
+  std::printf("%d\n", counter());           // 1
+}
+```
+
+`decltype(i)` 写在尾置返回类型里也能找到 init-capture 的 `i`，因为 lambda 作用域包含整个声明符。这是 C++23 的 [[P2036R3]] 确立的规则。
+
+init-capture 的 const 规则与简单捕获不同：`[x]` 保留 `x` 的 const，`[x = x]` 按 `auto` 推导去掉顶层 const，`[&x = x]` 按 `auto&` 推导保留 const。
+
+### 嵌套 lambda（¶14）
+
+¶14 内层 lambda `m2` 捕获了一个实体，而紧邻的外层 lambda `m1` 也捕获了它时：如果 `m1` 按值捕获，`m2` 捕获的是 `m1` 闭包里的那个成员（`m1` 不是 `mutable` 时这个成员视为 const）；如果 `m1` 按引用捕获，`m2` 捕获的是同一个原始实体。
+
+标准例 11 输出 `123234`：
+
+```cpp run ok
+#include <iostream>
+
+int main() {
+  int a = 1, b = 1, c = 1;
+  auto m1 = [a, &b, &c]() mutable {
+    auto m2 = [a, b, &c]() mutable {
+      std::cout << a << b << c;
+      a = 4; b = 4; c = 4;
+    };
+    a = 3; b = 3; c = 3;
+    m2();
+  };
+  a = 2; b = 2; c = 2;
+  m1();
+  std::cout << a << b << c << '\n';
+}
+```
+
+推导过程如下：
+
+1. 创建 `m1` 时，它复制了 `a`（值为 1），按引用持有外部的 `b`、`c`。随后外部的三个变量都变成 2。
+2. 调用 `m1()`，在其中创建 `m2`。`m2` 的 `a` 复制自 `m1` 的成员（1）；`m1` 按引用捕获 `b`，所以 `m2` 复制的是外部 `b` 的当前值（2）；`c` 仍是外部的 `c`。
+3. `m1` 把自己的 `a` 和外部的 `b`、`c` 改为 3，然后调用 `m2()`，输出 `m2` 的 `a`(1)、`b`(2) 和外部的 `c`(3)，即 `123`；再把自己的副本和外部的 `c` 改为 4。
+4. 最后输出外部的 `a`(2)、`b`(3)、`c`(4)，即 `234`。
+
+### 初始化顺序（¶15–¶16）
+
+¶15 闭包成员的声明顺序是未指定的 {{unspec}}，但显式捕获对应的成员按捕获列表的顺序声明。¶16 求值 lambda 表达式时，按值捕获的实体用来直接初始化对应的成员，init-capture 按自己的初始化器初始化，顺序与成员的声明顺序一致。因此显式捕获按书写顺序初始化，析构顺序与之相反（注 9）。
+
+```cpp ok
+#include <utility>
+#include <vector>
+
+void f(std::vector<int>&& v) {
+  [size = v.size(), own = std::move(v)] {};   // size 先初始化，拿到的是原来的大小
+}
+```
+
+### 包和结构化绑定（¶18）
+
+¶18 带 `...` 的简单捕获（`args...`、`&args...`）是包展开；带 `...` 的 init-capture（`...xs = std::move(args)`）是声明了一个 init-capture 包的包展开 {{c++20}}。
 
 ```cpp run ok
 #include <cstdio>
@@ -788,18 +511,16 @@ int main() {
 template<class... Args> int sum(Args... args) {
   auto l1 = [args...] { return (0 + ... + args); };                 // 按值捕获整个包
   auto l2 = [...xs = std::move(args)] { return (0 + ... + xs); };   // C++20：init-capture 包
-  auto l3 = [&...rs = args] { return (0 + ... + rs); };             // C++20：按引用的 init-capture 包
+  auto l3 = [&...rs = args] { return (0 + ... + rs); };             // C++20：按引用
   return l1() + l2() + l3();
 }
 
 int main() { std::printf("%d\n", sum(1, 2, 3)); }   // 18
 ```
 
-注意 `...` 的位置：simple-capture 中 `...` 在后（`args...`，与包展开的一般习惯一致），init-capture 中 `...` 在前（`...xs = e`，与声明包的习惯 `class... Ts` 一致，因为它是在声明一个新包）。
+`...` 的位置有规律：简单捕获里它在后面（`args...`），与一般的包展开一致；init-capture 里它在前面（`...xs = e`），与声明一个新包（`class... Ts`）一致。
 
-### 捕获结构化绑定 {{c++20}}
-
-[[basic.pre]] 把结构化绑定列为局部实体，所以它们可以像变量一样被捕获。这在 C++17 中是非良构的（结构化绑定不是变量）；C++20 允许按值和按引用捕获结构化绑定。但如果结构化绑定指代位域，就不能按引用捕获（¶12）：
+结构化绑定是局部实体，C++20 起可以像变量一样按值或按引用捕获。指代位域的结构化绑定不能按引用捕获（¶12）。
 
 ```cpp ok
 #include <utility>
@@ -807,58 +528,176 @@ int main() { std::printf("%d\n", sum(1, 2, 3)); }   // 18
 void sb() {
   auto [p, q] = std::pair{1, 2};
   auto l  = [p, &q] { return p + q; };   // C++20 起 OK
-  auto l2 = [=] { return p; };           // 隐式捕获也 OK
+  auto l2 = [=] { return p; };           // 隐式捕获也可以
 }
 ```
 
-```cpp error
-struct B { int bf : 3; };
-void g(B b) {
-  auto& [x] = b;
-  [&x] { return x; };      // error: x 指代位域，不能按引用捕获
+### 契约断言不能引起捕获 [expr.prim.lambda.closure] {{c++26}}
+
+¶10 如果一个被隐式捕获的局部实体，它的所有潜在引用都出现在调用运算符的契约断言（`pre`、`post`）或 lambda 体里的 `contract_assert` 中，程序非良构。注 4 说明了目的：给现有程序加上契约断言，不应导致额外的捕获，否则加一句断言就可能改变闭包的大小和布局。
+
+```cpp
+void test() {
+  int i = 1;
+  auto f2 = [=] pre(i > 0) {};   // error: 不能在这里隐式捕获 i
+  auto f3 = [i] pre(i > 0) {};   // OK：显式捕获
+  auto f5 = [=] {
+    contract_assert(i > 0);      // OK：下面还引用了 i
+    (void)i;
+  };
 }
 ```
+
+本机 Clang 23 尚不支持契约语法，这段代码没有标判定。
+
+## 转换为函数指针 [expr.prim.lambda.closure]
+
+¶11 一个 lambda 如果不是泛型的、没有捕获、没有显式对象参数，并且约束（如果有）得到满足，它的闭包类型就有一个转换到函数指针的转换函数。函数指针的形参和返回类型与调用运算符相同；调用运算符不会抛出异常时，转换到 `noexcept` 函数指针。
+
+调用运算符是静态成员函数时，转换得到的就是它的地址。否则得到某个函数 F 的地址，调用 F 的效果等同于在一个默认构造的闭包对象上调用调用运算符。
+
+只有无捕获的 lambda 可以转换，因为函数指针只是一个地址，没有地方存放捕获的状态。
+
+```cpp run ok
+int (*fp)(int) = [](int i) { return i; };     // 隐式转换
+void (*fnp)() noexcept = []() noexcept {};    // 转为 noexcept 函数指针
+auto p = +[](int i) { return i * 2; };        // 一元 + 触发转换，p 的类型是 int(*)(int)
+
+int main() { return fp(0) + p(0); }
+```
+
+¶12 无捕获的泛型 lambda 有一个转换函数模板。它从目标函数指针类型推导模板实参，再用推导出的特化确定返回类型（注 5，¶13）。标准例 7 展示了推导的边界：
+
+```cpp error
+void f1(int (*)(int))   { }
+void f2(char (*)(int))  { }
+void g(int (*)(int))    { }     // #1
+void g(char (*)(char))  { }     // #2
+void h(int (*)(int))    { }     // #3
+void h(char (*)(int))   { }     // #4
+
+auto glambda = [](auto a) { return a; };
+void test() {
+  f1(glambda);   // OK：a 推导为 int，返回 int
+  f2(glambda);   // error: a 推导为 int 时返回 int，不是 char
+  g(glambda);    // error: #1 和 #2 都可行，有歧义
+  h(glambda);    // OK：只有 #3 可行
+}
+int& (*fpi)(int*) = [](auto* a) -> auto& { return *a; };   // OK
+```
+
+¶14 泛型 lambda 转换得到的函数也遵循 ¶11 的规则：静态时指向调用运算符模板的特化，否则指向一个转发函数。这会触发 lambda 函数体的实例化（注 6）。
+
+¶15 转换函数是 public、constexpr、非 virtual、非 explicit、const 的，并且不抛出异常。转换本身总能在常量表达式里进行，但得到的函数指针能不能在常量表达式里调用，取决于调用运算符是不是 constexpr 函数：
+
+```cpp error
+auto Fwd = [](int (*fp)(int), auto a) { return fp(a); };
+auto C  = [](auto a) { return a; };
+static_assert(Fwd(C, 3) == 3);    // OK
+
+auto NC = [](auto a) { static int s; return a; };   // 有静态局部变量，不可能是 constexpr
+static_assert(Fwd(NC, 3) == 3);   // error: 不是常量表达式
+```
+
+## 特殊成员函数 [expr.prim.lambda.closure]
+
+¶17 闭包类型的特殊成员函数：
+
+| | 有捕获 | 无捕获 |
+|---|---|---|
+| 默认构造函数 | 没有 | 预置（defaulted）{{c++20}} |
+| 拷贝、移动构造函数 | 预置 | 预置 |
+| 拷贝赋值运算符 | 弃置（deleted） | 预置 {{c++20}} |
+| 移动赋值运算符 | 不声明，赋值会选中弃置的拷贝赋值 | 预置 {{c++20}} |
+
+这些函数照常隐式定义，因此可能被定义为弃置的（注 7）。例如按值捕获了一个 `std::unique_ptr`，拷贝构造函数就是弃置的，闭包只能移动。¶18 闭包类型有一个隐式声明的析构函数。
+
+C++20 之前，所有闭包类型都不能默认构造和赋值。C++20 放开了无捕获的情形，再加上 lambda 可以出现在 `decltype` 里，就能把 lambda 的类型直接用作比较器或删除器：
+
+```cpp run ok
+#include <cstdio>
+#include <memory>
+#include <set>
+
+int main() {
+  using Cmp = decltype([](int a, int b) { return a > b; });
+  std::set<int, Cmp> s{1, 3, 2};          // set 默认构造一个 Cmp
+  std::printf("%d\n", *s.begin());        // 3
+
+  std::unique_ptr<int, decltype([](int* p) { delete p; })> up(new int(1));
+}
+```
+
+## 闭包类型的其他性质 [expr.prim.lambda.closure]
+
+¶4 闭包类型不是聚合，所以不能用花括号初始化伪造一个闭包对象。它不是 final，所以可以从闭包类型派生，常见的 `overloaded` 写法就依赖这一点。当且仅当 lambda 没有任何捕获时，它是**结构化类型**（[[g:structural-type|structural type]]，[[temp.param]]），可以用作非类型模板实参。
+
+!!! std
+    The closure type is not an aggregate type and is not final; it is a structural type if and only if the lambda has no *lambda-capture*.
+
+```cpp run ok
+#include <cstdio>
+#include <string>
+#include <variant>
+
+template<class... Fs> struct overloaded : Fs... { using Fs::operator()...; };
+
+template<auto F> int call() { return F(); }   // 无捕获 lambda 作非类型模板实参
+
+int main() {
+  std::variant<int, std::string> v = std::string("hi");
+  std::visit(overloaded{[](int i) { std::printf("int %d\n", i); },
+                        [](const std::string& s) { std::printf("str %s\n", s.c_str()); }}, v);
+  std::printf("%d\n", call<[] { return 42; }>());
+}
+```
+
+¶4 后半段允许实现用不同于上述描述的方式定义闭包类型，只要可观察行为不变，例外是下面三项可以不同：闭包类型的大小和对齐、是否可平凡复制、是否是标准布局类。实现不能给闭包类型添加右值引用类型的成员。所以 `sizeof` 一个闭包、`std::is_trivially_copyable_v` 的结果，在不同编译器之间不保证一致。
+
+<details class="fine" markdown="1"><summary>其余条文</summary>
+
+¶3（[expr.prim.lambda.general]）*requires-clause* 可以以属性结尾，与 lambda 声明符前的属性冲突，例如 `[]<class T> requires T::operator int [[attr]] (int) {}`。标准规定这时属性一律归 lambda。注 2 指出，这样的歧义写法本来就没有合法语义，因为约束表达式的类型不会是 `bool`。
+
+¶2（[expr.prim.lambda.closure]）闭包类型在 lambda 的函数体结束前是不完整的。
+
+¶8（[expr.prim.lambda.closure]）是一个关于 constexpr lambda 的长例子，要点已在前文说明。
+
+¶9（[expr.prim.lambda.closure]）注 3 说明，调用运算符可以用类型约束、`<…>` 后的 *requires-clause* 和尾置 *requires-clause* 加约束，与普通函数模板相同（[[temp.constr.decl]]）。
+
+¶19（[expr.prim.lambda.closure]）闭包类型的成员不能被显式实例化、显式特化，也不能在友元声明中被指名。
+
+</details>
 
 ## 实现视角
 
 !!! impl
-    - **闭包布局**：主流实现把按值捕获实现为普通数据成员；按引用捕获通常每个存一个指针（本机 Clang 上，按引用捕获两个 `int` 的闭包 `sizeof` 为 16）。¶4 与 ¶12 允许实现采用别的表示（例如只存一个栈帧指针）。无捕获闭包是空类，`sizeof` 为 1。
-    - **名字修饰**：Itanium C++ ABI 为 lambda 规定了修饰方式（`UlvE_` 之类，形如 `{lambda()#1}`），使得出现在内联函数、类定义、变量模板等可在多个 TU 中重复定义的位置上的 lambda，在各个 TU 中得到相同的闭包类型名。这是 ODR 能够成立的前提（[[basic.def.odr]] 要求这些定义在各 TU 中相同）。对于出现在非内联函数中的 lambda，Clang 会给出 `$_0` 之类的局部名字（ASan 报告中可以看到 `make()::$_0::operator()()`）。
-    - **函数指针转换**：对非 static 的无捕获 lambda，编译器生成一个静态的调用器（invoker）函数，在其中构造一个闭包对象（空类），再调用 `operator()`，这就是 ¶11 中的 `F`。C++23 的 static lambda 省掉了这一层。
-    - **`__func__`**：Clang 在 lambda 体内给出 `"operator()"`，GCC 也是如此；这是实现定义的。
-    - **诊断**：Clang 的 `-Wdeprecated-this-capture` 对应 [[depr.capture.this]]；`-Wunused-lambda-capture` 提示显式捕获了但未 odr-use 的实体（例如常量）。
+    - 主流实现把按值捕获实现为普通数据成员，按引用捕获通常每个存一个指针。本机 Clang 23 上，按引用捕获两个 `int` 的闭包 `sizeof` 为 16；无捕获的闭包是空类，`sizeof` 为 1。¶4 和 ¶12 也允许别的表示，例如只存一个栈帧指针。
+    - Itanium C++ ABI 为 lambda 规定了名字修饰方式，使出现在 inline 函数、类定义等可以在多个翻译单元中重复定义的位置上的 lambda，在各个翻译单元里得到相同的闭包类型，这是满足 ODR 的前提（[[basic.def.odr]]）。
+    - 对非静态的无捕获 lambda，编译器生成一个静态的转发函数，在里面构造一个空的闭包对象再调用 `operator()`，这就是 ¶11 里的 F。
+    - Clang 的 `-Wunused-lambda-capture` 提示显式捕获了却没有 odr-use 的实体，例如常量。
 
 ## 历史与演进
 
 !!! history
-    - **C++11**：引入 lambda 表达式；返回类型推导仅限单一 return 语句；只能捕获自动变量与 `this`。
-    - **C++14**：泛型 lambda（`auto` 形参）；init-capture（解决 move-only 对象的捕获）；返回类型推导与普通函数统一。
-    - **C++17**：`constexpr` lambda 与隐式 constexpr（[[P0170R1]]）；`[*this]` 按值捕获当前对象（[[P0018R3]]）。
-    - **C++20**：lambda 的模板形参列表（[[P0428R2]]）；无捕获 lambda 可默认构造与赋值（[[P0624R2]]）；lambda 可出现在未求值操作数中（[[P0315R4]]）；init-capture 中的包展开（[[P0780R2]]）；允许 `[=, this]`、弃用 `[=]` 隐式捕获 `this`（[[P0806R2]]）；可捕获结构化绑定（[[P1091R3]]、[[P1381R1]]）；`consteval` lambda。
-    - **C++23**：省略 `()` 的规则放宽（[[P1102R2]]）；`static` lambda（[[P1169R4]]）；显式对象参数（[[P0847R7]]）；lambda 声明符前的属性（[[P2173R1]]）；尾置返回类型中捕获名字的作用域调整（[[P2036R3]]，即 [[expr.prim.id.unqual#4]] 的现行规则）。
-    - **C++26**：契约说明符可用于 lambda，并规定契约不得引起隐式捕获（¶10）；`consteval` 块不定义 `__func__`。
+    - C++11 引入 lambda。返回类型推导只限单条 `return` 语句，只能捕获自动变量和 `this`。
+    - C++14：泛型 lambda（`auto` 形参）；init-capture，用来捕获只能移动的对象；返回类型推导与普通函数统一。
+    - C++17：constexpr lambda 和隐式 constexpr（[[P0170R1]]）；`[*this]` 按值捕获整个对象（[[P0018R3]]）。
+    - C++20：模板形参列表（[[P0428R2]]）；无捕获 lambda 可以默认构造和赋值（[[P0624R2]]）；lambda 可以出现在未求值操作数中（[[P0315R4]]）；init-capture 包（[[P0780R2]]）；`[=, this]` 和弃用 `[=]` 隐式捕获 `this`（[[P0806R2]]）；捕获结构化绑定（[[P1091R3]]、[[P1381R1]]）；隐式捕获改为基于语法的规则（[[P0588R1]]），此前的规则以 odr-use 为基础，并为泛型 lambda 另设了复杂的特殊规则。
+    - C++23：省略 `()` 的限制放宽（[[P1102R2]]）；`static` lambda（[[P1169R4]]）；显式对象参数（[[P0847R7]]）；声明符前的属性（[[P2173R1]]）；尾置返回类型可以看到捕获的名字（[[P2036R3]]）。
+    - C++26：lambda 可以带契约，契约断言不得引起隐式捕获。
 
-## 陷阱
+## 常见错误
 
-!!! pitfall "`[=]` 不复制 *this"
-    `[=] { return member; }` 捕获的是 `this` 指针。如果闭包被存起来（异步回调、`std::function` 成员），对象销毁后再调用就会悬垂。C++20 起，要么写 `[=, this]` 表明意图，要么写 `[=, *this]` 真正复制。
+!!! pitfall "每个 lambda 是不同的类型"
+    `auto g = cond ? [k] { return 1; } : [k] { return 2; };` 非良构，两个分支是不同的类，互相不能转换。去掉捕获后 `cond ? [] { return 1; } : [] { return 2; }` 却是良构的：操作数是不同的类类型时，[[expr.cond]] 会尝试转换，而两个无捕获闭包都能转换为 `int(*)()`，结果类型就是这个函数指针。
 
-!!! pitfall "按引用捕获的生命周期"
-    如果 lambda 只在当前作用域内同步使用，`[&]` 既安全又高效；一旦闭包逃逸（返回、存储、传给另一个线程），按引用捕获的局部变量就会悬垂。应当遵循的原则是：**逃逸的 lambda 只按值捕获，或者只按引用捕获生命周期确定更长的对象**。
-
-!!! pitfall "每个 lambda 一个类型"
-    `auto g = cond ? [k] { return 1; } : [k] { return 2; };` 非良构：两个分支是不同的类类型，彼此无法转换。有意思的是，去掉捕获之后，`cond ? [] { return 1; } : [] { return 2; }` 却是良构的：两个操作数的类类型不同时，[[expr.cond]] 会对内置候选做重载决议，而两个无捕获闭包都能转换为 `int(*)()`，于是结果类型就是函数指针。同理，`std::vector<decltype(lam)>` 也只能装这一个 lambda 的对象。
-
-!!! pitfall "init-capture 与 const"
-    `[x]` 保留 `x` 的 const；`[x = x]` 按 `auto` 推导，丢弃顶层 const；`[&x = x]` 按 `auto&` 推导，保留 const。
-
-!!! pitfall "常量不需要捕获，除非取它的地址"
-    `const int N = 10; [] { return N * 2; }` 没有问题；`[] { return &N; }`、`[] { std::max(N, 1); }`（`std::max` 按 `const T&` 接收，绑定引用，构成 odr-use）都非良构。很多人第一次困惑于常量为什么也要捕获，往往就是因为后一种情况。
+!!! pitfall "常量不需要捕获，除非取地址或绑定引用"
+    `const int N = 10; [] { return N * 2; }` 没有问题；`[] { return &N; }` 和 `[] { return std::max(N, 1); }` 都非良构，后者因为 `std::max` 按 `const T&` 接收参数。
 
 ## 思考题
 
 !!! question "思考题 1"
-    下面的 lambda 是否良构？若良构，闭包对象的 `sizeof` 是多少（在常见 64 位实现上）？
+    下面的 lambda 是否良构？在 Clang 上闭包对象的 `sizeof` 是多少？
     ```cpp
     void f() {
       const int N = 10;
@@ -869,20 +708,11 @@ void g(B b) {
 <details markdown="1">
 <summary>答案</summary>
 
-良构。`N` 在 lambda 体内被潜在引用、潜在求值，且在此处 odr-usable，因此按 ¶7 被隐式捕获（隐式捕获不要求 odr-use）。但由于 `N + 1` 中对 `N` 的使用不是 odr-use，按 ¶11，它指代外部的 `N`（编译期常量），而不是闭包成员；标准例子的注释说实现可以优化掉这个捕获。实践中 Clang 的 `sizeof(l)` 为 1（空闭包）。注意，标准并不保证这个大小，¶4 允许实现改变闭包的大小。
+良构。`N` 在 lambda 体里被潜在引用、潜在求值，并且在这里 odr-usable，所以按 [[expr.prim.lambda.capture#7]] 被隐式捕获，隐式捕获不要求 odr-use。但 `N + 1` 只读常量的值，不是 odr-use，按 [[expr.prim.lambda.capture#11]] 它指代外层的 `N`，而不是闭包成员，实现可以把这个捕获优化掉。本机 Clang 23 上 `sizeof(l)` 为 1。标准不保证这个大小（[[expr.prim.lambda.closure#4]]）。
 </details>
 
 !!! question "思考题 2"
-    为什么有捕获的 lambda 的拷贝赋值运算符被弃置，而拷贝构造函数却是预置的？
-
-<details markdown="1">
-<summary>答案</summary>
-
-历史上的考虑是：按引用捕获可能实现为引用成员，而带引用成员的类无法合理地赋值（引用不能重新绑定）；同时，对闭包赋值在语义上意味着替换捕获的状态，lambda 的设计并不打算这样使用。拷贝构造则是把闭包传给算法、存入 `std::function` 所必需的。C++20 放开的只是无捕获的情形：那里没有状态，赋值是平凡的，而允许赋值之后，闭包类型就可以作为 `std::set` 比较器、`unique_ptr` 删除器等需要默认构造或赋值的模板实参。
-</details>
-
-!!! question "思考题 3"
-    下面代码输出什么？
+    下面的代码输出什么？
     ```cpp
     int x = 1;
     auto l = [x]() mutable { return ++x; };
@@ -894,21 +724,5 @@ void g(B b) {
 <details markdown="1">
 <summary>答案</summary>
 
-输出 `421`。`l` 被调用三次，其成员依次变为 2、3、4，最后一次返回 4；`l2` 是在任何调用之前复制的，成员仍为 1，调用后返回 2；外部的 `x` 从未被修改，是 1。（C++17 起，`<<` 的左操作数先于右操作数求值，所以输出顺序是确定的。）这道题说明闭包对象就是一个普通对象，复制闭包就复制了它的所有捕获状态。
+输出 `421`。`l` 被调用三次，它的成员依次变为 2、3、4，第三次返回 4。`l2` 是在任何调用之前复制的，成员仍是 1，调用后返回 2。外部的 `x` 没有被修改，是 1。C++17 起 `<<` 的左操作数先于右操作数求值，所以顺序是确定的。闭包对象就是一个普通对象，复制它就复制了全部捕获的状态。
 </details>
-
-## 小结
-
-!!! summary
-    | 主题 | 要点 |
-    |---|---|
-    | 本质 | lambda 等于定义一个独一无二的无名类（闭包类型），再创建它的 prvalue 对象 |
-    | 闭包类型 | 非聚合、非 final；无捕获时是结构化类型；大小/平凡可复制/标准布局可能因实现而异 |
-    | 调用运算符 | 默认 `const`；`mutable` 去掉 const；`static` 变静态（不能有捕获）；显式对象参数下由 `self` 决定；满足条件时隐式 constexpr |
-    | 函数指针转换 | 仅限无捕获、无显式对象参数；泛型 lambda 有转换函数模板；转换函数本身总是 constexpr、noexcept |
-    | 特殊成员 | 有捕获：无默认构造、拷贝赋值弃置；无捕获（C++20）：可默认构造、可赋值 |
-    | 隐式捕获 | 在 odr-usable 处潜在引用且潜在求值即被捕获（不要求 odr-use）；语法决定，丢弃语句中也算 |
-    | 按值 vs 按引用 | `[=]` 隐式捕获 `*this` 是按引用（已弃用）；按值成员类型保留 const；位域/匿名联合体成员不能按引用捕获 |
-    | 名字指向 | odr-use → 闭包成员；非 odr-use（如常量取值）→ 原实体 |
-    | 初始化 | 求值 lambda 表达式时进行；显式捕获按书写顺序；其余顺序未指定 |
-    | 悬垂 | 按引用捕获的对象死后再访问是 UB；捕获的引用看其绑定对象的生命周期 |
