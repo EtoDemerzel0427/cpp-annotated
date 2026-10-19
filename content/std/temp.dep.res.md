@@ -1,326 +1,284 @@
 ---
 title: 待决名决议
-summary: 依赖名在哪里被查找：实例化点（POI）如何确定，即函数模板紧随引用它的声明之后、类模板紧挨其前、翻译单元末尾也是 POI；多个 POI 含义不同即 IFNDR；依赖调用的候选函数 = 定义处的无限定查找 ∪ 定义语境与实例化语境中的 ADL。附两阶段查找的精确表述、依赖基类与 this->、MSVC 的历史差异。
+summary: 模板里的依赖调用在哪里查找函数：普通查找只看模板定义处，ADL 还要看实例化点；实例化点怎样确定，多个实例化点含义不同、或换一组头文件就会选出更好的重载时，程序非良构而不要求诊断。
 status: done
 covers: temp.dep.res, temp.point, temp.dep.candidate
 papers: P1787R6
 related: temp.res, temp.dep, temp.inst, basic.lookup.argdep, module.context, module.reach, temp.expl.spec, basic.def.odr, topics/two-phase-lookup
 tags: 模板, 两阶段查找, 实例化点, ADL, 模块, IFNDR
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-[[temp.dep]] 决定了哪些名字是依赖的；本节 [[temp.dep.res]]（dependent name resolution）决定依赖名在哪里被查找。它只有两个子条款：
+!!! tldr
+    - 依赖调用 `f(t)` 的候选函数来自两处：模板定义处的普通无限定查找，加上定义处和实例化点的 ADL。模板定义之后才声明的函数，只能经由 ADL 找到。
+    - 依赖基类的成员在模板定义处不可见，要写 `this->g()` 或 `Base<T>::g()`；后者会关闭虚调用。
+    - 函数模板特化的实例化点紧跟在引用它的命名空间作用域声明之后，类模板特化的实例化点紧挨在它之前。
+    - 函数模板特化在翻译单元末尾还有一个实例化点。几个实例化点给出不同含义时，程序非良构，不要求诊断。
+    - 如果把所有翻译单元的声明都考虑进来，依赖调用会出错或选到更好的重载，程序同样非良构，不要求诊断。
 
-- [[temp.point]]：[[g:point-of-instantiation|**实例化点**]]（point of instantiation，POI），即一个特化在源代码的哪个位置被实例化；
-- [[temp.dep.candidate]]：依赖调用的候选函数。ADL 在实例化语境中找到的函数也参与重载决议，但如果把所有 TU 都考虑进来会改变结果，则 IFNDR。
-
-本页先把散落在几个条款中的两阶段查找规则拼成一张完整的图，再逐段读这两个子条款。
-
-## 两阶段查找的精确表述
-
-“两阶段查找”不是标准术语，它是以下规则的合称：
-
-| 名字的种类 | 在哪里查找 | 出处 |
-|---|---|---|
-| 非依赖名（无论限定与否） | 只在定义处查一次；结果固定 | [[temp.res.general#1]] |
-| 依赖调用 `f(args)` 中的 `f`：普通无限定查找 | 从定义处出发（对每个特化各做一次，但起点相同，结果相同） | [[temp.res.general#1]]、[[basic.lookup.unqual]] |
-| 依赖调用 `f(args)` 中的 `f`：ADL | 从定义处，以及实例化语境中的每一点出发 | [[basic.lookup.argdep#4]]、[[module.context]] |
-| 依赖的限定名 `T::x`、`Base<T>::x`、`t.x` | 替换后在确定的查找上下文中做限定名查找 | [[temp.res.general#1]]、[[temp.dep.type#5]] |
-| 以限定名引用的当前实例化成员 | 定义处查一次；实例化时在实例化语境中再查，结果不同则二义 | [[temp.dep.type#6]] |
-
-关键在第 2、3 行：**依赖调用并不是在实例化处做完整的查找**。实例化处只追加 ADL；普通的无限定查找仍然只看得到定义处之前的声明。
-
-!!! std
-    If N is a dependent name, the above lookup is also performed from each point in the instantiation context of the lookup, ...
-
-    （[[basic.lookup.argdep#4]]）对依赖名，ADL 还要从实例化语境中的每一点出发再做一次。
-
-对于不使用模块的程序，实例化语境就是实例化点本身（[[module.context#5]]）。模块带来的扩展见下文和 [[topics/two-phase-lookup]]。
+## 模板定义之后声明的函数能不能被调用
 
 ```cpp run ok title="where_lookup_happens.cpp"
 #include <cstdio>
 void f(int) { std::puts("f(int)"); }
 
-template<class T> void g(T t) { f(t); }    // 依赖调用
+template<class T> void g(T t) { f(t); }
 
-void f(double) { std::puts("f(double)"); } // 定义之后才声明
+void f(double) { std::puts("f(double)"); } // 定义之后声明
 namespace N {
-    struct S { operator int() const { return 0; } };
-    void f(S) { std::puts("N::f(S)"); }    // 定义之后才声明
+  struct S { operator int() const { return 0; } };
+  void f(S) { std::puts("N::f(S)"); }      // 定义之后声明
 }
 
 int main() {
-    g(1.0);      // f(int)：f(double) 不可见——无限定查找只在定义处，double 无关联命名空间
-    g(N::S{});   // N::f(S)：实例化语境中的 ADL 找到它
+  g(1.0);      // 输出 f(int)
+  g(N::S{});   // 输出 N::f(S)
 }
 ```
 
-`g(1.0)` 调用 `f(int)`（`double` 隐式转换为 `int`），尽管 `f(double)` 在实例化时早已声明且是精确匹配。这是两阶段查找最常被误解的地方。
+`g` 里的 `f(t)` 是一个**依赖调用**（dependent call）：实参 `t` 的类型取决于模板形参，所以在模板定义处还无法决定调用哪个 `f`（[[temp.dep]]）。`g(1.0)` 实例化时，`f(double)` 早已声明而且是精确匹配，最后调用的却是 `f(int)`。`g(N::S{})` 则找到了同样在定义之后才声明的 `N::f(S)`。
 
-## 依赖基类与 this->
+两者的区别在于查找方式。普通的无限定查找只在模板定义处做一次，那时只有 `f(int)`。**实参依赖查找**（ADL，[[g:argument-dependent-lookup]]）会到实参类型的关联命名空间里找函数，对依赖调用它还要在实例化时再做一次。`N::S` 的关联命名空间是 `N`，所以找到了 `N::f(S)`；`double` 是基本类型，没有关联命名空间，ADL 什么也找不到。
 
-两阶段查找最常让人困惑的地方是依赖基类中的成员：
+### 两阶段查找的完整规则
+
+这套规则通常叫**两阶段查找**（two-phase lookup，[[g:two-phase-lookup]]）。这不是标准术语，而是几条分散规则的合称：
+
+| 名字的种类 | 在哪里查找 | 出处 |
+|---|---|---|
+| 非依赖名（限定或不限定） | 只在模板定义处查一次，结果固定 | [[temp.res.general#1]] |
+| 依赖调用 `f(args)` 的普通无限定查找 | 只从模板定义处出发 | [[temp.res.general#1]] |
+| 依赖调用 `f(args)` 的 ADL | 从模板定义处，以及实例化语境中的每一点出发 | [[basic.lookup.argdep#4]] |
+| 依赖的限定名 `T::x`、`Base<T>::x`、`t.x` | 实例化时在确定的类里做限定名查找 | [[temp.dep.type#5]] |
+
+!!! std
+    If N is a dependent name, the above lookup is also performed from each point in the instantiation context of the lookup, ...
+
+[[basic.lookup.argdep#4]] 的这句话是第三行的依据：对依赖名，ADL 还要从**实例化语境**（instantiation context，[[g:instantiation-context]]）的每一点出发再做一次。不使用模块的程序里，实例化语境只有一个点，就是下文讲的实例化点（[[module.context#5]]）。
+
+## 依赖基类与 `this->`
 
 ```cpp error
 template<class T> struct Base { void g() { } };
 template<class T> struct D : Base<T> {
-    void f() { g(); }    // error: g 没有实参 → 不是依赖调用 → 定义处查找，依赖基类不被搜索
+  void f() { g(); }    // error: 找不到 g
 };
 ```
 
-`g()` 没有实参，也就不可能有类型依赖的实参，按 [[temp.dep.general#2]] 它不是依赖调用，`g` 是非依赖名。在定义处查找时，`D` 中没有 `g`，依赖基类 `Base<T>` 不被搜索（[[class.member.lookup#4]]、[[temp.dep.type#3]]），全局也没有，所以找不到。
+`g()` 没有实参，不可能是依赖调用，`g` 是非依赖名，只在定义处查找。`D` 自己没有 `g`；`Base<T>` 是**依赖基类**（[[g:dependent-base-class]]），即依赖于模板形参的基类，在定义处不被搜索（[[temp.dep.type#3]]）；全局也没有 `g`。于是查找失败。
 
-为什么依赖基类不被搜索？因为 `Base<T>` 可以被显式特化成任何样子：
+依赖基类不被搜索，是因为 `Base<T>` 可以被显式特化成任何样子。下面的程序在全局恰好有一个 `g`：
 
 ```cpp run ok title="silent_rebinding.cpp"
 #include <cstdio>
 void g() { std::puts("::g"); }
 
-template<class T> struct Base { void g() { std::puts("Base<T>::g"); } };
-template<class T> struct D : Base<T> {
-    void f() {
-        g();          // ::g——定义处绑定，永远不会是 Base<T>::g
-        this->g();    // Base<T>::g——依赖名，实例化时查找
-    }
+template<class T> struct Base {
+  void g() { std::puts("Base<T>::g"); }
 };
-template<> struct Base<int> { };   // 显式特化：没有 g
+template<class T> struct D : Base<T> {
+  void f() {
+    g();          // 定义处绑定到 ::g
+    this->g();    // 依赖名，实例化时查找
+  }
+};
+template<> struct Base<int> { };   // 没有 g
 
-int main() { D<double>{}.f(); }    // 输出 ::g，然后 Base<T>::g
+int main() { D<double>{}.f(); }    // ::g，然后 Base<T>::g
 ```
 
-这个例子说明了两件事：（1）如果全局恰好有个 `g`，无限定的 `g()` 会静默地绑定到它，不报错，行为却不是你想要的；（2）如果规则允许在定义处查看主模板 `Base<T>` 的成员，那么 `D<int>` 将无法正确处理 `Base<int>` 这个没有 `g` 的特化。标准选择了一致且可预测的规则：在定义时，依赖基类视同不存在。
+无限定的 `g()` 静默地绑定到了 `::g`，没有任何诊断。如果规则允许在定义处看主模板 `Base<T>` 的成员，那么 `D<int>` 遇到没有 `g` 的 `Base<int>` 时含义又会改变。标准选择了一致的规则：在模板定义处，依赖基类视同不存在。
 
-让名字变成依赖的三种写法：
+要使用依赖基类的成员，有下面几种写法：
 
 ```cpp run ok
-template<class T> struct Base { void g() { } int x = 0; };
+template<class T> struct Base { void g() { } };
 template<class T> struct D : Base<T> {
-    void f() {
-        this->g();      // ① this 类型依赖 → 成员访问依赖
-        D::g();         // ② 查找上下文是当前实例化、有依赖基类、查无此名 → 依赖（¶5.4）
-        Base<T>::g();   // ③ 查找上下文依赖 → 依赖（¶5.2）
-    }
+  void f() {
+    this->g();      // this 的类型依赖，成员访问随之依赖
+    D::g();         // 在当前类里查不到、又有依赖基类：依赖
+    Base<T>::g();   // 查找的类依赖于 T：依赖
+  }
 };
 template<class T> struct D2 : Base<T> {
-    using Base<T>::g;   // ④ using 声明把名字引入当前作用域
-    void f() { g(); }
+  using Base<T>::g; // 把名字引入 D2
+  void f() { g(); }
 };
 int main() { D<int>{}.f(); D2<int>{}.f(); }
 ```
 
-!!! pitfall "Base<T>::f() 会关掉虚调用"
-    写法 ③ 是限定调用，限定名调用虚函数不做动态派发（[[class.virtual]]）。若 `g` 是虚函数而派生类覆盖了它，`Base<T>::g()` 调用的是基类版本，`this->g()` 才是虚调用：
+`D::g()` 和 `Base<T>::g()` 依赖的依据分别是 [[temp.dep.type#5]] 的第 5.4 项和第 5.2 项。
+
+!!! pitfall "`Base<T>::f()` 会关闭虚调用"
+    限定名调用虚函数不做动态派发（[[class.virtual]]）。如果 `hook` 是虚函数，`Base<T>::hook()` 总是调用基类版本，`this->hook()` 才是虚调用：
 
     ```cpp run ok
     #include <cstdio>
-    template<class T> struct Base { virtual void hook() { std::puts("Base::hook"); } };
+    template<class T> struct Base {
+      virtual void hook() { std::puts("Base::hook"); }
+    };
     template<class T> struct D : Base<T> {
-        void hook() override { std::puts("D::hook"); }
-        void call() { this->hook(); Base<T>::hook(); }
+      void hook() override { std::puts("D::hook"); }
+      void call() { this->hook(); Base<T>::hook(); }
     };
     int main() { D<int> d; d.call(); }   // D::hook，然后 Base::hook
     ```
-    所以通用的建议是 `this->`，而不是 `Base<T>::`。
 
-### 为什么 MSVC 历史上不一样
+    所以一般推荐写 `this->`。
 
-MSVC 在很长时间里不实现两阶段查找：它把模板体保存为记号流，到实例化时才解析与查找。这意味着：
+!!! impl "MSVC 的旧行为"
+    MSVC 长期不实现两阶段查找：它把模板体存成记号流，实例化时才解析和查找。于是依赖基类的成员可以无限定使用，缺少 `typename` 的代码照样编译，定义之后声明的普通函数也能被找到，从未实例化的模板里的错误不报。这些代码换到 GCC、Clang 上无法编译，`silent_rebinding.cpp` 在旧 MSVC 上还会调用 `Base<T>::g`。
 
-- 依赖基类的成员可以直接无限定使用（实例化时基类已知，自然能找到）；
-- 缺少 `typename`、`template` 的代码照样能编译（实例化时已知 `T::x` 是什么）；
-- 定义之后才声明的函数，即使不是通过 ADL，也会被找到（实例化时它们已经声明）；
-- 模板里的语法错误、非依赖错误，只要模板从未被实例化就不报。
+    VS 2017 起，MSVC 在 `/permissive-` 模式下实现两阶段查找，`/Zc:twoPhase-` 可以关闭它。Clang 的 `-fdelayed-template-parsing` 模仿旧 MSVC，把函数模板体推迟到翻译单元末尾解析；用它编译上面找不到 `g()` 的例子不再报错。这是不符合标准的行为，Clang 也会提示该选项在 C++20 之后已弃用。
 
-这种模型对用户很宽松，但它给出的含义与标准不同（`silent_rebinding.cpp` 中它会调用 `Base<T>::g`），而且同一份代码在 GCC/Clang 上无法编译。微软从 VS 2017 开始在 `/permissive-` 一致性模式下实现两阶段查找，`/Zc:twoPhase-` 可以关掉它以兼容旧代码。
+## 实例化点 [temp.point]
 
-Clang 为兼容 MSVC 提供了 `-fdelayed-template-parsing`：函数模板体推迟到翻译单元末尾才解析。用它编译上面那个找不到 `g()` 的例子，Clang 不再报错。这正是旧 MSVC 的行为，也是不符合标准的行为（Clang 会提示该选项在 C++20 之后已弃用）。
+实例化语境里的点从哪里来？最基本的是**实例化点**（point of instantiation，POI，[[g:point-of-instantiation]]）：源代码中的一个位置，编译器视同在这里生成特化的定义。依赖调用的 ADL 从这里出发，看得到这里之前的声明。
 
-## 实例化点（[temp.point]）
-
-实例化点是一个程序点：特化中依赖名的 ADL 从这里出发，可达性（[[module.reach]]）也从这里判断。规则按实体种类分为函数类与类类，二者的位置恰好相反。
-
-### 函数类特化：紧随其后（¶1）
-
-¶1 对函数模板特化、成员函数模板特化、类模板的成员函数或静态数据成员的特化：
-
-- 如果 ¶1.1 它是因为在另一个模板特化中被引用而隐式实例化的，并且 ¶1.2 引用它的语境依赖于模板形参，那么它的 POI 就是外围特化的 POI；
-- 否则，它的 POI 紧随引用它的那个命名空间作用域声明或定义之后。
-
-“命名空间作用域声明”这个限定很重要：在函数体里调用 `f(x)`，POI 不在调用处，而在包含这个调用的整个命名空间作用域函数定义之后：
+### 函数紧随其后（¶1）
 
 ```cpp
 namespace N { struct S { }; }
 template<class T> void call(T t) { touch(t); }
 
 void use() {
-    call(N::S{});       // call<N::S> 的 POI：紧随 use 的定义之后（见下）
+  call(N::S{});
 }
-// ← call<N::S> 的 POI 在这里
+// ← call<N::S> 的实例化点
 namespace N { void touch(S) { } }
-// ← 翻译单元末尾：也是 POI（¶7）
+// ← 翻译单元末尾：也是实例化点（¶7）
 ```
 
-为什么是“之后”？函数模板特化可能递归地引用自己，或被包含它的函数间接引用；把 POI 放在整个声明之后，可以保证该声明本身（例如 `use`）在实例化语境中已经可见。
+¶1 对函数模板特化、成员函数模板特化、类模板的成员函数或静态数据成员的特化，实例化点紧随引用它的那个命名空间作用域声明或定义之后。`call(N::S{})` 写在 `use` 的函数体里，实例化点却不在调用处，而在整个 `use` 定义之后。
 
-嵌套情形：`call<N::S>` 内部若又调用了 `helper(t)`（依赖语境），`helper<N::S>` 的 POI 就是 `call<N::S>` 的 POI，而不是 `call` 定义内的某个位置，因为模板定义内部不存在可以作为参照的命名空间作用域声明。
+例外是嵌套的情形。如果这个特化是因为另一个模板特化引用它而隐式实例化的（¶1.1），并且引用它的语境依赖于模板形参（¶1.2），它的实例化点就是外围特化的实例化点。比如 `call<N::S>` 里再调用 `helper(t)`，`helper<N::S>` 的实例化点就是 `call<N::S>` 的实例化点。模板定义内部没有命名空间作用域的声明可以作为参照，只能沿用外围的。
 
-### 默认实参与 noexcept 说明符（¶2–¶3）
+¶2 调用用到了默认实参时，默认实参的实例化点就是这个函数特化的实例化点。
 
-¶2 函数模板或类模板成员函数的调用用到默认实参的定义时，默认实参的 POI 就是该函数特化的 POI。
+¶3 *noexcept-specifier* 的规则与 ¶1 相同：被另一个模板特化需要、需要它的语境又依赖于模板形参时，沿用那个特化的实例化点（¶3.1、¶3.2）；否则紧随需要它的命名空间作用域声明之后。默认实参和 noexcept 说明符各自按需单独实例化（[[temp.inst]]），所以需要自己的实例化点。
 
-¶3 函数模板特化或类模板成员函数特化的 *noexcept-specifier*：若因另一个模板特化需要而隐式实例化（¶3.1），且需要它的语境依赖于模板形参（¶3.2），POI 是需要它的那个特化的 POI；否则紧随需要它的命名空间作用域声明之后。
-
-这与 [[temp.res.general#7]] 呼应：默认实参与 noexcept 说明符被视为定义，按需单独实例化，因此需要自己的 POI。
-
-### 类类特化：紧挨其前（¶4）
-
-¶4 对类模板特化、类成员模板特化、类模板的类成员的特化：
-
-- 如果 ¶4.1 它是因为在另一个模板特化中被引用而隐式实例化的，¶4.2 引用语境依赖于模板形参，并且 ¶4.3 它在外围模板实例化之前尚未被实例化，那么 POI 紧挨在外围模板 POI 之前；
-- 否则，POI 紧挨在引用它的命名空间作用域声明或定义之前。
-
-为什么类在“之前”？因为引用它的声明需要一个完整的类型：`int x = sizeof(H<A>);` 在解析这个声明时就得知道 `H<A>` 的布局，类模板特化必须在这个声明开始之前就已经实例化。函数则不同，声明中引用一个函数只需要它的声明，定义可以稍后再给。
+### 类紧挨其前（¶4）
 
 ```cpp error
 namespace N { struct A { }; }
-template<class T> struct H { char buf[probe(T{})]; };   // probe 依赖：ADL
+template<class T> struct H {
+  char buf[probe(T{})];      // probe(T{}) 是依赖调用
+};
 
-int x = sizeof(H<N::A>);    // H<N::A> 的 POI 紧挨在这个声明之前：probe 尚未声明
+int x = sizeof(H<N::A>);     // H<N::A> 的实例化点在这一行之前
 
 namespace N { constexpr int probe(A) { return 4; } }
 ```
 
-类模板特化在一个 TU 中至多有一个 POI（¶7），所以这里没有翻译单元末尾这个 POI 可以补救：实例化在 `x` 之前进行，`probe` 不可见，程序非良构。若把 `N::probe` 的声明移到 `x` 之前，就正常了。
+¶4 对类模板特化、类成员模板特化、类模板的成员类的特化，实例化点紧挨在引用它的命名空间作用域声明或定义之前。上例中实例化发生在 `x` 的声明之前，那时 `N::probe` 还没有声明，程序非良构。把 `N::probe` 移到 `x` 之前就正常了。
 
-### 虚函数与显式实例化（¶5–¶6）
+类放在前面，是因为引用它的声明往往要用它的完整定义：解析 `int x = sizeof(H<N::A>);` 时就必须知道 `H<N::A>` 的大小。函数只需要声明就能被引用，定义可以以后再生成。
 
-¶5 隐式实例化的虚函数，POI 紧随其外围类模板特化的 POI 之后。原因是虚函数要放进虚表，而虚表在类被实例化时就需要（实现上常常在类实例化时就实例化所有虚函数，[[temp.inst]] 允许这样做）。
+嵌套的情形也与函数对应：被另一个模板特化引用（¶4.1）、引用语境依赖于模板形参（¶4.2）、而且之前尚未实例化（¶4.3）时，实例化点紧挨在外围模板的实例化点之前。
 
-¶6 显式实例化定义是它所指定的特化的一个实例化点。
+### 虚函数、显式实例化与展开语句（¶5、¶6、¶8）
 
-### 多个实例化点与 IFNDR（¶7）
+¶5 隐式实例化的虚函数，实例化点紧随外围类模板特化的实例化点之后。虚函数要填进虚表，而虚表在类实例化时就需要。
 
-¶7 是本节最重要的一段。函数模板、成员函数模板、类模板的成员函数或静态数据成员的特化，在一个 TU 内可以有多个 POI。除了上面描述的那些之外：
+¶6 显式实例化定义（`template void f<int>(int);`，见 [[temp.explicit]]）也是它所指定的特化的一个实例化点。
 
-- ¶7.1 若特化在翻译单元 *declaration-seq* 中（私有模块片段之前）有 POI，则翻译单元的 *declaration-seq* 之后那一点也是它的 POI；
-- ¶7.2 若特化在私有模块片段中有 POI，则翻译单元末尾也是它的 POI。
+¶8 {{c++26}} 展开语句（[[stmt.expand]]）的循环体，实例化点是外围模板化实体的实例化点；不在模板里时，紧随包含它的命名空间作用域声明之后。展开语句在非模板函数里也要实例化循环体，所以单独规定。
 
-类模板特化在一个 TU 内至多一个 POI。任何模板的特化都可以在多个 TU 中有 POI。
+### 翻译单元末尾也是实例化点（¶7）
+
+¶7 第 1 段所说的那类函数特化，在一个翻译单元里可以有多个实例化点。除了前面描述的位置，翻译单元的声明序列末尾也是它的实例化点（¶7.1）；如果实例化点在私有模块片段里，翻译单元末尾也是（¶7.2）。类模板特化在一个翻译单元里至多有一个实例化点。任何特化都可以在多个翻译单元里各有实例化点。
 
 !!! std
     If two different points of instantiation give a template specialization different meanings according to the one-definition rule, the program is ill-formed, no diagnostic required.
 
-    两个不同的 POI 按 ODR 给出不同的含义 → {{ifndr}}。
+几个实例化点按 ODR（单一定义规则，[[basic.def.odr]]）给出不同含义时，程序是**非良构、不要求诊断**的（IFNDR）：标准对这个程序没有任何要求，编译器不必报错，生成的程序做什么都可以（[[intro.compliance]]）。
 
-为什么要把翻译单元末尾也算作 POI？这是为了让编译器可以把函数模板的实例化推迟到 TU 末尾统一处理，Clang 和 GCC 实际上就是这么做的（实例化代价高，集中处理有利于去重与性能）。为了让这种实现与紧随声明之后的规则不冲突，标准干脆规定两个点都是 POI，并要求它们含义相同；不同则 IFNDR。
-
-于是，下面这段程序：
+把翻译单元末尾也算作实例化点，是为了允许编译器把函数模板的实例化集中推迟到最后处理。Clang 和 GCC 都这样做。标准承认两个位置都合法，并要求它们含义一致。
 
 ```cpp ifndr title="two_pois.cpp"
 #include <cstdio>
 namespace N { struct S { }; }
 template<class T> int g(T t) { return h(t); }
 
-int a = g(N::S{});          // POI ①：紧随此声明之后，此时 N::h 未声明 → 非良构
-                            // POI ②：TU 末尾，此时 N::h 已声明 → 调用 N::h
+int a = g(N::S{});   // 点 1：紧随此声明之后，N::h 尚未声明
+                     // 点 2：翻译单元末尾，N::h 已声明
 
 namespace N { int h(S) { return 42; } }
 int main() { std::printf("%d\n", a); }
 ```
 
-在 POI ① 处 ADL 找不到 `h`（程序非良构），在 POI ② 处找到 `N::h`。两个 POI 给出不同含义，IFNDR。实测 Clang 接受这个程序并输出 `42`，因为它在 TU 末尾才实例化 `g<N::S>`。
+按点 1，ADL 找不到 `h`，程序非良构；按点 2，调用 `N::h`。两个点含义不同，IFNDR。本机 Clang 23 在翻译单元末尾实例化 `g<N::S>`，接受这个程序并输出 `42`。
 
-同样的机制下，加一个重载就可能在不同实现上得到完全不同的结果：
+把 `g` 改成 `constexpr`，Clang 就会在用到时立即实例化（常量求值需要它的定义），报 `h` 未声明。两种结果都符合标准，因为程序本来就是 IFNDR。
+
+晚声明一个重载，同样可能让不同实现得出不同结论：
 
 ```cpp ifndr
 namespace N { struct S { }; }
 template<class T> void call(T t) { touch(t); }
 namespace N { void touch(S) { } }
-void use() { call(N::S{}); }                 // POI ①：只有 touch(S)，调用它
-namespace N { void touch(const S&) { } }     // POI ②（TU 末尾）：两个 touch，二义
+void use() { call(N::S{}); }   // 点 1：只有 touch(S)
+namespace N { void touch(const S&) { } }
+// 点 2：两个 touch，调用二义
 ```
 
-按 POI ① 程序良构；按 POI ② 调用二义。IFNDR。Clang 在 TU 末尾实例化，于是报告调用 touch 有二义。
+本机 Clang 23 在翻译单元末尾实例化，报告 `touch` 的调用有二义。
 
-!!! impl "Clang 并不总是推迟"
-    Clang 对普通函数模板推迟到 TU 末尾实例化，但对 constexpr 函数模板会在用到时立即实例化（常量求值可能需要它的定义）。于是把上面 `two_pois.cpp` 中的 `g` 改成 `constexpr`，Clang 就会在 `int a = g(...)` 处报 `h` 未声明。两种行为都符合标准，因为程序本来就是 IFNDR。
+跨翻译单元也是一样：两个翻译单元里的 `g<N::S>` 看到的 `h` 不同，就是 IFNDR。每个翻译单元各自实例化，生成可合并的弱符号，链接器任选一份保留，不会发现不一致。
 
-多个 TU 中的 POI 同样适用这条规则：同一个特化 `g<N::S>` 在 TU 1 和 TU 2 中实例化，若两处看到的 `h` 不同，就违反了 ODR 要求各处定义一致的规定（[[basic.def.odr#16]] 一族条款），同样 IFNDR，链接器一般随便保留一份。
+!!! lawyer "显式特化晚于使用"
+    另一条相关规则在 [[temp.expl.spec#7]]：显式特化必须在每个会引起隐式实例化的使用之前声明。
 
-!!! lawyer "显式特化的声明晚于使用"
-    另一条相关但不同的规则在 [[temp.expl.spec#7]]：显式特化的声明必须在每个会引起隐式实例化的使用之前可达，否则 IFNDR。
     ```cpp error
     template<class T> void show(T) { }
-    void use() { show(1); }                 // 隐式实例化 show<int>
-    template<> void show<int>(int) { }      // 太晚了
+    void use() { show(1); }               // 隐式实例化 show<int>
+    template<> void show<int>(int) { }    // error: 太晚了
     ```
-    这个特定情形 Clang 能诊断（在实例化之后显式特化）；跨 TU 的版本则基本无法诊断。
 
-### 展开语句（¶8）{{c++26}}
+    同一个翻译单元里 Clang 能诊断（explicit specialization after instantiation）；分在不同翻译单元时基本无法诊断。
 
-¶8 *expansion-statement*（[[stmt.expand]]）的复合语句的 POI 是其外围模板化实体的 POI（若有）；否则紧随包含该展开语句的命名空间作用域声明或定义之后。展开语句在非模板函数中也会实例化它的循环体，所以需要自己的 POI 规则；规则与函数类特化一致。
+## 候选函数 [temp.dep.candidate]
 
-## 候选函数（[temp.dep.candidate]）
-
-### 看全所有 TU 的假想查找（¶1）
-
-¶1 对一个依赖调用，假如它的依赖名查找考虑所有翻译单元中、在关联命名空间里引入的所有外部链接函数声明，而不仅仅是模板定义语境和实例化语境中找到的那些（[[basic.lookup.argdep]]），如果这样会使调用非良构，或找到更好的匹配，则程序 {{ifndr}}。
-
-这条规则限制了 ADL 对语境的依赖：依赖调用的结果，不应该取决于某个 TU 碰巧包含了哪些头文件。
+### 结果不能取决于看到了哪些头文件（¶1）
 
 ```cpp title="h.h"
 namespace N { struct S { }; void g(S, long); }
-template<class T> void call(T t) { g(t, 0); }   // 依赖调用
+template<class T> void call(T t) { g(t, 0); }
 ```
 
 ```cpp title="a.cpp"
 #include "h.h"
-void use() { call(N::S{}); }    // 这里只看得到 g(S, long)
+void use() { call(N::S{}); }   // 只看得到 g(S, long)
 ```
 
 ```cpp ifndr title="b.cpp"
 #include "h.h"
-namespace N { void g(S, int) { } }   // 外部链接、在关联命名空间 N 中、对 g(t, 0) 是更好的匹配
+namespace N { void g(S, int) { } }   // 对 g(t, 0) 是更好的匹配
 ```
 
-`a.cpp` 中 `call<N::S>` 选中 `g(S, long)`；但如果考虑所有 TU，`b.cpp` 中的 `g(S, int)` 对实参 `0` 是精确匹配，更好。按 ¶1 程序 IFNDR。编译器和链接器都不可能可靠地发现这类错误，只能靠约定避免：**一个类型的所有重载应该和类型本身一起声明**（同一头文件、同一模块接口）。
+`a.cpp` 里的 `call<N::S>` 选中 `g(S, long)`。可是 `b.cpp` 在同一个命名空间 `N` 里声明了 `g(S, int)`，对实参 `0` 是精确匹配。
 
-### 模块中的例子（¶2–¶5）
+¶1 对一个依赖调用，假设查找不只看模板定义语境和实例化语境，而是看所有翻译单元中在关联命名空间里声明的、具有外部链接的函数。如果这样会让调用非良构，或者找到更好的匹配，程序 {{ifndr}}。上面的程序正是这种情况。
 
-后四段都是例子，展示模块如何影响依赖调用的查找。读懂它们需要 [[module.context]] 中实例化语境的定义：对于在模块 M 的接口单元中定义、在别处被实例化的模板，实例化语境除了 POI 之外，还包括 M 的主模块接口单元末尾那一点（[[module.context#3]]）；ADL 在实例化语境中查找时，忽略来自其他 TU、附属于全局模块、且被丢弃或具有内部链接的声明（[[basic.lookup.argdep#4]]）。
+编译器和链接器都不可能可靠地发现这类错误。避免它的办法是约定：一个类型的所有重载，和类型本身一起声明在同一个头文件或同一个模块接口里。
 
-**例 1（¶2）：定义语境的 ADL**
+!!! history "从 UB 到 IFNDR"
+    早期标准把 ¶1 的情形定为未定义行为，现在的措辞是非良构、不要求诊断。
 
-```cpp title="M1 的模块接口单元"
-module;
-#include "X.h"        // namespace Q { struct X { }; }
-#include "G.h"        // namespace Q { void g_impl(X, X); }
-export module M1;
-export template<typename T>
-void g(T t) {
-    g_impl(t, Q::X{ });   // 定义语境中的 ADL 找到 Q::g_impl，于是 g_impl 不被丢弃
-}
-```
+### 模块中的依赖调用（¶2–¶5）
 
-```cpp ok title="M2 的模块接口单元"
-module;
-#include "X.h"
-export module M2;
-import M1;
-void h(Q::X x) {
-    g(x);                 // OK
-}
-```
+¶2–¶5 都是例子，展示模块怎样影响实例化语境中的 ADL。需要两条背景：
 
-全局模块片段（`module;` 之后）里的声明，如果没有被模块单元用到，会被丢弃（[[module.global.frag]]），对导入者不可见。`g_impl` 在 `g` 的定义中被 ADL 找到（实参 `Q::X{}` 不依赖，关联命名空间 `Q` 在定义处就确定），这算是用到了，所以它被保留下来，`M2` 中实例化 `g<Q::X>` 时可以调用它。
+- 模块单元开头 `module;` 之后的部分叫**全局模块片段**（[[g:global-module-fragment]]），用来 `#include` 传统头文件。其中没有被模块单元用到的声明会被丢弃（[[module.global.frag]]），对导入者不可见。
+- 实例化语境不只是实例化点。嵌套实例化时，它还包括外围特化的实例化语境；模板定义在模块 M 的接口单元里、而实例化点不在 M 的接口单元时，还包括 M 的主模块接口单元末尾（[[module.context#3]]）。在实例化语境中做 ADL 时，忽略来自其他翻译单元、属于全局模块、且被丢弃或具有内部链接的声明（[[basic.lookup.argdep#4]]）。
 
-**例 2（¶3）：只能经由实例化语境的 ADL 找到**
+例 2（¶3）展示了定制点在模块中照常工作：
 
 ```cpp title="Std 的模块接口单元"
 export module Std;
 export template<typename Iter>
 void indirect_swap(Iter lhs, Iter rhs) {
-    swap(*lhs, *rhs);     // 无限定查找找不到 swap，只能靠 ADL
+  swap(*lhs, *rhs);   // 无限定查找找不到 swap，只能靠 ADL
 }
 ```
 
@@ -329,130 +287,68 @@ export module M;
 import Std;
 
 struct S { /* ... */ };
-void swap(S&, S&);        // #1
+void swap(S&, S&);        // #1，没有导出
 
 void f(S* p, S* q) {
-    indirect_swap(p, q);  // 经由实例化语境中的 ADL 找到 #1
+  indirect_swap(p, q);    // 经由实例化语境中的 ADL 找到 #1
 }
 ```
 
-`#1` 没有导出，`Std` 也看不见 `M`，但 `indirect_swap<S*>` 的 POI 在 `M` 中，ADL 从 POI 出发找到了 `swap(S&, S&)`。定制点在模块中正是这样继续工作的。本机 Clang 23 编译并运行了这个例子的可执行版本，行为符合预期。
+`Std` 看不见 `M`，`#1` 也没有导出，但 `indirect_swap<S*>` 的实例化点在 `M` 里，ADL 从那里出发找到了 `swap(S&, S&)`。本机 Clang 23 编译并运行了这个例子的可执行版本，结果符合预期。
 
-**例 3（¶4）：运算符**
+其余三个例子的要点：
 
-```cpp title="X.h"
-struct X { /* ... */ };
-X operator+(X, X);
-```
+- 例 1（¶2）：模块 `M1` 的全局模块片段里有 `Q::g_impl`，模板 `g` 的定义中用非依赖实参 `Q::X{}` 调用了它，定义处的 ADL 就找到了它。这算是用到，所以 `g_impl` 不会被丢弃，其他模块实例化 `g` 时可以调用它。
+- 例 3（¶4）：模板里的 `t + t` 也按依赖调用处理，`operator+` 在实例化语境中可见即可。
+- 例 4（¶5）：模块 `C1` 在全局模块片段里 `#include "foo.h"`，其中的 `dog(foo, foo)` 没有被 `C1` 用到，被丢弃，于是别处经由 `C1` 实例化的模板里 `dog(t, t)` 找不到它，非良构。同一个头文件里的 `cat` 是 `foo` 的隐藏友元，按第 4.2 项（关联类的定义可达时，找得到它的友元）仍能找到。如果改为导入头文件单元，`dog` 不会被丢弃，在 `C2` 接口单元末尾可见，调用合法。
 
-```cpp title="F 的模块接口单元"
-export module F;
-export template<typename T>
-void f(T t) {
-    t + t;
-}
-```
+!!! impl "Clang 没有实现丢弃规则"
+    本机 Clang 23 对例 4 的错误情形不报错：它没有完整实现全局模块片段中声明的丢弃规则。按标准这里非良构，依赖这种宽松行为的代码不可移植。
 
-```cpp ok title="M 的模块接口单元"
-module;
-#include "X.h"
-export module M;
-import F;
-void g(X x) {
-    f(x);       // OK：实例化 F 中的 f，operator+ 在实例化语境中可见
-}
-```
+## 常见误解
 
-运算符表达式 `t + t` 的非成员候选也按依赖调用处理（[[temp.dep.general#2]] 首句说调用也可能由运算符的非成员候选形成），所以同样适用实例化语境中的 ADL。`operator+` 在 `M` 的全局模块片段里，被 `g` 中的 `f(x)` 间接用到。
+!!! pitfall "实例化时会重新查找所有名字"
+    实例化时只追加 ADL。普通无限定查找停留在模板定义处，所以定义之后才声明、只接受 `int`、`double`、普通指针这类基本类型的重载，永远不会被依赖调用找到。
 
-**例 4（¶5）：被丢弃的声明与头文件单元**
-
-这个例子最复杂，它对比了 `#include` 普通头文件与导入头文件单元：
-
-- 模块 `A` 的模板 `f` 调用 `cat(t, t)`（#1）和 `dog(t, t)`（#2）；`B` 的 `g` 调用 `f`；`C1` 的全局模块片段 `#include "foo.h"`（`struct foo { friend int cat(foo, foo); }; int dog(foo, foo);`），`C1` 的 `h` 调用 `g(foo{}, t)`。
-- 在另一个 TU 中 `import C1; h(0);` 是错误的，`#2` 处找不到 `dog`。因为 `dog` 在 `C1` 中没有被用到，已被丢弃；ADL 在实例化语境中查找时，忽略来自其他 TU、附属全局模块且被丢弃的声明。`cat` 则没问题：它是 `foo` 的隐藏友元，按 [[basic.lookup.argdep#4]] ¶4.2 中关联类定义可达时可找到其友元的规则被找到。
-- 把 `foo.h` 换成可导入头文件 `bar.h`（`#include` 被替换为导入头文件单元），`dog` 不会被丢弃，它在 `C2` 的模块接口单元末尾可见，而那一点属于实例化语境（[[module.context#3]]），于是 `j(0)` 没有问题。
-
-!!! impl "Clang 对丢弃规则的实现"
-    截至写作时，本机 Clang 23 对例 4 的错误情形（`h(0)` 找不到 `dog`）并不报错，它没有完整实现全局模块片段中声明的丢弃规则。标准规定这里非良构，依赖这种宽松行为的代码不可移植。
-
-## 实现视角
-
-!!! impl "实例化的时机与 POI"
-    - Clang 遇到函数模板特化的使用时，把它加入待实例化队列，在 TU 末尾统一实例化（constexpr 函数、需要推导返回类型的函数等例外，会立即实例化）。所以 Clang 实际上使用的是 ¶7.1 规定的 TU 末尾 POI。类模板特化在需要完整类型时立即实例化。
-    - GCC 的策略类似：函数模板体的实例化通常推迟到 TU 末尾。
-    - 对于 ADL 在实例化语境中的查找，两者都把 POI 处可见的声明纳入；由于函数模板实际在 TU 末尾实例化，它们看到的是整个 TU 的声明，这正是 ¶7 让 TU 末尾成为合法 POI 的意义。
-    - 跨 TU 时，每个 TU 各自实例化，生成弱符号（COMDAT/linkonce_odr），链接器任选其一。不同 TU 的实例化若不一致，链接器不会发现。
-
-## 历史与演进
-
-!!! history "历史与演进"
-    | 版本 | 变化 |
-    |---|---|
-    | C++98 | 已有 POI 规则（函数类紧随其后、类类紧挨其前）、依赖调用在 POI 处做 ADL、¶1 那种考虑所有 TU 的条款（早期标准把它规定为未定义行为，后来改为 IFNDR）；`export` 模板曾让实例化语境跨 TU 变得极其复杂（后于 C++11 移除） |
-    | C++11 前后 | 通过核心语言缺陷报告承认 TU 末尾也是 POI，使实现推迟实例化的做法合规；随 noexcept 的引入，后续缺陷报告为 noexcept 说明符规定了单独的 POI |
-    | C++20 | 模块：引入实例化语境（[[module.context]]），POI 之外加入模块接口单元末尾等点；私有模块片段（¶7.2） |
-    | C++23 | [[P1787R6]] 把实例化语境中的 ADL 移到 [[basic.lookup.argdep]] 统一表述 |
-    | C++26 | 展开语句的 POI（¶8）；常量求值中的隐式实例化使用求值语境（[[module.context#6]]，与反射的 `define_aggregate` 相关） |
-
-## 陷阱
-
-!!! pitfall "晚声明的重载只能经由 ADL 找到"
-    模板定义之后才声明的函数，只有当实参类型的关联命名空间包含它时才可能被找到。基本类型（`int`、`double`、指针到基本类型）没有关联命名空间，晚声明的重载对它们永远不可见。
-
-!!! pitfall "头文件顺序改变程序含义"
-    依赖 POI 处可见性的代码（自定义点在模板实例化之后才声明），在 Clang/GCC 上因为 TU 末尾实例化而碰巧能工作，换一种实例化策略（或者把函数改成 `constexpr`）就会失败。正确的做法是在第一次使用之前声明所有重载与特化。
-
-!!! pitfall "依赖基类成员的静默误绑定"
-    依赖基类中的成员被无限定使用时，若外层恰有同名实体，代码能编译但调用的是外层实体（`silent_rebinding.cpp`）。习惯性地写 `this->` 可以避免。
+!!! pitfall "头文件顺序不影响结果"
+    定制函数在使用模板之后才声明的代码，在 Clang、GCC 上往往因为翻译单元末尾实例化而碰巧能工作。换一个实现，或者把函数改成 `constexpr`，就可能失败。在第一次使用模板之前声明所有重载和特化。
 
 ## 思考题
 
 !!! question "思考题 1"
     ```cpp
     #include <vector>
-    template<class T> void print_all(const std::vector<T>& v) { for (auto& x : v) print(x); }
+    template<class T> void print_all(const std::vector<T>& v) {
+      for (auto& x : v) print(x);
+    }
     struct Point { int x, y; };
     void print(const Point&);
     int main() { print_all(std::vector<Point>{}); }
     ```
-    `print(x)` 能找到 `::print(const Point&)` 吗？如果把 `Point` 换成 `int`、`print` 换成 `void print(int);` 呢？
+    `print(x)` 能找到 `::print(const Point&)` 吗？把 `Point` 换成 `int`、`print` 换成 `void print(int);` 呢？
 
 <details markdown="1">
 <summary>答案</summary>
 
-`Point` 的关联命名空间是全局命名空间。`print(x)` 是依赖调用，实例化语境中的 ADL 在全局命名空间中找到 `print(const Point&)`（它在 POI 之前声明），所以 OK。
+能。`Point` 的关联命名空间是全局命名空间，实例化语境中的 ADL 在那里找到 `print(const Point&)`，它在实例化点之前已经声明。
 
-换成 `int` 后，`int` 没有关联命名空间，ADL 什么也不找；普通无限定查找只在模板定义处进行，而 `print(int)` 在定义之后才声明，因此找不到，程序非良构。（`std::vector<int>` 的关联命名空间 `std` 与此无关：`print` 的实参是 `int`，不是 vector。）
+换成 `int` 后找不到。`int` 没有关联命名空间，ADL 什么也不找；普通无限定查找只在模板定义处进行，那时 `print(int)` 还没有声明。`std::vector<int>` 的关联命名空间 `std` 与此无关，`print` 的实参是 `int`。本机 Clang 23 报错：call to function 'print' that is neither visible in the template definition nor found by argument-dependent lookup。
 </details>
 
 !!! question "思考题 2"
-    为什么类模板特化在一个 TU 中至多有一个 POI，而函数模板特化可以有多个？
+    为什么类模板特化在一个翻译单元里至多有一个实例化点，函数模板特化却可以有多个？
 
 <details markdown="1">
 <summary>答案</summary>
 
-类模板特化一旦实例化，它就成为一个完整类型，后续代码依赖它的布局、成员集合（`sizeof`、成员访问、继承……）。如果允许它在 TU 末尾重新实例化，之前基于第一次实例化做出的所有判断都可能失效，这在实现上不可行，在语义上也无意义。函数模板特化的定义只影响生成的代码，不影响之前声明的类型检查，所以可以推迟到 TU 末尾再实例化。标准为此把 TU 末尾也算作 POI，并要求它与紧随声明之后的 POI 含义一致。
+类模板特化一旦实例化就是完整类型，之后的代码依赖它的大小、成员和基类。允许它在翻译单元末尾再实例化一次，之前基于第一次实例化做出的判断都可能失效。函数模板特化的定义只影响生成的代码，不影响之前声明的类型检查，所以可以推迟到末尾。标准因此把末尾也算作函数特化的实例化点，并要求两处含义一致（¶7）。
 </details>
 
 !!! question "思考题 3"
-    `template<class T> struct D : Base<T> { void f() { g(*this); } };` 中，`g` 是依赖名吗？如果 `Base<T>` 有成员函数 `g`，实例化时会调用它吗？
+    `template<class T> struct D : Base<T> { void f() { g(*this); } };` 中，如果 `Base<T>` 有成员函数 `g`，实例化时会调用它吗？
 
 <details markdown="1">
 <summary>答案</summary>
 
-`*this` 的类型是 `D<T>`，类型依赖，所以 `g(*this)` 是依赖调用，`g` 是依赖名。但依赖调用的查找是定义处的无限定查找与 ADL 的并集。定义处的无限定查找不搜索依赖基类，找不到 `Base<T>::g`；实例化时也只追加 ADL，而 ADL 只找命名空间作用域函数（和关联类的友元），永远不会找到类成员函数。所以不会调用 `Base<T>::g`，结果要么是找到某个命名空间中的 `g`，要么非良构。要调用成员，写 `this->g(*this)`。
+不会。`*this` 的类型是 `D<T>`，所以 `g(*this)` 是依赖调用。但它的候选只来自定义处的无限定查找和 ADL：定义处不搜索依赖基类；ADL 只找命名空间作用域的函数和关联类的友元，不找成员函数。结果要么找到某个命名空间里的 `g`，要么非良构。要调用成员，写 `this->g(*this)`。
 </details>
-
-## 小结
-
-| 规则 | 出处 | 要点 |
-|---|---|---|
-| 依赖调用的普通查找 | [[temp.res.general#1]] | 只在定义处 |
-| 依赖调用的 ADL | [[basic.lookup.argdep#4]] | 定义处 + 实例化语境中的每一点 |
-| 函数类特化的 POI | ¶1、¶2、¶3、¶5 | 紧随引用它的命名空间作用域声明之后；嵌套时继承外围 POI |
-| 类类特化的 POI | ¶4 | 紧挨在引用它的声明之前；一个 TU 至多一个 |
-| TU 末尾 | ¶7 | 函数类特化的额外 POI，允许推迟实例化 |
-| 多个 POI 含义不同 | ¶7 | {{ifndr}}（含跨 TU） |
-| 考虑所有 TU 会更好/会出错 | [temp.dep.candidate] ¶1 | {{ifndr}} |
-| 模块 | [[module.context]] | 实例化语境包含模块接口单元末尾；被丢弃的 GMF 声明不参与 |

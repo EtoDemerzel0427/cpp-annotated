@@ -1,206 +1,199 @@
 ---
 title: 模板实例化与特化
-summary: 第 13.9 节的总纲：什么叫实例化、什么叫特化，隐式实例化/显式实例化/显式特化三种途径如何产生同一个特化，它们之间的“至多一次”与可达性约束，显式实例化与显式特化豁免访问检查，以及每个特化各有一份静态成员。
+summary: 特化从哪里来：隐式实例化、显式实例化、显式特化三种途径；同一组实参至多一个定义，显式特化与显式实例化并存的条件；特化声明中的名字豁免访问检查；每个类模板特化各有一份静态成员。
 status: done
 covers: temp.spec.general
 papers: P0692R1
 related: temp.inst, temp.explicit, temp.expl.spec, temp.spec.partial, temp.fct.spec, temp.point, basic.def.odr
 tags: 模板, 实例化, 特化, 访问控制
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-模板本身不是类、不是函数、也不是变量，而是生成这些实体的配方。把模板实参代入、得到一个具体实体的过程，标准称为[[g:template-instantiation|**模板实例化**]]（template instantiation）；得到的具体实体（或者程序员手写的替代品）叫[[g:specialization|**特化**]]（specialization）。
+!!! tldr
+    - 把模板实参代入模板、生成具体的类、函数或变量，叫实例化；得到的实体，以及程序员用 `template<>` 手写的替代品，都叫特化。
+    - 特化有三个来源：使用时的隐式实例化、`template class X<int>;` 这样的显式实例化、`template<> class X<int> {…};` 这样的显式特化。
+    - 同一组实参的显式特化必须在显式实例化之前可见，反过来是错误；分在两个翻译单元时不要求诊断。
+    - 显式实例化和显式特化的声明里可以指名私有类型和私有成员，但函数体、类体等部分照常检查访问。
+    - 静态成员属于特化而不属于模板：`X<int>::n` 和 `X<long>::n` 是两个变量。
 
-第 13.9 节 [[temp.spec]] 讲的就是一个特化从哪里来。答案有三种：
+## 三种途径，同一个特化
 
-| 途径 | 语法 | 谁写定义 | 详见 |
+```cpp run ok
+template<class T> struct Box { T v; };
+
+Box<int> a;                         // 隐式实例化：用到时按模板生成
+template struct Box<long>;          // 显式实例化：指定在这里生成
+template<> struct Box<char> {       // 显式特化：不用模板，用这份定义
+  char v[4];
+};
+
+int main() { Box<char> c; (void)a; (void)c; }
+```
+
+模板本身不是类、函数或变量，而是生成它们的配方。¶1 把代入模板实参、得到一个具体实体的过程叫做**模板实例化**（template instantiation，[[g:template-instantiation]]）。实例化的对象可以是函数、变量、类，也可以是类模板的成员或成员模板。类模板的成员函数 `Box<T>::f` 没有自己的模板形参列表，不是模板，但同样要实例化才能得到 `Box<int>::f` 的定义。
+
+¶4 实例化得到的实体，以及程序员为某组实参写的显式特化，都叫**特化**（specialization，[[g:specialization]]）。上例的 `Box<int>`、`Box<long>`、`Box<char>` 都是 `Box` 的特化，区别只在定义的来源：
+
+| 途径 | 语法 | 定义来自 | 详见 |
 |---|---|---|---|
-| **隐式实例化**（implicit instantiation） | 无，使用即触发 | 编译器按模板生成 | [[temp.inst]] |
-| **显式实例化**（explicit instantiation） | `template class X<int>;` / `extern template ...;` | 编译器按模板生成，但由程序员指定何时何地 | [[temp.explicit]] |
-| **显式特化**（explicit specialization） | `template<> class X<int> { ... };` | 程序员手写，完全替换模板 | [[temp.expl.spec]] |
+| 隐式实例化 | 无，用到即触发 | 编译器按模板生成 | [[temp.inst]] |
+| 显式实例化 | `template struct Box<long>;`<br>`extern template struct Box<long>;` | 编译器按模板生成，位置由程序员指定 | [[temp.explicit]] |
+| 显式特化 | `template<> struct Box<char> {…};` | 程序员手写，完全替换模板 | [[temp.expl.spec]] |
 
-前两种都是实例化，定义来自模板；第三种不是实例化，定义来自程序员。三者都产生特化。另外还有部分特化（partial specialization，[[temp.spec.partial]]），它本身仍是模板，只是为一族实参提供替代的模板定义，最终还要经过实例化才得到特化。
+部分特化（[[temp.spec.partial]]）不在表中：它本身仍是模板，为一族实参提供另一份模板定义，最终还要实例化。
 
-本页是 13.9 的总述（[[temp.spec.general]]），定义术语并给出几条贯穿三种途径的约束。
+!!! note "日常用语里的特化"
+    日常说写一个特化，通常指 `template<>` 的显式特化。标准里的特化范围更宽，`std::vector<int>` 就是 `std::vector` 的特化，哪怕没有人为它写过 `template<>`。
 
-## 术语：实例化与“被实例化的 X”（¶1–¶2）
+## 显式特化的写法（¶3）
 
-¶1 实例化一个函数、变量、类、类模板的成员或成员模板的行为，叫做模板实例化。
-
-注意列表里有类模板的成员：类模板 `X<T>` 的成员函数 `X<T>::f` 本身不是模板（它没有自己的模板形参列表），但它是模板化实体（templated entity，[[temp.pre]]），同样要经过实例化才能得到 `X<int>::f` 的定义。所以后面的规则总在说“函数模板、成员函数、静态数据成员……”。
-
-¶2 给出一组命名，后文会反复用到：
-
-| 从什么实例化 | 得到 |
-|---|---|
-| 函数模板 | instantiated function（被实例化的函数） |
-| 类模板 | instantiated class |
-| 类模板的成员函数 / 成员类 / 成员枚举 / 静态数据成员的成员定义 | instantiated member function / member class / member enumeration / static data member |
-| 成员函数模板 | instantiated member function |
-| 成员类模板 | instantiated member class |
-| 变量模板 | instantiated variable |
-| 静态数据成员模板 | instantiated static data member |
-
-这些名字没有额外的语义，只是让后文能精确地说“被实例化的成员函数”，而不是笼统地说“特化”。
-
-## 显式特化的声明形式（¶3）
-
-¶3 可以为函数模板、变量模板、类模板、类模板的成员、成员模板声明显式特化；显式特化声明以 `template<>` 开头。对变量模板、类模板、类模板的成员、类成员模板，被特化的变量或类必须用 *simple-template-id*（`A<double>` 这样带尖括号的形式）写出；对函数模板，可以用 *template-id*，也可以只写函数名，让实参从函数类型推导出来（[[temp.deduct.decl]]）。
+¶3 显式特化以 `template<>` 开头，可以针对函数模板、变量模板、类模板、类模板的成员和成员模板。类、变量以及类的成员必须用带尖括号的 *simple-template-id* 指出特化的是哪个；函数模板可以省略尖括号，让编译器从函数类型推导实参（[[temp.deduct.decl]]）。
 
 ```cpp run ok title="spec_forms.cpp"
 template<class T = int> struct A {
-    static int x;
+  static int x;
 };
 template<class U> void g(U) { }
 
 template<> struct A<double> { };   // T == double
-template<> struct A<> { };         // T == int：默认模板实参照样生效
-template<> void g(char) { }        // U == char：从形参类型推导
-template<> void g<int>(int) { }    // U == int：显式写出
-template<> int A<char>::x = 0;     // 类模板成员的显式特化：A<char>::x
+template<> struct A<> { };         // T == int，默认实参照样生效
+template<> void g(char) { }        // U == char，从形参类型推导
+template<> void g<int>(int) { }    // U == int，显式写出
+template<> int A<char>::x = 0;     // 类模板成员的显式特化
 
-template<class T = int> struct B {
-    static int x;
-};
-template<> int B<>::x = 1;         // B<int>::x
+int main() {}
 ```
 
-`A<>` 这行值得注意：空尖括号仍然是 *simple-template-id*，补上默认实参 `int` 后它就是 `A<int>`。类模板特化必须有尖括号，`template<> struct A { };` 不合法，那会被当作重新定义 `A`。
+`A<>` 也是 *simple-template-id*，补上默认实参后就是 `A<int>`。写成 `template<> struct A { };` 则不合法。函数能省略尖括号，是因为它有类型可以拿来推导，类没有。
 
-函数模板可以省略 `<...>`，是因为函数有类型可以拿来推导；类没有可供推导的类型签名，所以不行。
+## 每组实参至多一个定义（¶5）
 
-## 特化 = 实例化出来的 + 显式特化的（¶4）
-
-¶4 一个被实例化的模板特化，可以是对给定实参列表的隐式实例化（[[temp.inst]]），也可以是显式实例化（[[temp.explicit]]）。特化（specialization）是从模板化实体实例化出来的、或作为其显式特化（[[temp.expl.spec]]）的类、变量、函数或类成员。
-
-换句话说，说 `X<int>` 是 `X` 的一个特化，并不关心它是怎么来的。程序里每个 `X<int>` 都指同一个实体，只是它的定义可能来自主模板、某个部分特化、或程序员手写的显式特化。具体是哪一个，由 [[temp.spec.partial.match]] 和本节的可达性规则决定。
-
-!!! note "“特化”一词的两种用法"
-    日常说“写一个特化”通常指显式特化（`template<>`）。标准里的“特化”则是一个更宽的概念：`std::vector<int>` 就是 `std::vector` 的一个特化，哪怕没有人为它写过 `template<>`。读标准时看到 "specialization" 要按宽义理解；看到 "explicit specialization" 才是狭义。
-
-## 每组实参：至多一个定义（¶5）
-
-¶5 对给定的模板和给定的一组模板实参：
+¶5 对给定的模板和一组模板实参：
 
 - ¶5.1 显式实例化定义在整个程序中至多出现一次；
-- ¶5.2 显式特化在整个程序中至多定义一次（按 [[basic.def.odr]]）；
-- ¶5.3 显式实例化与显式特化的声明不能同时出现，除非显式特化从显式实例化处可达。若两者互不可达，不要求诊断。
+- ¶5.2 显式特化至多定义一次，这是 ODR 的要求（[[basic.def.odr]]）；
+- ¶5.3 显式实例化与显式特化的声明不能同时出现，除非显式特化从显式实例化处可达（reachable，大致是能看到它的声明，见 [[module.reach]]）。两者互不可达时，不要求诊断。
 
-¶5.3 背后的道理是：显式实例化要求按主模板生成定义，显式特化则要求不用主模板而用自己提供的定义，两者矛盾。唯一的协调方式是让显式特化从显式实例化处可达，此时按 [[temp.explicit#7]]，显式实例化没有效果。反过来，先显式实例化、后显式特化，就是真正的冲突：
+显式实例化要求按模板生成定义，显式特化要求不用模板，两者矛盾。唯一的协调方式是特化在前：这时显式实例化没有效果（[[temp.explicit#7]]）。
+
+<div class="compare" markdown="1">
 
 ```cpp error
-template<class T> struct S { void f() {} };
-template struct S<int>;          // 显式实例化定义：按主模板生成 S<int>
-template<> struct S<int> { };    // error: 显式特化出现在实例化之后
+template<class T>
+struct S { void f() {} };
+template struct S<int>;
+template<> struct S<int> { };
+// error: 实例化之后才特化
 ```
 
 ```cpp ok
-template<class T> struct S { void f() {} };
-template<> struct S<int> { };    // 显式特化
-template struct S<int>;          // OK：特化可达，此显式实例化无效果（Clang 会给出警告）
+template<class T>
+struct S { void f() {} };
+template<> struct S<int> { };
+template struct S<int>;
+// OK：实例化没有效果
 ```
 
-两者分处不同翻译单元、互相不可达时，编译器看不到冲突，¶5.3 只能是 {{ifndr}}。
+</div>
 
-!!! lawyer "违反 ¶5.1 必须诊断吗？"
-    ¶5.1 本身没有写 "no diagnostic required"，所以同一 TU 里重复的显式实例化定义编译器会报错（Clang："duplicate explicit instantiation"）。但跨 TU 的重复，主流实现把显式实例化出来的定义按可合并的弱符号输出（与内联函数、隐式实例化相同），链接器不会报重复定义。实践中跨 TU 违反 ¶5.1 通常不会被发现，但不要依赖这一点。
+本机 Clang 23 对右边给出 `-Winstantiation-after-specialization` 警告。两者分在不同翻译单元、互相看不到时，编译器无法发现冲突，所以 ¶5.3 是 {{ifndr}}（非良构、不要求诊断：标准对这样的程序没有任何要求）。
 
-¶5.2 只是重申 ODR：显式特化是普通的（非模板）实体定义，例如函数模板的显式特化是一个普通函数，不是 inline 的（除非声明为 inline，见 [[temp.expl.spec#12]]），放在头文件里被多个 TU 包含就会违反 ODR。这是一个很常见的链接错误来源，见 [[temp.expl.spec]] 的陷阱。
+¶5.1 没有写不要求诊断，同一翻译单元里重复的显式实例化定义会被报错。但主流实现把显式实例化的定义输出为可合并的弱符号，跨翻译单元的重复链接器不会报告。
 
-## 访问检查豁免（¶6）
+¶5.2 提醒的是一个常见的链接错误：函数模板的显式特化是普通函数，默认不是 inline 的（[[temp.expl.spec]]）。把它的定义写在头文件里、被多个翻译单元包含，就违反 ODR。
 
-¶6 显式实例化或显式特化的声明中的名字不受通常的访问检查约束，但出现在函数体、默认实参、*base-clause*、*member-specification*、*enumerator-list*、静态数据成员或变量模板的初始化器中的名字除外。
-
-注 1 说得更直接：模板实参、函数声明符里的名字（形参类型、返回类型、异常说明）可以是平时无法访问的私有类型或对象。
-
-为什么要这样规定？因为特化经常需要指名一个私有类型。比如类 `Widget` 想让 `std::hash` 支持它的私有嵌套类型，或者测试代码要为私有类型特化一个 trait。如果特化声明本身就要受访问控制，就只能把类型改成 public，或者到处写 friend。
+## 特化声明豁免访问检查（¶6）
 
 ```cpp run ok title="access_exempt.cpp"
 class Widget {
-    struct Impl { int v = 42; };   // 私有
+  struct Impl { int v = 42; };   // 私有
 };
 
 template<class T> struct Probe { static int get() { return 0; } };
-template<> struct Probe<Widget::Impl> {        // OK：模板实参中的私有名不受检查
-    static int get() { return 1; }
+template<> struct Probe<Widget::Impl> {   // OK
+  static int get() { return 1; }
 };
 
 template<class T> int peek() { return 0; }
-template<> int peek<Widget::Impl>() { return 1; } // OK：声明符中的私有名不受检查
+template<> int peek<Widget::Impl>() {     // OK
+  return 1;
+}
 
 int main() { return Probe<int>::get() + peek<int>(); }
 ```
 
-但函数体照常检查：
+¶6 显式实例化和显式特化的声明中，名字不做通常的访问检查。注 1 指出，模板实参和函数声明符中的名字（形参类型、返回类型、异常说明）都可以是平时无法访问的私有类型或对象。这样，为私有类型特化一个 trait 时，就不必把类型改成 public 或到处写友元。
+
+豁免不包括以下部分：函数体、默认实参、基类列表、类的成员列表（*member-specification*）、枚举项列表，以及静态数据成员和变量模板的初始化器。
 
 ```cpp error
 class Widget { struct Impl { int v = 42; }; };
 template<class T> int peek() { return 0; }
 template<> int peek<Widget::Impl>() {
-    Widget::Impl i;     // error: 'Impl' is a private member of 'Widget'
-    return i.v;
+  Widget::Impl i;   // error: 'Impl' is a private member of 'Widget'
+  return i.v;
 }
 ```
 
-!!! history "历史与演进"
-    显式实例化的访问豁免在 C++98 就已存在。显式特化（以及部分特化）的豁免是 C++20 由 [[P0692R1]]（Access Checking on Specializations）加入的：此前为私有类型写特化在技术上是非良构的，尽管多数编译器早已放行。
+C++20 之前只有显式实例化有这项豁免；为私有类型写显式特化或部分特化在技术上是非良构的，尽管多数编译器早已放行。[[P0692R1]] 把豁免扩展到了特化。
 
-### 合法地取得私有成员
+!!! lawyer "合法地取得私有成员的指针"
+    利用显式实例化的豁免，可以取得私有成员的指针，行为完全有定义：
 
-利用显式实例化的访问豁免，可以完全合法地取得私有成员的指针：
+    ```cpp run ok title="steal.cpp"
+    #include <cstdio>
+    class Bank { int balance = 100; };
 
-```cpp run ok title="steal.cpp"
-#include <cstdio>
-class Bank { int balance = 100; };
+    template<int Bank::* M> struct Thief {
+      friend int Bank::* steal() { return M; }
+    };
+    int Bank::* steal();   // 让普通查找能找到 steal
 
-template<int Bank::* M> struct Thief {
-    friend int Bank::* steal() { return M; }   // 每次实例化定义一个友元函数
-};
-int Bank::* steal();                           // 让 steal 可被普通查找找到
+    template struct Thief<&Bank::balance>;   // OK：豁免访问检查
 
-template struct Thief<&Bank::balance>;         // OK：显式实例化中 &Bank::balance 不检查访问
+    int main() {
+      Bank b;
+      std::printf("%d\n", b.*steal());       // 100
+    }
+    ```
 
-int main() {
-    Bank b;
-    std::printf("%d\n", b.*steal());           // 100
-}
-```
+    模板实参 `&Bank::balance` 写在显式实例化里，不检查访问；友元函数 `steal` 把这个成员指针带出模板。改成隐式实例化（`Thief<&Bank::balance> t;`）就要检查访问，本机 Clang 23 报 `'balance' is a private member of 'Bank'`。测试框架和序列化库会用到这个技巧。
 
-模板实参 `&Bank::balance` 出现在显式实例化的声明里，¶6 豁免了它；友元函数 `steal` 把这个成员指针带出了模板。这一技巧被用在测试框架和序列化库里。要明白它绕过的是封装，而不是类型系统，行为完全有定义。注意若把 `template struct` 换成隐式实例化（例如 `Thief<&Bank::balance> t;`），`&Bank::balance` 就要受访问检查，程序非良构。
-
-## 每个特化各自一份静态成员（¶7）
-
-¶7 从模板实例化出来的每个类模板特化，都有它自己的静态成员副本。
+## 每个特化各有一份静态成员（¶7）
 
 ```cpp run ok
 template<class T> struct Counter { static int n; };
 template<class T> int Counter<T>::n = 0;
 
 int main() {
-    Counter<int>::n += 1;
-    Counter<long>::n += 5;
-    return Counter<int>::n == 1 && Counter<long>::n == 5 ? 0 : 1;
+  Counter<int>::n += 1;
+  Counter<long>::n += 5;
+  return Counter<int>::n == 1 && Counter<long>::n == 5 ? 0 : 1;
 }
 ```
 
-`Counter<int>` 和 `Counter<long>` 是两个毫无关系的类，`n` 自然也是两个变量。这条规则看似多余，但它排除了一种误读，即认为静态成员属于模板。模板不是类，没有成员；只有特化有。函数模板的局部静态变量同理，每个特化一份（[[temp.fct.spec.general#2]]）。
+¶7 每个从模板实例化出来的类模板特化，都有自己的一份静态成员。`Counter<int>` 和 `Counter<long>` 是两个无关的类，`n` 也是两个变量。模板不是类，没有成员，只有特化有。函数模板里的局部静态变量同理，每个特化一份（[[temp.fct.spec.general#2]]）。
 
-!!! pitfall "写在模板里的全局计数器不再是全局的"
-    想统计所有 `Handle<T>` 一共创建了多少个，把 `static int count` 放进 `Handle<T>` 是错的，因为每个 `T` 各自计数。把计数器移到一个非模板基类里，或者放在命名空间作用域。
+!!! pitfall "模板里的计数器不是全局的"
+    想统计所有 `Handle<T>` 一共创建了多少个，把 `static int count` 放进 `Handle<T>` 是错的，每个 `T` 各自计数。计数器应当放在非模板基类或命名空间作用域里。
 
-## 通过依赖类型得到函数类型（¶8）
-
-¶8 如果一个函数声明不是用函数声明符的语法形式、而是通过依赖类型获得了函数类型，程序非良构。
+## 依赖类型不能把声明变成函数声明（¶8）
 
 ```cpp error
 template<class T> struct A {
-    static T t;          // T 若是函数类型，这就"变成"了静态成员函数声明
+  static T t;
 };
 typedef int function();
-A<function> a;           // error: 会把 A<function>::t 声明为静态成员函数
+A<function> a;   // error: A<function>::t 会成为静态成员函数
 ```
 
-普通代码里 `typedef int F(); F f;` 是合法的函数声明（[[dcl.fct]]），但如果在模板里允许这样做，`static T t;` 这一行声明的是数据成员还是成员函数就取决于模板实参，这会破坏类模板的整体结构（成员函数要不要定义？`t` 能不能取地址得到数据成员指针？）。标准干脆禁止。Clang 的诊断是 "static data member instantiated with function type"。
+¶8 函数声明如果不是通过函数声明符的语法，而是通过依赖类型获得了函数类型，程序非良构。普通代码里 `typedef int F(); F f;` 是合法的函数声明（[[dcl.fct]]）。在模板里允许这样做，`static T t;` 声明的是数据成员还是成员函数就取决于模板实参，类模板的结构就无从确定。本机 Clang 23 的诊断是 static data member instantiated with function type。
+
+<details class="fine" markdown="1"><summary>其余条文</summary>
+
+¶2 给实例化出的实体起了一组名字：从函数模板实例化出的函数叫 instantiated function，从类模板实例化出的类叫 instantiated class；类模板的成员函数、成员类、成员枚举、静态数据成员从成员定义实例化后，分别叫 instantiated member function、member class、member enumeration、static data member；成员函数模板、成员类模板、变量模板、静态数据成员模板也各有对应的名称。这些名字没有额外的语义，只是让后文能精确地指称。
+
+</details>
 
 ## 思考题
 
@@ -208,35 +201,27 @@ A<function> a;           // error: 会把 A<function>::t 声明为静态成员�
     下面的程序良构吗？
     ```cpp
     template<class T> struct S { static const int v = 1; };
-    template<> struct S<int>;          // (a)
-    S<int>* p;                         // (b)
-    int n = S<int>::v;                 // (c)
+    template<> struct S<int>;   // (a)
+    S<int>* p;                  // (b)
+    int n = S<int>::v;          // (c)
     ```
 
 <details markdown="1">
 <summary>答案</summary>
 
-(a) 声明了显式特化 `S<int>` 但没有定义。(b) 只需要指针，不要求类完整，OK。(c) 需要 `S<int>` 完整；`S<int>` 是一个已声明但未定义的显式特化，按 [[temp.expl.spec#7]]，已声明但未定义的显式特化永远不会被隐式实例化，所以它就是不完整类型，`S<int>::v` 非良构（必须诊断：对不完整类的成员访问）。主模板里那个 `v` 与 `S<int>` 毫无关系。
+不良构，错在 (c)。(a) 声明了显式特化 `S<int>`，没有定义。(b) 只需要指针，不要求完整类型。(c) 需要 `S<int>` 完整；按 [[temp.expl.spec#7]]，已声明的显式特化不会被隐式实例化，没有定义它就是不完整类型。主模板里的 `v` 与 `S<int>` 无关。本机 Clang 23 报 incomplete type 'S<int>' named in nested name specifier。
 </details>
 
 !!! question "思考题 2"
-    `std::hash` 的特化可以写成 `template<> struct std::hash<Widget::Impl> { ... };`，其中 `Impl` 是 `Widget` 的私有成员。特化里的 `operator()` 的形参类型写 `const Widget::Impl&`，函数体里访问 `impl.v`（私有数据成员）。哪些地方会报访问错误？
+    `Impl` 是 `Widget` 的私有成员。下面哪些地方会报访问错误？
+    ```cpp
+    template<> struct std::hash<Widget::Impl> {
+      std::size_t operator()(const Widget::Impl& i) const { return i.v; }
+    };
+    ```
 
 <details markdown="1">
 <summary>答案</summary>
 
-模板实参 `std::hash<Widget::Impl>` 中的 `Widget::Impl`：豁免（C++20 起）。
-但 `operator()` 是在显式特化的类定义（*member-specification*）里声明的，¶6 把 *member-specification* 排除在豁免之外，所以形参类型里的 `Widget::Impl` 照常检查，会报错；函数体里的 `impl.v` 也报错。实际写法是让 `Widget` 把 `std::hash<Widget::Impl>` 声明为友元，或者把 `Impl` 暴露出来。豁免只覆盖声明特化的那一句本身，而不是特化的整个内容。
+模板实参 `std::hash<Widget::Impl>` 中的 `Widget::Impl` 豁免检查。但 `operator()` 在特化的类定义里，属于 *member-specification*，¶6 把它排除在豁免之外，所以形参类型里的 `Widget::Impl` 和函数体里的 `i.v` 都要检查，会报错。豁免只覆盖特化声明本身，不覆盖特化的内容。实际做法是让 `Widget` 把 `std::hash<Widget::Impl>` 声明为友元。
 </details>
-
-## 小结
-
-| 规则 | 段落 | 后果 |
-|---|---|---|
-| 实例化 = 从模板生成定义；特化 = 实例化所得或显式特化 | ¶1, ¶4 | 术语 |
-| 显式特化以 `template<>` 引入；类/变量须写 *simple-template-id*，函数可推导 | ¶3 | — |
-| 显式实例化定义至多一次；显式特化至多定义一次 | ¶5.1–¶5.2 | 非良构 / ODR |
-| 显式实例化与显式特化共存，须特化可达 | ¶5.3 | 互不可达时 {{ifndr}} |
-| 显式实例化/特化声明中的名字豁免访问检查（函数体、成员规格等除外） | ¶6 | C++20 起含特化 |
-| 每个类模板特化各有一份静态成员 | ¶7 | — |
-| 依赖类型使声明成为函数声明 | ¶8 | {{ill-formed}} |
