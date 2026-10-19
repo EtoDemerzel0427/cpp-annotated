@@ -1,6 +1,6 @@
 ---
 title: 动态内存管理
-summary: <new> 头文件总览——全局 operator new/delete 家族、nothrow_t、align_val_t、destroying_delete_t、new_handler、std::launder，以及 hardware_destructive/constructive_interference_size
+summary: <new> 头文件总览：全局 operator new/delete 家族、nothrow_t、align_val_t、destroying_delete_t、new_handler、std::launder，以及 hardware_destructive/constructive_interference_size
 status: done
 covers: support.dynamic.general, new.syn, hardware.interference
 related: new.delete, alloc.errors, ptr.launder, basic.stc, expr.new, expr.delete, basic.align, basic.life, intro.races
@@ -8,7 +8,7 @@ tags: 标准库, operator new, align_val_t, destroying_delete, 伪共享
 updated: 2026-10-18
 ---
 
-`new` 和 `delete` 是**核心语言**的表达式（[[expr.new]]、[[expr.delete]]），但它们获取和归还存储所用的**分配函数**和**释放函数**，是**库**提供的——就在 `<new>` 里。核心语言在 [[basic.stc.dynamic]] 里规定了这些函数"必须长什么样、必须满足什么契约"；本节规定标准库**提供的版本**做什么、程序**替换**它们时必须遵守什么。
+`new` 和 `delete` 是核心语言的表达式（[[expr.new]]、[[expr.delete]]），但它们获取和归还存储所用的分配函数和释放函数由库提供，就声明在 `<new>` 里。核心语言在 [[basic.stc.dynamic]] 里规定了这些函数的形式和必须满足的契约；本节规定标准库提供的版本做什么，以及程序替换它们时必须遵守什么。
 
 ¶1（[support.dynamic.general]）：`<new>` 定义了管理程序中动态存储分配的若干函数，以及报告存储管理错误的组件。
 
@@ -51,15 +51,15 @@ namespace std {
 // 全局作用域：operator new/new[]/delete/delete[] 的 22 个声明，见 [new.delete]
 ```
 
-注意分配/释放函数声明在**全局命名空间**，不在 `std` 里——这是 [[basic.stc.dynamic.general]] 的要求：它们在每个翻译单元中都**隐式声明**，即使不包含 `<new>`。包含 `<new>` 只是为了拿到 `std::nothrow`、`std::align_val_t` 等配套类型，以及 placement 形式（它们**不**隐式声明）。
+注意分配/释放函数声明在全局命名空间，不在 `std` 里。这是 [[basic.stc.dynamic.general]] 的要求：即使不包含 `<new>`，它们在每个翻译单元中也都隐式声明。包含 `<new>` 只是为了拿到 `std::nothrow`、`std::align_val_t` 等配套类型，以及 placement 形式（这些形式不会隐式声明）。
 
-### 三个"标签类型"
+### 三个标签类型
 
-`nothrow_t`、`align_val_t`、`destroying_delete_t` 都不携带运行时数据（`align_val_t` 除外），它们的作用是**参与重载决议**，把不同语义的分配/释放函数区分开：
+`nothrow_t`、`align_val_t`、`destroying_delete_t` 都不携带运行时数据（`align_val_t` 除外），它们的作用是参与重载决议，把不同语义的分配/释放函数区分开：
 
-**`std::nothrow_t` / `std::nothrow`**：`new (std::nothrow) T` 会把 `std::nothrow` 作为 placement 实参传给 `operator new(size_t, const nothrow_t&)`，分配失败时返回空指针而不是抛异常（[[new.delete.single#5]]）。构造函数是 `explicit` 的默认构造函数——这是 C++ 库中"标签类型"的惯用写法，目的是禁止从 `{}` 隐式构造出标签（`std::nothrow_t t = {};` 非良构）。
+**`std::nothrow_t` / `std::nothrow`**：`new (std::nothrow) T` 会把 `std::nothrow` 作为 placement 实参传给 `operator new(size_t, const nothrow_t&)`，分配失败时返回空指针而不是抛异常（[[new.delete.single#5]]）。构造函数是 `explicit` 的默认构造函数，这是 C++ 库中标签类型的惯用写法，目的是禁止从 `{}` 隐式构造出标签（`std::nothrow_t t = {};` 非良构）。
 
-**`std::align_val_t`**（C++17）：一个底层类型为 `size_t` 的作用域枚举，用来传递对齐值。当 *new-expression* 分配的类型具有**超出 new 扩展对齐**（new-extended alignment，即 `alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__`，见 [[basic.align]]）时，编译器调用带 `align_val_t` 参数的版本（[[expr.new]]）。之所以用枚举而不是直接用 `size_t`，是为了不与 `operator new(size_t, size_t)` 这种用户自定义的 placement 形式冲突。
+**`std::align_val_t`**（C++17）：一个底层类型为 `size_t` 的作用域枚举，用来传递对齐值。当 *new-expression* 分配的类型具有超出 new 扩展对齐（new-extended alignment，即 `alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__`，见 [[basic.align]]）时，编译器调用带 `align_val_t` 参数的版本（[[expr.new]]）。之所以用枚举而不是直接用 `size_t`，是为了不与 `operator new(size_t, size_t)` 这种用户自定义的 placement 形式冲突。
 
 ```cpp run title="align-val.cpp" ok
 #include <cstdio>
@@ -84,7 +84,7 @@ int main() {
 }
 ```
 
-**`std::destroying_delete_t` / `std::destroying_delete`**（C++20）：类的成员 `operator delete` 如果第二个参数是 `std::destroying_delete_t`，它就是一个**销毁型 operator delete**（[[g:destroying-operator-delete]]）。*delete-expression* 遇到它时**不先调用析构函数**，而是把尚未析构的对象指针直接交给这个函数，由它负责析构和释放（[[expr.delete]]、[[basic.stc.dynamic.deallocation]]）。典型用途：通过基类指针删除对象时，不用虚析构函数，而是根据对象里的"种类"字段手动分派到正确的派生类析构，并按正确的大小释放存储。
+**`std::destroying_delete_t` / `std::destroying_delete`**（C++20）：类的成员 `operator delete` 如果第二个参数是 `std::destroying_delete_t`，它就是一个**销毁型 operator delete**（[[g:destroying-operator-delete]]）。*delete-expression* 遇到它时不先调用析构函数，而是把尚未析构的对象指针直接交给这个函数，由它负责析构和释放（[[expr.delete]]、[[basic.stc.dynamic.deallocation]]）。典型的用法是：通过基类指针删除对象时不依赖虚析构函数，而是根据对象里表示种类的字段手动分派到正确的派生类析构，并按正确的大小释放存储。
 
 ```cpp run title="destroying-delete.cpp" ok
 #include <cstdio>
@@ -117,15 +117,15 @@ int main() {
 
 ## 硬件干扰大小（[hardware.interference]）{{c++17}}
 
-两个 `inline constexpr size_t` 常量，值由实现定义，都**至少为 `alignof(max_align_t)`**：
+两个 `inline constexpr size_t` 常量，值由实现定义，都至少为 `alignof(max_align_t)`：
 
 !!! std
     `hardware_destructive_interference_size`: This number is the minimum recommended offset between two concurrently-accessed objects to avoid additional performance degradation due to contention introduced by the implementation.
 
-    两个被并发访问的对象之间推荐的**最小偏移**，以避免由实现引入的争用造成额外的性能下降。
+    两个被并发访问的对象之间推荐的最小偏移，以避免由实现引入的争用造成额外的性能下降。
 
-- ¶1 **`hardware_destructive_interference_size`**（"破坏性干扰"）：两个被不同线程频繁写入的对象，应当至少相隔这么远，否则会落在同一缓存行上造成**伪共享**（false sharing）——每次写入都使另一个核心的缓存行失效。用法是 `alignas(std::hardware_destructive_interference_size)`。
-- ¶2 **`hardware_constructive_interference_size`**（"建设性干扰"）：两个被**同一线程**以时间局部性一起访问的对象，所占连续内存的推荐**最大**大小——放在这么大的范围内，它们大概率位于同一缓存行，一次缓存未命中就能把两者都带进来。用法是 `static_assert(sizeof(together) <= std::hardware_constructive_interference_size)`。
+- ¶1 `hardware_destructive_interference_size`（破坏性干扰）：两个对象如果由不同线程频繁写入，应当至少相隔这么远，否则会落在同一缓存行上，造成**伪共享**（false sharing），每次写入都使另一个核心的缓存行失效。用法是 `alignas(std::hardware_destructive_interference_size)`。
+- ¶2 `hardware_constructive_interference_size`（建设性干扰）：两个对象如果由同一线程以时间局部性一起访问，这是它们所占连续内存的推荐最大大小。放在这么大的范围内，它们大概率位于同一缓存行，一次缓存未命中就能把两者都带进来。用法是 `static_assert(sizeof(together) <= std::hardware_constructive_interference_size)`。
 
 ```cpp run title="interference.cpp" ok
 #include <atomic>
@@ -149,12 +149,12 @@ int main() {
 }
 ```
 
-两个值通常不同：在同一编译目标上，destructive 可能大于 constructive。原因是现代 CPU 的**相邻行预取器**（adjacent-line prefetcher）会成对拉取缓存行，于是"保证不干扰"需要两倍的行宽，而"保证在同一行"只能按一行算。
+两个值通常不同：在同一编译目标上，destructive 可能大于 constructive。原因是现代 CPU 的相邻行预取器（adjacent-line prefetcher）会成对拉取缓存行，于是要保证互不干扰需要两倍的行宽，而要保证落在同一行只能按一行算。
 
 !!! impl "Clang/libc++ 的取值与 ABI 隐患"
     libc++ 把它们定义为编译器预定义宏 `__GCC_DESTRUCTIVE_SIZE` 和 `__GCC_CONSTRUCTIVE_SIZE`。本机（AArch64 macOS）上 Clang 给出 destructive = 128、constructive = 64。
 
-    这两个值是**由实现定义的编译期常量**，并且可能随 `-mtune`/`-mcpu` 而变。一旦它们出现在头文件里的 `alignas` 中，就影响了类的**布局**——用不同选项编译的两个翻译单元会对同一个类得出不同的布局，违反 ODR（[[basic.def.odr]]）。GCC 为此提供了 `-Winterference-size` 警告。需要跨 ABI 边界的类型，应当硬编码一个具体数值（例如 64 或 128）。
+    这两个值是由实现定义的编译期常量，并且可能随 `-mtune`/`-mcpu` 而变。一旦它们出现在头文件里的 `alignas` 中，就会影响类的布局，用不同选项编译的两个翻译单元会对同一个类得出不同的布局，违反 ODR（[[basic.def.odr]]）。GCC 为此提供了 `-Winterference-size` 警告。需要跨 ABI 边界的类型，应当硬编码一个具体数值（例如 64 或 128）。
 
 ## 思考题
 
@@ -165,8 +165,8 @@ int main() {
 <details markdown="1">
 <summary>展开查看答案与解析</summary>
 
-1. 防止从空花括号 `{}` 隐式构造标签。若构造函数不是 `explicit`，一个 `{}` 实参就能复制列表初始化出 `nothrow_t`，标签就失去了"必须显式写出"的意义，并可能让 `f({})` 这类调用意外匹配到带标签参数的重载。复制列表初始化选中 `explicit` 构造函数是非良构的（[[over.match.list]]），所以 `nothrow_t x = {};` 无法编译，只能写 `nothrow_t{}` 或使用 `std::nothrow`。
-2. `alignof(S) = 32 > 16`，属于 new 扩展对齐，*new-expression* 先以 `(size, std::align_val_t(32))` 为实参查找 `operator new[]`，找到全局的 `operator new[](size_t, align_val_t)`。若 `S` 声明了成员 `operator new[]`（注意是数组形式）但只有 `(size_t)` 版本，按 [[expr.new#20]]，第一次带对齐实参的重载决议失败后，会**去掉对齐实参**再做一次，于是调用成员的 `operator new[](size_t)`——此时由该函数自己负责满足对齐。若只声明了成员 `operator new`（非数组）则与 `new S[10]` 无关，仍用全局的对齐版本。
+1. 防止从空花括号 `{}` 隐式构造标签。若构造函数不是 `explicit`，一个 `{}` 实参就能复制列表初始化出 `nothrow_t`，标签就失去了必须显式写出的意义，并可能让 `f({})` 这类调用意外匹配到带标签参数的重载。复制列表初始化选中 `explicit` 构造函数是非良构的（[[over.match.list]]），所以 `nothrow_t x = {};` 无法编译，只能写 `nothrow_t{}` 或使用 `std::nothrow`。
+2. `alignof(S) = 32 > 16`，属于 new 扩展对齐，*new-expression* 先以 `(size, std::align_val_t(32))` 为实参查找 `operator new[]`，找到全局的 `operator new[](size_t, align_val_t)`。若 `S` 声明了成员 `operator new[]`（注意是数组形式）但只有 `(size_t)` 版本，按 [[expr.new#20]]，第一次带对齐实参的重载决议失败后，会去掉对齐实参再做一次，于是调用成员的 `operator new[](size_t)`，此时由该函数自己负责满足对齐。若只声明了成员 `operator new`（非数组）则与 `new S[10]` 无关，仍用全局的对齐版本。
 </details>
 
 ## 小结

@@ -1,6 +1,6 @@
 ---
 title: 诊断库
-summary: 第 19 章导读：C++ 标准库报告与诊断错误的六件工具——<stdexcept> 异常类、assert 宏、errno、<system_error>（错误码/错误状况/错误类别）、C++23 的 <stacktrace>、C++26 的 <debugging>——各自解决什么问题、如何分工，以及它们与核心语言异常、契约（contracts）的关系。
+summary: 第 19 章导读：C++ 标准库报告与诊断错误的六件工具（<stdexcept> 异常类、assert 宏、errno、<system_error> 的错误码/错误状况/错误类别、C++23 的 <stacktrace>、C++26 的 <debugging>）各自解决什么问题、如何分工，以及它们与核心语言异常、契约（contracts）的关系。
 status: done
 covers: diagnostics.general
 related: std.exceptions, assertions, errno, syserr, stacktrace, debugging, except, support.exception, basic.contract, res.on.exception.handling
@@ -13,16 +13,16 @@ updated: 2026-10-18
 !!! std
     This Clause describes components that C++ programs may use to detect and report error conditions.
 
-    本章描述 C++ 程序可用来**检测**和**报告**错误状况的组件。
+    本章描述 C++ 程序可用来检测和报告错误状况的组件。
 
-注意这里的组件**不是**错误处理的全部。异常的核心语言机制（`throw`、`try`、栈回溯）在 [[except]]；`std::exception` 基类、`bad_alloc`、`exception_ptr`、`terminate` 在语言支持库 [[support.exception]]；`std::expected` 在通用工具库；契约（`pre`/`post`/`contract_assert`）在核心语言 [[basic.contract]]。本章收录的是剩下的、偏"库"的部分：
+这里的组件并不是错误处理的全部。异常的核心语言机制（`throw`、`try`、栈回溯）在 [[except]]；`std::exception` 基类、`bad_alloc`、`exception_ptr`、`terminate` 在语言支持库 [[support.exception]]；`std::expected` 在通用工具库；契约（`pre`/`post`/`contract_assert`）在核心语言 [[basic.contract]]。本章收录的是剩下的、偏向库的部分：
 
 | 子条款 | 头文件 | 解决的问题 | 本站页面 |
 |---|---|---|---|
-| [std.exceptions] | `<stdexcept>` | 一套预定义的异常类型，按"逻辑错误 / 运行期错误"二分 | [[std.exceptions]] |
+| [std.exceptions] | `<stdexcept>` | 一套预定义的异常类型，分为逻辑错误和运行期错误两类 | [[std.exceptions]] |
 | [assertions] | `<cassert>` | `assert` 宏：可以用 `NDEBUG` 关掉的断言 | [[assertions]] |
 | [errno] | `<cerrno>` | C/POSIX 风格的线程局部错误号 | [[errno]] |
-| [syserr] | `<system_error>` | 把"来自操作系统或底层 API 的整数错误码"包装成可移植、可比较、可扩展的类型 | [[syserr]] |
+| [syserr] | `<system_error>` | 把来自操作系统或底层 API 的整数错误码包装成可移植、可比较、可扩展的类型 | [[syserr]] |
 | [stacktrace] {{c++23}} | `<stacktrace>` | 在运行时获取当前调用栈 | [[stacktrace]] |
 | [debugging] {{c++26}} | `<debugging>` | 与调试器交互：断点、检测调试器 | [[debugging]] |
 
@@ -46,11 +46,11 @@ updated: 2026-10-18
   └──────────────────────┘
 ```
 
-几条经验性的分工原则——标准本身并不强制，但库的设计体现了它们：
+下面几条是经验性的分工原则。标准本身并不强制，但库的设计体现了它们：
 
-- **前置条件违反是 bug，不是"错误"**。标准库规格中"*Preconditions*"被违反是未定义行为（[[structure.specifications]]），而不是抛 `logic_error`；C++26 的**强化实现**（[[g:hardened-implementation]]）把一部分"*Hardened preconditions*"的违反变成契约违反。`logic_error` 族主要用于库**选择**检查并报告的情形，如 `vector::at` 的 `out_of_range`。
-- **可预期的环境失败**两条路都走：`<filesystem>` 的绝大多数操作都提供两个重载——一个抛 `filesystem_error`（派生自 `system_error`），一个接受 `error_code&` 出参、不抛异常。两条路共用同一套 `error_code` 数据。
-- `errno` 是与 C 兼容的遗产，`<system_error>` 在设计时刻意**不修改** `errno`（[[syserr.general]] ¶2），二者通过 `errc` 枚举与 `generic_category()` 衔接。
+- **前置条件违反是 bug，不属于这里说的错误**。违反标准库规格中的 *Preconditions* 是未定义行为（[[structure.specifications]]），而不是抛 `logic_error`；C++26 的强化实现（[[g:hardened-implementation]]）把一部分 *Hardened preconditions* 的违反变成契约违反。`logic_error` 族主要用于库选择检查并报告的情形，如 `vector::at` 的 `out_of_range`。
+- 对可预期的环境失败，两条路都提供：`<filesystem>` 的绝大多数操作都提供两个重载——一个抛 `filesystem_error`（派生自 `system_error`），一个接受 `error_code&` 出参、不抛异常。两条路共用同一套 `error_code` 数据。
+- `errno` 是与 C 兼容的遗产，`<system_error>` 在设计时刻意不修改 `errno`（[[syserr.general]] ¶2），二者通过 `errc` 枚举与 `generic_category()` 衔接。
 
 ## 与 freestanding 的关系
 
@@ -63,7 +63,7 @@ updated: 2026-10-18
 - `<stacktrace>` 在 C++23 加入（[[P0881R7]]），其格式化支持由 [[P2693R1]] 加入。
 - `assert` 在 C++26 变成可变参数宏（[[P2264R7]]），解决了模板实参中的逗号问题。
 - `<debugging>` 在 C++26 加入（[[P2546R5]]），`is_debugger_present` 随后被规定为可替换函数（[[P2810R4]]）。
-- `<stdexcept>` 中所有异常类的构造函数在当前草案中都是 `constexpr` 的——配合 C++26 允许在常量求值中抛出异常（[[P3068R6]]）。
+- `<stdexcept>` 中所有异常类的构造函数在当前草案中都是 `constexpr` 的，这与 C++26 允许在常量求值中抛出异常（[[P3068R6]]）相配合。
 - `error_code` 有了 `std::formatter` 特化（[[syserr.fmt]]，C++23 之后加入草案）。
 
 各页面会说明本机 Clang 23 + libc++ 对这些新特性的支持情况：截至本文编写时，libc++ 尚未提供 `<stacktrace>` 与 `<debugging>`，也不支持在常量求值中抛出异常。
