@@ -1,6 +1,7 @@
 ---
 title: 从源码到可执行文件
 summary: clang++ 一条命令背后的流水线：驱动程序拆出哪些子命令，预处理、AST、LLVM IR、汇编、目标文件、链接各对应哪个翻译阶段，以及头文件与模块两种编译模型的差别。
+group: 工具链
 status: draft
 order: 10
 related: lex.phases, lex.separate, basic.link, cpp.include, module.unit, module.import, toolchain/linking-and-symbols, toolchain/modules-in-practice

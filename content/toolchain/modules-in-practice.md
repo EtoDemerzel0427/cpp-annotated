@@ -1,6 +1,7 @@
 ---
 title: 模块的工程实践
 summary: 编译器怎样实现 C++20 模块：各编译器的 BMI，Clang 的两种编译方式和 reduced BMI，依赖扫描，CMake 的 CXX_MODULES 文件集，import std 和头文件单元的现状，以及模块附属怎样体现在符号名里。
+group: 工具链
 status: draft
 order: 30
 related: module, module.unit, module.import, module.global.frag, module.reach, basic.link, basic.def.odr, lex.phases, toolchain/compilation-pipeline

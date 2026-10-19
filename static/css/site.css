@@ -187,6 +187,9 @@ body[data-active="topics"] .topnav a[data-nav="topics"],
 body[data-active="toolchain"] .topnav a[data-nav="toolchain"],
 body[data-active="papers"] .topnav a[data-nav="papers"],
 body[data-active="history"] .topnav a[data-nav="history"],
+body[data-active="patterns"] .topnav a[data-nav="patterns"],
+body[data-active="perf"] .topnav a[data-nav="perf"],
+body[data-active="exercises"] .topnav a[data-nav="exercises"],
 body[data-active="glossary"] .topnav a[data-nav="glossary"] { color: var(--accent); background: var(--accent-bg); }
 .search-btn {
   margin-left: auto; display: flex; align-items: center; gap: 18px;
@@ -755,3 +758,14 @@ figure.code figcaption > .code-title { flex-shrink: 1; min-width: 0; overflow: h
 .sb-legend .dot.hollow { background: none; border: 1px solid var(--accent); }
 /* anchors placed before headings of covered subclauses */
 .sec-anchor { display: block; height: 0; scroll-margin-top: calc(var(--topbar-h) + 16px); }
+
+/* collection index groups, sidebar group headers, exercises page */
+.coll-group { font-family: var(--font-serif); font-size: 22px; margin: 1.8em 0 .7em; padding-left: .6em; border-left: 4px solid var(--accent); }
+.coll-group:first-of-type { margin-top: .4em; }
+.sb-plain li.sb-group { margin: 12px 6px 4px; font-size: 11.5px; font-weight: 650; letter-spacing: .06em; color: var(--ink-3); }
+.exercises h2 small { font-family: var(--font-sans); font-size: 13px; color: var(--ink-3); font-weight: 400; margin-left: 6px; }
+.exercises .ex-page { margin: 1.2em 0 1.8em; }
+.exercises .ex-page h3 { font-size: 17px; margin: 0 0 .4em; }
+.exercises .ex-page h3::before { display: none; }
+.topnav a { padding: 6px 8px; font-size: 14px; white-space: nowrap; }
+@media (max-width: 1280px) { .brand-sub { display: none; } }

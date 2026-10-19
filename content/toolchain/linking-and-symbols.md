@@ -1,6 +1,7 @@
 ---
 title: 目标文件、符号与链接
 summary: 目标文件里有什么，C++ 的链接和 ODR 怎样落到符号的绑定、COMDAT 组和弱定义上，未定义引用和重复定义在标准里是什么，链接器默默接受哪些违规，以及静态库、动态库和符号可见性的行为。
+group: 工具链
 status: draft
 order: 20
 related: basic.link, basic.def.odr, dcl.inline, dcl.link, temp.expl.spec, lex.phases, toolchain/compilation-pipeline, toolchain/name-mangling

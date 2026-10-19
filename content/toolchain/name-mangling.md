@@ -1,6 +1,7 @@
 ---
 title: 名字修饰（Itanium C++ ABI）
 summary: GCC 和 Clang 怎样把 C++ 函数、变量、模板特化编码成链接器能比较的符号名，以及这种编码与标准里签名的对应关系。
+group: 工具链
 status: draft
 order: 25
 related: intro.defs, dcl.link, basic.link, over.load, temp.over.link, dcl.fct, expr.prim.lambda.closure, module.unit, toolchain/linking-and-symbols, toolchain/object-layout-and-vtables

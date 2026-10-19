@@ -1,6 +1,7 @@
 ---
 title: 对象布局与虚表（Itanium C++ ABI）
 summary: 标准对类对象的内存布局只规定了少数几条，其余由 ABI 决定；本页用 Clang 的布局与 vtable 转储说明 Itanium ABI 下数据成员、空基类、vptr、vtable、thunk 和虚基类是怎样排布和工作的。
+group: 工具链
 status: draft
 order: 35
 related: class.mem, class.prop, class.virtual, class.derived, class.mi, intro.object, dcl.attr.nouniqueaddr, expr.dynamic.cast, toolchain/name-mangling, toolchain/linking-and-symbols

@@ -1,6 +1,7 @@
 ---
 title: C++ 异常是如何实现的
 summary: GCC 和 Clang 在非 Windows 平台上采用的 Itanium ABI 表驱动异常处理：抛出时调用哪些运行时函数，两阶段回溯怎样找到 handler，着陆点怎样析构对象和进入 catch，noexcept 和 -fno-exceptions 对代码生成的影响，以及零开销的真实代价。
+group: 工具链
 status: draft
 order: 40
 related: except, except.throw, except.handle, except.ctor, except.spec, except.special, toolchain/compilation-pipeline

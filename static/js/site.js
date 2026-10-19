@@ -90,12 +90,13 @@
 
   var TABS = [
     { k: "lang", label: "核心语言" }, { k: "lib", label: "标准库" }, { k: "annex", label: "附录" },
-    { k: "topics", label: "专题" }, { k: "patterns", label: "模式" }, { k: "toolchain", label: "工具链" }, { k: "history", label: "沿革" }
+    { k: "topics", label: "专题" }, { k: "patterns", label: "模式" }, { k: "perf", label: "性能" },
+    { k: "toolchain", label: "工程" }, { k: "history", label: "沿革" }, { k: "papers", label: "提案" }
   ];
   function defaultTab() {
     var act = body.dataset.active;
     if (curPath.length) return NAV.groups[curPath[0].i] || "lang";
-    if (act === "topics" || act === "patterns" || act === "toolchain" || act === "history" || act === "papers") return act;
+    if (act === "topics" || act === "patterns" || act === "perf" || act === "toolchain" || act === "history" || act === "papers") return act;
     return store("tab") || "lang";
   }
   function renderSidebar(tab) {
@@ -126,7 +127,9 @@
       var items = (NAV.collections && NAV.collections[tab]) || [];
       if (!items.length) { sidebar.appendChild(el("div", { class: "sb-empty" }, "还没有内容。")); return; }
       var ul = el("ul", { class: "sb-plain" });
+      var lastG = "";
       items.forEach(function (it) {
+        if (it.g && it.g !== lastG) { ul.appendChild(el("li", { class: "sb-group" }, esc(it.g))); lastG = it.g; }
         var cur = PAGE === it.u.replace(/\.html$/, "");
         ul.appendChild(el("li", null, '<a href="' + ROOT + it.u + '"' + (cur ? ' class="current"' : "") + ">" + esc(it.t) + "</a>"));
       });
@@ -151,7 +154,7 @@
     document.head.appendChild(sc);
   }
   var sel = 0, results = [];
-  var KIND = { std: "笔记", clause: "章", topics: "专题", patterns: "模式", toolchain: "工具链", history: "沿革", papers: "提案", term: "术语", eel: "原文 ↗" };
+  var KIND = { std: "笔记", clause: "章", topics: "专题", patterns: "模式", perf: "性能", toolchain: "工程", history: "沿革", papers: "提案", term: "术语", eel: "原文 ↗" };
 
   function openSearch() {
     if (!modal) return;

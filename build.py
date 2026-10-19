@@ -36,7 +36,9 @@ SITE_SUB = "The Annotated C++ Standard"
 
 COLLECTIONS = {
     "topics": ("专题", "跨越多个条款的主题：把散落在标准各处的规则串成一条线。"),
-    "toolchain": ("工具链", "编译器、链接器、ABI、构建系统：标准之外，让 C++ 程序真正跑起来的那一半。"),
+    "patterns": ("惯用法与模式", "C++ 里常用的惯用法和设计模式：每一个解决什么问题，用哪些语言规则实现，代价是什么，现代 C++ 又给了哪些替代写法。"),
+    "perf": ("性能", "C++ 性能调优：先学会测量，再看编译器能做什么、做不到什么，内存、拷贝、分支和构建层面的优化各值多少，每个结论都有本机实测。"),
+    "toolchain": ("工具链与工程", "编译器、链接器、ABI、构建系统，以及组织一个 C++ 项目的工程实践：物理设计、库边界、依赖、测试、调试和静态分析。"),
     "history": ("沿革", "一个特性或一个库是怎么走到今天的：早期的尝试、委员会里的争论与妥协、被否决的方案、后来的转机，以及还在进行中的工作。"),
     "papers": ("提案", "WG21 提案解读：一个特性从动机、设计取舍到最终措辞的来龙去脉。"),
 }
@@ -518,8 +520,12 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
   <nav class="topnav">
     <a href="{root}std/index.html" data-nav="std">标准</a>
     <a href="{root}topics/index.html" data-nav="topics">专题</a>
-    <a href="{root}toolchain/index.html" data-nav="toolchain">工具链</a>
+    <a href="{root}patterns/index.html" data-nav="patterns">模式</a>
+    <a href="{root}perf/index.html" data-nav="perf">性能</a>
+    <a href="{root}toolchain/index.html" data-nav="toolchain">工程</a>
     <a href="{root}history/index.html" data-nav="history">沿革</a>
+    <a href="{root}papers/index.html" data-nav="papers">提案</a>
+    <a href="{root}exercises.html" data-nav="exercises">习题</a>
     <a href="{root}glossary.html" data-nav="glossary">术语</a>
   </nav>
   <button class="search-btn" type="button" aria-label="搜索"><span>搜索 stable name / 关键词</span><kbd>/</kbd></button>
@@ -616,7 +622,7 @@ def collect_pages(by_id):
             "status": meta.get("status", "draft"), "tags": split_list(meta.get("tags")),
             "since": meta.get("since", ""), "papers": split_list(meta.get("papers")),
             "related": split_list(meta.get("related")), "order": float(meta.get("order", 999)),
-            "updated": meta.get("updated", ""), "covers": split_list(meta.get("covers")),
+            "updated": meta.get("updated", ""), "covers": split_list(meta.get("covers")), "group": meta.get("group", ""),
             "url": f"{kind}/{pid}.html",
         }
         if kind == "std" and pid not in by_id:
@@ -625,6 +631,40 @@ def collect_pages(by_id):
             warn(f"{rel}: unknown status '{p['status']}'")
         pages[key] = p
     return pages
+
+
+def extract_questions(html_s):
+    """The `!!! question` admonitions of a rendered page (balanced <div> scan)."""
+    out = []
+    for m in re.finditer(r'<div class="admonition question">', html_s):
+        depth, pos = 0, m.start()
+        for d in re.finditer(r"<div\b|</div>", html_s[pos:]):
+            depth += 1 if d.group(0) == "<div" else -1
+            if depth == 0:
+                out.append(html_s[pos:pos + d.end()])
+                break
+    return out
+
+
+def exercises_page(exercises):
+    """Every 思考题 on the site, grouped by section, each linking back to its page."""
+    root = ""
+    sections, total = {}, 0
+    for ex in exercises:
+        sections.setdefault(ex["section"], {}).setdefault(ex["key"], ex)
+    parts = []
+    for sec, by_page in sections.items():
+        n = sum(len(e["qs"]) for e in by_page.values())
+        total += n
+        rows = []
+        for e in by_page.values():
+            qs = "".join(q.replace("{ROOT}", root) for q in e["qs"])
+            rows.append(f'<section class="ex-page"><h3><a href="{root}{e["url"]}">{esc(e["title"])}</a></h3>{qs}</section>')
+        parts.append(f'<h2 id="{slugify_unicode(sec, "-")}">{esc(sec)} <small>{n} 题</small></h2>' + "".join(rows))
+    head = (f'<header class="page-head"><h1>习题</h1><p class="page-summary">全站各页的思考题汇总，共 {total} 题，按栏目和页面排列。'
+            f'答案都折叠在题目下面，点题目上方的页面标题可以回到原文。</p></header>')
+    return layout(title="习题", root=root, active="exercises", page_id="exercises",
+                  body=head + f'<div class="prose exercises">{"".join(parts)}</div>')
 
 
 def plain_text(html_s):
@@ -668,6 +708,7 @@ def build():
     ctx = Ctx(by_id, pages, glossary, zh)
     clauses = [e for e in entries if e["level"] == 1]
     search = []
+    exercises = []
 
     # ---- std pages
     std_sorted = sorted((p for p in pages.values() if p["kind"] == "std"),
@@ -678,8 +719,15 @@ def build():
             continue  # rendered as clause overview below
         root = rel_root(p["url"])
         body_html, toks = render_markdown(p["src"], ctx, p["key"])
-        body_html = body_html.replace("{ROOT}", root)
         e = by_id.get(p["id"])
+        qs = extract_questions(body_html)
+        if qs:
+            top = p["id"]
+            while ctx.parent.get(top):
+                top = ctx.parent[top]
+            sec = {"lang": "核心语言", "lib": "标准库", "annex": "附录"}.get(clause_group(by_id[top]) if top in by_id else "", "标准")
+            exercises.append({"section": "标准 · " + sec, "key": p["key"], "url": p["url"], "title": f'{p["title"]} [{p["id"]}]', "qs": qs})
+        body_html = body_html.replace("{ROOT}", root)
         head = []
         if e:
             head.append(breadcrumbs(e, by_id, zh, root, ctx.std_pages))
@@ -740,6 +788,9 @@ def build():
         for i, p in enumerate(items):
             root = rel_root(p["url"])
             body_html, toks = render_markdown(p["src"], ctx, p["key"])
+            qs = extract_questions(body_html)
+            if qs:
+                exercises.append({"section": label, "key": p["key"], "url": p["url"], "title": p["title"], "qs": qs})
             body_html = body_html.replace("{ROOT}", root)
             meta_bits = [status_badge(p["status"])]
             if p["since"]:
@@ -763,6 +814,9 @@ def build():
 
     # ---- glossary, home
     write("glossary.html", glossary_page(gloss_list, ctx))
+    exercises.sort(key=lambda e: 0 if e["section"].startswith("标准") else 1 + list(COLLECTIONS.values()).index(
+        next(v for v in COLLECTIONS.values() if v[0] == e["section"])))
+    write("exercises.html", exercises_page(exercises))
     for g in gloss_list:
         search.append({"t": g["en"], "e": g.get("zh", ""), "s": "", "u": f"glossary.html#{g['id']}", "k": "term",
                        "x": re.sub(r"\[\[([^|\]]+)(?:\|([^\]]+))?\]\]", lambda m: m.group(2) or m.group(1), g.get("def", ""))[:160]})
@@ -779,7 +833,7 @@ def build():
 
     nav = {
         "clauses": [nav_node(c, by_id, ctx) for c in clauses],
-        "collections": {k: [{"t": p["title"], "u": p["url"], "st": p["status"]}
+        "collections": {k: [{"t": p["title"], "u": p["url"], "st": p["status"], "g": p.get("group", "")}
                             for p in sorted((p for p in pages.values() if p["kind"] == k), key=lambda p: (p["order"], p["title"]))]
                         for k in COLLECTIONS},
         "groups": {c["id"]: clause_group(c) for c in clauses},
@@ -913,12 +967,15 @@ def std_index(clauses, by_id, ctx, toc_meta):
 def collection_index(kind, label, blurb, items):
     root = "../"
     if items:
-        cards = "".join(
-            f'<a class="topic-card" href="{root}{p["url"]}"><span class="t">{esc(p["title"])}</span>'
-            f'<span class="s">{esc(p["summary"])}</span><span class="m">{status_badge(p["status"])}'
-            + "".join(f'<span class="tag">{esc(t)}</span>' for t in p["tags"][:4]) + '</span></a>'
-            for p in items)
-        body = f'<div class="topic-grid">{cards}</div>'
+        def card(p):
+            return (f'<a class="topic-card" href="{root}{p["url"]}"><span class="t">{esc(p["title"])}</span>'
+                    f'<span class="s">{esc(p["summary"])}</span><span class="m">{status_badge(p["status"])}'
+                    + "".join(f'<span class="tag">{esc(t)}</span>' for t in p["tags"][:4]) + '</span></a>')
+        groups = {}
+        for p in items:  # groups keep the order of their first page
+            groups.setdefault(p.get("group", ""), []).append(p)
+        body = "".join((f'<h2 class="coll-group">{esc(g)}</h2>' if g else "")
+                       + f'<div class="topic-grid">{"".join(card(p) for p in ps)}</div>' for g, ps in groups.items())
     else:
         body = '<p class="empty">这一栏还在准备中。</p>'
     return layout(title=label, root=root, active=kind, page_id=f"{kind}-index",
@@ -972,6 +1029,7 @@ def home_page(clauses, by_id, ctx, pages, toc_meta):
   <div class="hero-stats">
     <div><b>{counts['std']}</b><span>条款笔记</span></div>
     <div><b>{counts['topics']}</b><span>专题</span></div>
+    <div><b>{counts['patterns']}</b><span>惯用法与模式</span></div>
     <div><b>{counts['toolchain']}</b><span>工具链</span></div>
     <div><b>{counts['history']}</b><span>沿革</span></div>
     <div><b>{len(ctx.glossary)}</b><span>术语</span></div>
