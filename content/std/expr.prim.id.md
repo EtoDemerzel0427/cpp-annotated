@@ -1,55 +1,24 @@
 ---
 title: 名字（id 表达式）
-summary: 用名字指代实体的表达式：类型与值类别如何确定、何时被隐式改写成 (*this).m、lambda 中被按值捕获的名字为何带 const、隐式移动（move-eligible）、限定名、伪析构函数与 C++26 包索引。
-status: draft
+summary: 把名字当作表达式使用时，它的类型和值类别怎样确定、什么时候被改写成 (*this).m、什么时候会被隐式移动，以及限定名、包索引和伪析构函数的规则。
+status: done
 covers: expr.prim.id.general, expr.prim.id.unqual, expr.prim.id.qual, expr.prim.pack.index, expr.prim.id.dtor
 related: expr.prim, basic.lookup, basic.lval, expr.ref, expr.prim.lambda.capture, temp.variadic, class.dtor, stmt.return
+papers: P1825R0, P2266R3, P2036R3, P2662R3
 tags: 表达式, 值类别, 名字查找, 隐式移动, 包展开
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-**id 表达式**（*id-expression*）就是把一个名字当作表达式使用：`x`、`N::x`、`operator+`、`~T`、`f<int>`，以及 C++26 的 `ts...[0]`。名字查找（[[basic.lookup]]）回答这个名字指的是哪个实体；本节回答下一步的问题：这个表达式的类型、值类别是什么，它可以用在什么场合。
+!!! tldr
+    - 成员函数里写成员名 `m`，会被改写成 `(*this).m`，之后按成员访问的规则确定类型，所以 `const` 成员函数里的 `m` 是 const。
+    - 非静态成员名脱离对象只能做三件事：参与成员访问、形成成员指针、（数据成员）出现在 `sizeof` 等未求值操作数中。
+    - 有名字的变量是 lvalue，右值引用变量也不例外；只有作为 `return`、`co_return`、`throw` 的操作数且满足条件时，它才是 xvalue，从而被隐式移动。
+    - 非 `mutable` 的 lambda 中，按值捕获的名字带 const；类类型的非类型模板形参是 const lvalue，标量的则是 prvalue，不能取地址。
+    - C++26 的 `ts...[I]` 取包的第 I 个元素，下标越界或为负都非良构。
 
-这一节看似琐碎，却能解释日常编程中的许多疑问：
+**id 表达式**（id-expression）就是把一个名字当作表达式使用：`x`、`N::x`、`operator+`、`~T`、`f<int>`，以及 C++26 的 `ts...[0]`。名字查找（[[basic.lookup]]）确定这个名字指哪个实体；本节确定接下来的事：这个表达式是什么类型、哪种值类别（[[basic.lval]]）、可以用在哪里。
 
-- 为什么成员函数里写 `m` 就能访问成员？因为有隐式成员访问变换（¶2）。
-- 为什么 `sizeof(S::m)` 合法，`int i = S::m;` 却不合法？因为 ¶4 限制了使用场合。
-- 为什么 `[=]{ ... }` 里 `decltype((x))` 是 `const T&`？见 [[expr.prim.id.unqual#4]]。
-- 为什么 `return x;` 会移动，`return (x);` 也会，`return x.member;` 却不会？这取决于是否 move-eligible（[[expr.prim.id.unqual#15]]）。
-- 为什么非类型模板形参 `N` 不能取地址，而类类型模板形参却可以？见 ¶9 与 ¶12。
-
-## 总体规则（[expr.prim.id.general]）
-
-### id 表达式的三种形式（¶1）
-
-¶1 *id-expression* 是 *unqualified-id*、*qualified-id* 或 *pack-index-expression*，是 *primary-expression* 的一种受限形式。注释提醒，*id-expression* 也会出现在 `.`/`->` 之后，那时它是成员访问的组成部分，而不是独立的基本表达式（[[expr.ref]]）。
-
-### 隐式成员访问变换（¶2）
-
-¶2 这是本节最重要的规则。设 id 表达式 `E` 指代某个类 `C` 的非静态、非类型成员（数据成员或成员函数），且在 `E` 所处位置，当前类（[[expr.prim.this#2]]）是 `X`。如果同时满足：
-
-- (2.1) `E` 是潜在求值的（[[basic.def.odr#3]]），或者 `C` 就是 `X` 或 `X` 的基类；
-- (2.2) `E` 本身不是类成员访问 `a.E` / `p->E` 中的那个 id 表达式；
-- (2.3) `E` 不是反射表达式 `^^E` 的操作数 {{c++26}}；
-- (2.4) 如果 `E` 是限定名，它不是一元 `&` 的不加括号的操作数（否则就是在形成成员指针）；
-
-那么 `E` 改写成以 `(*this)` 为对象表达式的类成员访问：`m` → `(*this).m`。
-
-!!! std
-    the *id-expression* is transformed into a class member access expression using `(*this)` as the object expression.
-
-    满足条件时，裸成员名改写成 `(*this).名字`，此后一切按 [[expr.ref]] 处理。
-
-这条规则能解释很多现象：
-
-1. 成员函数里能直接写 `m`，因为它就是 `(*this).m`。之后的类型、值类别、cv 都按成员访问的规则确定：在 `const` 成员函数里 `*this` 是 const，所以 `m` 是 const lvalue。
-2. (2.1) 中的"或者"：为什么要区分潜在求值和"C 是 X 或其基类"两种情况？设想 `sizeof(Other::om)` 出现在与 `Other` 无关的类 `X` 的成员函数里：它不是潜在求值的，`Other` 也不是 `X` 的基类，于是不做变换，作为 ¶4.3 所说的在未求值操作数中命名非静态数据成员，是合法的。而 `sizeof(m)`（`m` 是 `X` 自己的成员）会变换成 `sizeof((*this).m)`，结果一样，但类型此时受 `*this` 的 cv 影响。
-3. (2.4) 只针对限定名。`&X::m` 是成员指针（[[expr.unary.op]]），所以不能变换；`&(X::m)` 有括号，照常变换为 `&(*this).m`，得到普通指针。这正是 [[expr.prim.paren]] 中括号改变含义的一个例子。
-4. 在模板定义上下文中不做变换（[[temp.dep.type]]）。在模板定义中是否需要变换，可能取决于依赖基类等因素，所以推迟到实例化时决定。
-
-!!! note "注释 2：两种必然失败的情形"
-    - 如果 `C` 不是 `X` 或 `X` 的基类，变换出的 `(*this).C::m` 非良构。也就是说，不能在 `Der` 的成员里以潜在求值的方式使用不相关类 `Other` 的成员。
-    - 如果 id 表达式出现在静态成员函数或显式对象成员函数（deducing this）内部，变换出的成员访问非良构，因为那里没有 `this`（[[expr.prim.this#4]]）。在显式对象成员函数中必须写 `self.m`。
+## 成员名与隐式的 this [expr.prim.id.general]
 
 ```cpp run ok
 struct Base  { int bm; };
@@ -58,92 +27,85 @@ struct Other { int om; };
 struct Der : Base {
   int dm;
   void h() const {
-    (void)dm;                    // (*this).dm，类型 const int lvalue
-    (void)bm;                    // (*this).bm，Base 是 Der 的基类
-    (void)Base::bm;              // 限定名同样变换：(*this).Base::bm
-    (void)sizeof(Other::om);     // 不变换：未求值，且 Other 不是基类；由 ¶4.3 允许
+    (void)dm;                 // (*this).dm，const int lvalue
+    (void)bm;                 // (*this).bm，Base 是基类
+    (void)Base::bm;           // (*this).Base::bm
+    (void)sizeof(Other::om);  // 不改写：见下文 ¶4.3
   }
 };
 
 int main() { }
 ```
 
+成员函数里能直接写 `dm`，是因为编译器把它改写成了 `(*this).dm`。
+
+¶2 设 id 表达式 `E` 指代某个类 `C` 的非静态成员（数据成员或成员函数），在 `E` 所在位置，当前类（[[g:current-class]]，包含该位置的最内层类）是 `X`。如果同时满足以下四条，`E` 就改写成以 `(*this)` 为对象的类成员访问：
+
+- (2.1) `E` 是潜在求值的（[[g:potentially-evaluated]]，大致说就是不在 `sizeof`、`decltype` 这类不求值的操作数里），或者 `C` 就是 `X` 或 `X` 的基类；
+- (2.2) `E` 不是某个成员访问 `a.E`、`p->E` 中的名字；
+- (2.3) `E` 不是反射表达式 `^^E` 的操作数 {{c++26}}；
+- (2.4) 如果 `E` 是限定名，它不是一元 `&` 的不加括号的操作数。
+
+改写之后一切按成员访问（[[expr.ref]]）处理。在 `const` 成员函数里 `*this` 是 const，所以 `m` 是 const lvalue。
+
+(2.1) 区分两种情况。上例的 `sizeof(Other::om)` 不求值，`Other` 也不是 `Der` 的基类，于是不改写，按后面的 ¶4.3 合法。如果改成潜在求值的 `(void)Other::om;`，就会改写成 `(*this).Other::om`，而 `Other` 不是 `Der` 的基类，非良构（注 2）。
+
+(2.4) 只针对限定名。`&X::m` 是在形成成员指针（[[expr.unary.op]]），不能改写；`&(X::m)` 有括号，照常改写为 `&(*this).X::m`，得到普通指针。这是括号改变含义的一个例子（[[expr.prim.paren]]）。
+
+在模板定义中不做改写（[[temp.dep.type]]），因为是否需要改写可能取决于依赖的基类，要等实例化时才知道。
+
+注 2 还指出，在静态成员函数或显式对象成员函数（deducing this）里，改写出的成员访问非良构，因为那里没有 `this`（[[expr.prim.this#4]]）。显式对象成员函数中必须写 `self.m`。
+
 ```cpp error
 struct Other { int om; };
 struct Der {
-  void h() { (void)Other::om; }   // error: 潜在求值 → 变换为 (*this).Other::om，但 Other 不是 Der 的基类
-  void e(this Der& self) { }
   int dm;
-  void k(this Der& self) { (void)dm; }   // error: 显式对象成员函数中没有隐式 this
+  void h() { (void)Other::om; }          // error: Other 不是基类
+  void k(this Der& self) { (void)dm; }   // error: 没有隐式 this
 };
 ```
 
-!!! std "C++26 契约中的附加限制"
-    如果变换发生在构造函数前置条件或析构函数后置条件的谓词中，表达式非良构 {{c++26}}。
-
-    构造函数开始执行前成员尚未初始化，析构函数结束后成员已经销毁，这时读取成员必然出错；但未求值的 `sizeof(b)` 和显式写出的 `&this->b` 仍然允许（后者不读取值）。
+¶2 的最后一句是 C++26 的附加规则：如果改写发生在 `X` 的构造函数的前置条件，或析构函数的后置条件中，表达式非良构 {{c++26}}。前置条件检查时成员还没有初始化，后置条件检查时成员已经销毁。不求值的 `sizeof(b)` 和不读值的 `&this->b` 仍然可以用。
 
 !!! lawyer "静态成员函数中的 `sizeof(m)`"
-    设在类 `X` 的静态成员函数中写 `sizeof(m)`（`m` 是 `X` 的非静态数据成员）。按当前措辞，条件 (2.1) 后半的"C 是 X"成立，因此它会变换成 `sizeof((*this).m)`，而注释 2 说这在静态成员函数中非良构。C++11 的旧措辞则规定只在可以使用 `this` 的上下文中才做变换，按旧措辞这是合法的。实践中，Clang 接受函数体中的 `sizeof(m)`，但拒绝声明中的（如尾置返回类型 `-> decltype(sizeof(m))`）。要写可移植的代码，请用 `sizeof(std::declval<X&>().m)` 或者直接写类型。
+    在类 `X` 的静态成员函数中写 `sizeof(m)`，`m` 是 `X` 的非静态数据成员。按当前措辞，(2.1) 的后半句 `C` 就是 `X` 成立，`m` 会被改写成 `(*this).m`，在静态成员函数中非良构。C++11 的措辞是只在可以使用 `this` 的地方才改写，按那时的规则它是合法的。Clang 23 接受函数体中的 `sizeof(m)`，却拒绝声明中的，例如尾置返回类型 `-> decltype(sizeof(m))`。可移植的写法是 `sizeof(std::declval<X&>().m)`，或者直接写类型。
 
-### 匿名联合体的成员（¶3）
+### 非静态成员名能用在哪里
 
-¶3 如果 `E` 指代某匿名联合体 `U`（[[class.union.anon]]）的变体成员 `M`：
+¶4 指代非静态数据成员或隐式对象成员函数的 id 表达式（或 splice 表达式）只能这样用：
 
-- (3.1) 如果 `U` 是一个非静态数据成员（类内的匿名联合体），`E` 就当作在 `E` 终端名的查找上下文里的成员 `M`。例如 `o.x` 解释为 `o.u.x`（`u` 代表那个无名成员）。
-- (3.2) 否则（命名空间作用域或块作用域的匿名联合体，它引入了一个无名变量），`E` 解释为对该匿名联合体变量的子对象 `M` 的成员访问，例如 `N::x` 解释为 `N::u.x`。注释 3 强调，这样解释之后，`E` 不再指代非静态数据成员，所以命名空间作用域的匿名联合体成员可以像普通变量一样使用，不受 ¶4 限制。
+- (4.1) 作为类成员访问的一部分（包括 ¶2 改写的结果），对象表达式的类型是该成员所属的类或其派生类；
+- (4.2) 形成成员指针（`&C::m`）；
+- (4.3) 如果指代的是数据成员，出现在未求值操作数（[[g:unevaluated-operand]]，`sizeof`、`decltype`、`noexcept` 等的操作数）中。
 
-```cpp run ok
-namespace N { static union { int x; float f; }; }   // 命名空间作用域的匿名联合体必须是 static
+<div class="compare" markdown="1">
 
-struct O {
-  union { int a; char c; };          // 类内匿名联合体：a、c 是 O 的变体成员
-};
+```cpp ok
+struct S { int m; void mf() {} };
 
-int main() {
-  N::x = 1;            // 即 N::<匿名变量>.x
-  O o;
-  o.a = 2;             // 即 o.<匿名成员>.a
-  return N::x + o.a - 3;
-}
-```
-
-### 非静态成员名能用在哪里（¶4–5）
-
-¶4 指代非静态数据成员或隐式对象成员函数的 id 表达式（或 splice 表达式）只能：
-
-- (4.1) 作为类成员访问的一部分（包括 ¶2 隐式变换的结果），且对象表达式的类型是该成员所属的类或其派生类；
-- (4.2) 用来形成成员指针（`&C::m`）；
-- (4.3) 如果指代的是非静态数据成员，出现在未求值操作数（[[expr.context]]，如 `sizeof`、`decltype`、`noexcept`、`requires` 中）里。
-
-(4.3) 是 C++11 新增的。在此之前 `sizeof(S::m)` 非良构，只能写成 `sizeof(((S*)0)->m)` 这种难看的形式。注意 (4.3) 只对数据成员开放，成员函数名在未求值操作数中依然不能单独出现，因为脱离对象的成员函数甚至没有一个可以描述的类型。
-
-```cpp run ok
-#include <type_traits>
-
-struct S { int m; void mf(); };
-
-int i = sizeof(S::m);                 // OK：(4.3)
-int j = sizeof(S::m + 42);            // OK：整个操作数是未求值的
-int S::* pm = &S::m;                  // OK：(4.2)
-void (S::* pmf)() = &S::mf;           // OK：(4.2)
-static_assert(std::is_same_v<decltype(S::m), int>);
-
-int main() { }
+int i = sizeof(S::m);       // (4.3)
+int j = sizeof(S::m + 42);  // (4.3)
+int S::* pm = &S::m;        // (4.2)
+void (S::* pmf)() = &S::mf; // (4.2)
 ```
 
 ```cpp error
-struct S { int m; void mf(); };
-int a = S::m;                  // error: 潜在求值地使用非静态数据成员，且无对象
-auto b = S::mf;                // error: 非静态成员函数只能被调用或用于形成成员指针
-auto c = sizeof(S::mf);        // error: (4.3) 只允许数据成员
+struct S { int m; void mf() {} };
+
+int a = S::m;           // error: 没有对象
+auto b = S::mf;         // error
+auto c = sizeof(S::mf); // error: 成员函数
 ```
 
-¶5 {{c++26}} 指代直接基类关系的 splice 表达式只能作为类成员访问的第二操作数（`obj.[: base_rel :]`），用于取得基类子对象。见 [[expr.prim.splice#2]]。
+</div>
 
-### 重载集（¶6）
+(4.3) 是 C++11 加入的，此前只能写 `sizeof(((S*)0)->m)`。它只对数据成员开放：脱离对象的成员函数名连一个可以描述的类型都没有。
 
-¶6 如果 id 表达式指代一个重载集，就进行重载决议（[[over.match]]，取地址时用 [[over.over]]），选出唯一的函数。注释 4 由此推出一个重要结论：如果函数的尾置 *requires-clause* 不被满足，它就永远不会被选中，因此根本无法被引用。不能调用，不能取地址，甚至不能出现在 `decltype` 里：虽然 `decltype` 的操作数不求值，但要引用某个函数，本身就需要先确定是哪个函数。
+¶5 {{c++26}} 指代直接基类关系的 splice 表达式只能作为成员访问的第二个操作数（`obj.[: base :]`），用来取得基类子对象，见 [[expr.prim.splice]]。
+
+### 重载集与不满足的约束
+
+¶6 如果名字指代一个重载集，就做重载决议（[[over.match]]；取地址时按 [[over.over]]）选出唯一的函数。注 4 由此推出：尾置 *requires-clause* 不满足的函数永远不会被选中，所以根本无法引用它，即使在 `decltype` 这样的未求值操作数里也不行。
 
 ```cpp error
 template<typename T> struct A {
@@ -151,110 +113,114 @@ template<typename T> struct A {
 };
 
 void g() {
-  A<int>::f(0);                         // error: 约束不满足，无法调用
-  void (*p1)(int) = A<int>::f;          // error: 无法取地址
-  decltype(A<int>::f)* p2 = nullptr;    // error: 即使在未求值操作数中也需要约束满足
+  A<int>::f(0);                        // error: 无法调用
+  void (*p1)(int) = A<int>::f;         // error: 无法取地址
+  decltype(A<int>::f)* p2 = nullptr;   // error: 同样需要约束满足
 }
 ```
 
-有了这条规则，按条件禁用成员函数比 C++20 之前的 SFINAE 技巧干净得多：带 `requires` 约束的成员在类模板实例化时不会导致硬错误，只是在重载决议中不可见（参见 [[temp.constr]]）。
+这让带约束的成员函数可以安全地留在类模板里：约束不满足时，实例化类模板不会出错，只是这个函数在重载决议中不可见（[[temp.constr]]）。
 
-## 非限定名（[expr.prim.id.unqual]）
+### 匿名联合体的成员
 
-### 什么算 unqualified-id（¶1–3）
+¶3 匿名联合体（[[class.union.anon]]）的成员名会被解释成对那个无名对象的成员访问。类内的匿名联合体是一个无名的非静态数据成员，`o.x` 解释为 `o.u.x`（`u` 代表那个无名成员）。命名空间或块作用域的匿名联合体是一个无名变量，`N::x` 解释为 `N::u.x`。注 3 指出，后一种情况下 `x` 不再算非静态数据成员，所以可以像普通变量一样使用，不受 ¶4 限制。
 
-¶1 *unqualified-id* 包括：标识符、`operator@`（[[over.oper]]）、转换函数名 `operator T`（[[class.conv.fct]]）、字面量运算符名 `operator""_x`（[[over.literal]]）、`~类型名`/`~decltype(...)`（析构函数，见下文）、*template-id*。一个标识符只有经过适当声明（或者正作为 *declarator-id* 被声明）时才是 id 表达式。换言之，未声明的名字不是表达式，而是错误。ADL 的情形是例外，由 [[basic.lookup.argdep]] 处理：`f(x)` 中的 `f` 可以在普通查找中找不到。
+```cpp run ok
+namespace N { static union { int x; float f; }; }  // 命名空间作用域的必须是 static
 
-¶2 [[g:component-name|**组成名字**]]（component name）与[[g:terminal-name|**终端名字**]]（terminal name）是 C++23 为统一名字查找的措辞而引入的术语。*unqualified-id* 的组成名字就是它本身（如果它是名字），或者其中 *template-id*/*type-name* 的组成名字；一个构造的终端名字是它在词法上最后出现的组成名字。例如 `N::C<int>::f` 的终端名字是 `f`。[[basic.lookup.qual]] 用这些术语描述哪个名字在哪个作用域里查找。
+struct O {
+  union { int a; char c; };   // a、c 是 O 的变体成员
+};
 
-¶3 结果就是名字查找（[[basic.lookup.unqual]]）找到的实体。
+int main() {
+  N::x = 1;    // N::<无名变量>.x
+  O o;
+  o.a = 2;     // o.<无名成员>.a
+  return N::x + o.a - 3;
+}
+```
 
-### 类型：逐条排除的规则（¶4–10）
+## 非限定名的类型 [expr.prim.id.unqual]
 
-确定 unqualified-id 的类型时，标准依次检查以下情形，第一个匹配的生效：
+¶1 *unqualified-id* 包括标识符、`operator+` 这样的运算符函数名、转换函数名 `operator T`、字面量运算符名 `operator""_x`、析构函数名 `~T`，以及 *template-id*。标识符只有在被声明过（或正在作为声明符被声明）时才是 id 表达式；ADL 是例外，`f(x)` 中的 `f` 可以在普通查找中找不到（[[basic.lookup.argdep]]）。
+
+¶3 结果就是名字查找（[[basic.lookup.unqual]]）找到的实体。它的类型按下表依次检查，第一个适用的生效：
 
 | 段落 | 情形 | 表达式的类型 |
 |---|---|---|
-| ¶4 | lambda 中命名一个会被按值捕获的局部实体，且位于该 lambda 的函数形参作用域内 | 通过对象参数访问对应闭包成员时的类型（通常带 const） |
-| ¶5 | 协程形参 | 协程帧中那份拷贝的类型，且结果就是那份拷贝 |
-| ¶6 {{c++26}} | 后置条件中的结果绑定（`post(r: ...)`）| `const T`（返回 `T&` 时）或 `const U` |
-| ¶7 {{c++26}} | 契约谓词中命名谓词外声明的变量/引用/结构化绑定 | `const T` |
+| ¶4 | lambda 中命名一个被按值捕获的局部实体 | 对应闭包成员的类型，非 `mutable` 时带 const |
+| ¶5 | 协程的形参 | 协程帧中那份副本的类型，结果也是那份副本 |
+| ¶6 {{c++26}} | 后置条件的结果绑定 `post(r: ...)` | `const T` |
+| ¶7 {{c++26}} | 契约谓词中命名谓词外声明的变量 | `const T` |
 | ¶9 | 类类型的模板形参对象 | `const T` |
 | ¶10 | 其余 | 实体的类型 |
 
-¶11 的注释说明，所得类型还要按 [[expr.type]] 调整：引用类型去掉引用，cv 限定的非类类型 prvalue 去掉 cv。
+¶11 的注释提醒，得到的类型还要按 [[expr.type]] 调整：引用类型去掉引用，非类类型的 prvalue 去掉 cv。
 
-#### lambda 中的名字（¶4）
+### lambda 中按值捕获的名字
 
-¶4 处理的问题比较微妙。在 lambda 内部写 `decltype((x))` 时，`x` 并没有变换为闭包成员访问（变换只针对 odr-use，见 [[expr.prim.lambda.capture#11]]，而 `decltype` 的操作数是未求值的），但程序员显然期望得到 `x` 在 lambda 里的实际类型。¶4 有四个条件：
+```cpp
+void f() {
+  int x = 0;
+  auto a = [x] { decltype((x)) r = x; };          // const int&
+  auto b = [x] mutable { decltype((x)) r = x; };  // int&
+  auto c = [&x] { decltype((x)) r = x; };         // int&
+}
+```
 
-- (4.1) unqualified-id 出现在 lambda 表达式中的程序点 P；
+lambda 体里用到按值捕获的 `x` 时，实际访问的是闭包对象的一个数据成员（[[expr.prim.lambda.capture#11]]）。非 `mutable` lambda 的调用运算符是 const 成员函数，这个成员访问是 const 的，所以 `x` 不能修改。
+
+但那条改写只针对 odr-use，即真正需要读写那个对象的使用。`decltype((x))` 的操作数不求值，不会触发改写。¶4 补上了这个缺口，让 `decltype((x))` 也给出 `x` 在 lambda 里的实际类型。它的四个条件是：
+
+- (4.1) 名字出现在 lambda 表达式中的某一点 P；
 - (4.2) 实体是局部实体（[[basic.pre]]）或 init-capture 声明的变量；
-- (4.3) 如果在最内层 lambda 的复合语句中（不在未求值操作数中）命名它，会引用到某个中间 lambda 按值捕获的实体；
-- (4.4) P 位于最内层这样的 lambda `E` 的函数形参作用域内，但不在形参声明子句中，也就是在尾置返回类型、noexcept 说明、函数体等位置。
+- (4.3) 如果在 P 所在的最内层 lambda 的函数体中命名这个实体，会引用到某个中间层 lambda 按值捕获的实体；
+- (4.4) P 在最内层的这样一个 lambda `E` 的函数形参作用域内，但不在它的形参列表里，也就是在尾置返回类型、`noexcept` 说明或函数体中。
 
-满足这些条件时，表达式的类型等于通过 `E` 的函数调用运算符的对象参数，访问按值捕获所产生的那个非静态数据成员时得到的类型。非 `mutable` lambda 的调用运算符是 `const` 的，于是类型是 `const T`。
+满足时，表达式的类型就是通过 `E` 的调用运算符的对象形参访问那个捕获成员时的类型。
 
-```cpp run ok
+```cpp run
 #include <type_traits>
 
 void f() {
   float x, &r = x;
 
-  [=]() -> decltype((x)) {     // 返回 const float&：P 在尾置返回类型中，满足 (4.4)
-    decltype(x) y1;            // float   —— 不加括号的 decltype 看的是实体的声明类型，不受 ¶4 影响
+  [=]() -> decltype((x)) {     // 返回 const float&
+    decltype(x) y1;            // float：不加括号看声明类型
     decltype((x)) y2 = y1;     // const float&
-    decltype(r) r1 = y1;       // float&  —— 声明类型
-    decltype((r)) r2 = y2;     // const float& —— 按值捕获引用时，捕获的是被引用的 float
+    decltype(r) r1 = y1;       // float&：声明类型
+    decltype((r)) r2 = y2;     // const float&：捕获的是被引用的 float
     static_assert(std::is_same_v<decltype(y2), const float&>);
     static_assert(std::is_same_v<decltype(r2), const float&>);
-    (void)r1; (void)r2;
+    (void)r1;
     return y2;
   };
 
-  [=](decltype((x)) y) {       // y 是 float&：形参声明子句不满足 (4.4)，看的是外面的 x
+  [=](decltype((x)) y) {       // 形参列表不满足 (4.4)：float&
     static_assert(std::is_same_v<decltype(y), float&>);
   };
 
-  [=]() mutable {              // mutable：调用运算符不是 const，成员不带 const
-    static_assert(std::is_same_v<decltype((x)), float&>);
-  };
-
   [=] {
-    [](decltype((x)) y) { };   // 标准：y 的类型是 const float&（见下方说明；Clang 给出 float&）
+    [](decltype((x)) y) { };   // 标准：const float&；Clang 23：float&
   };
 }
 
 int main() { }
 ```
 
-最后一个例子最考验对 (4.4) 的理解。P 位于内层 lambda 的形参子句中，但 (4.4) 说的是最内层的"这样的" lambda，即按值捕获了 `x` 的那个 lambda，也就是外层的 `[=]`。P 位于外层 lambda 的函数形参作用域内（在它的函数体里），且不在外层的形参子句中，所以条件成立，`decltype((x))` 是 `const float&`。标准原文的例子就是这样注释的。
+最后一个例子考验对 (4.4) 的理解。P 在内层 lambda 的形参列表里，但 (4.4) 说的是最内层的这样一个 lambda，即按值捕获了 `x` 的外层 `[=]`。P 在外层 lambda 的函数体中，不在外层的形参列表里，所以条件成立，类型是 `const float&`。标准的例子就是这样注释的。
 
-!!! warning "编译器分歧"
-    截至写作时，本机 Clang（Homebrew clang 23）对这个嵌套情形给出的是 `float&`，与标准例子不一致；前面几种情形则与标准一致。依赖此类细节的代码应当避免，或者显式写出类型。
+这个代码块没有标判定，因为 Clang 23 对嵌套的情形给出 `float&`，与标准不一致；其余几种情形与标准一致。如果在最后一个 lambda 里加上 `static_assert(std::is_same_v<decltype(y), const float&>)`，Clang 会报断言失败。
 
-!!! note "为什么形参子句被排除在外"
-    (4.4) 排除 *parameter-declaration-clause* 的理由是：形参的类型决定了调用运算符的签名，而签名应当只依赖外部可见的信息，不依赖这个名字是否会被捕获。何况在隐式捕获时，捕获集合要等看完整个函数体才能确定。
+形参列表被排除在外，是因为形参类型决定了调用运算符的签名，签名应当只依赖外部可见的信息。何况隐式捕获时，要看完整个函数体才知道捕获了哪些变量。
 
-#### 协程形参（¶5）
+### 协程形参
 
-¶5 协程开始执行时，形参会拷贝（或移动）到协程帧中（[[dcl.fct.def.coroutine]]），之后协程体里的形参名指代的是那份拷贝。这也说明了为什么协程按引用接受的参数在首次挂起之后可能悬垂：拷贝的只是引用本身。
+¶5 协程开始执行时，形参被复制或移动到协程帧中（[[dcl.fct.def.coroutine]]），之后协程体里的形参名指的是那份副本。按引用接受的形参只复制了引用本身，所以首次挂起之后它可能悬垂。
 
-#### 契约谓词中的 const 化 {{c++26}}（¶6–8）
+### 模板形参对象
 
-¶6 后置条件的结果绑定（result binding，[[dcl.contract.res]]，即 `post(r : r > 0)` 中的 `r`）：如果返回类型是 `T&`，`r` 的类型是 `const T`；否则是 `const U`。
-
-¶7 如果契约断言 `C` 的谓词中命名了在 `C` 之外声明的对象类型变量、引用类型变量、模板形参或结构化绑定，表达式类型是 `const T`。¶8 是一个长例子，要点如下：
-
-- `pre(++i)`、`pre(++r)`、`pre(x.m())` 都非良构（`i`、`r`、`x` 被视为 const）；
-- `pre(++(*p))`、`pre(px->m())` 良构，因为 const 只加在名字本身上（`p` 是 `int* const`），不传递到它指向的对象；
-- 谓词中的 `[=] mutable { ++p; }` 良构，因为 lambda 体内的 `p` 指的是闭包的成员（因为 mutable 而不是 const）；而 `[=,&i] mutable { ++i; }` 非良构，因为按引用捕获的 `i` 仍然指向那个被视为 const 的外部实体。
-
-这组规则的目的是让契约检查不改变程序状态，同时保持浅 const 这一简单模型。C++23 及之前没有契约，自然也没有这些规则。
-
-#### 模板形参对象（¶9）
-
-¶9 类类型（或其他非标量结构化类型）的非类型模板形参，命名的是一个**模板形参对象**（template parameter object，[[temp.param]]）。它是一个静态存储期的 `const` 对象，整个程序中值相同的实参共享同一个对象。所以表达式类型是 `const T`，并且（按 ¶12）是 lvalue，可以取它的地址。相比之下，标量类型的非类型模板形参 `N` 是 prvalue（落入 ¶12 的"否则"分支），`&N` 非良构。
+¶9 类类型的非类型模板形参命名的是一个**模板形参对象**（[[g:template-parameter-object|template parameter object]]，[[temp.param]]）：一个静态存储期的 const 对象，整个程序中值相同的实参共享同一个对象。所以表达式类型是 `const T`，按 ¶12 是 lvalue，可以取地址。标量类型的非类型模板形参 `N` 落入 ¶12 的其他情况，是 prvalue，`&N` 非良构。
 
 ```cpp run ok
 #include <type_traits>
@@ -262,146 +228,153 @@ int main() { }
 struct P { int x; };
 
 template<P p> constexpr const P* addr() {
-  static_assert(std::is_same_v<decltype((p)), const P&>);   // const lvalue
-  return &p;                                               // OK：模板形参对象有地址
+  static_assert(std::is_same_v<decltype((p)), const P&>);  // const lvalue
+  return &p;                                               // OK：有地址
 }
 template<int N> void nn() {
-  static_assert(std::is_same_v<decltype((N)), int>);      // prvalue
+  static_assert(std::is_same_v<decltype((N)), int>);       // prvalue
 }
 
-static_assert(addr<P{1}>() == addr<P{1}>());   // 值相同 → 同一个对象
+static_assert(addr<P{1}>() == addr<P{1}>());   // 值相同，同一个对象
 
 int main() { nn<1>(); }
 ```
 
-### 值类别（¶12）
+### 契约谓词中的名字 {{c++26}}
 
-¶12 unqualified-id 的值类别：
+契约断言应该只观察程序状态。所以谓词里命名外部的变量时，类型一律带 const，但这个 const 是浅的，只加在名字本身上。
 
-- 如果是 move-eligible 的（¶15），则为 xvalue；
-- 如果实体是函数、变量、结构化绑定、结果绑定、数据成员、模板形参对象，则为 lvalue；
-- 否则（枚举项、标量非类型模板形参等）为 prvalue。
+¶6 后置条件的结果绑定（[[dcl.contract.res]]，`post(r: r > 0)` 中的 `r`）：函数返回 `T&` 时 `r` 的类型是 `const T`，否则是 `const U`（`U` 是返回类型）。
 
-如果标识符指代位域，表达式就是位域。
+¶7 在契约断言 `C` 的谓词中命名以下实体时，类型是 `const T`：`C` 之外声明的对象类型变量（类型 `T`）、`C` 之外声明的引用类型变量或模板形参（类型为 `T` 的引用）、对应变量在 `C` 之外声明的结构化绑定。
 
-注意变量也包括引用类型的变量：`int&& rr = 1;` 之后，`rr` 是一个 lvalue（类型 `int`）。常说的"有名字的右值引用是左值"就是这条规则，除非它是 move-eligible 的。
+¶8 是一个长例子，要点如下：
 
-### 隐式移动：move-eligible（¶15）
+- `pre(++i)`、`pre(++r)`、`pre(x.m())` 非良构，因为 `i`、`r`、`x` 被当作 const；
+- `pre(++(*p))`、`pre(px->m())` 良构，const 只加在 `p` 本身上，不传到它指向的对象；
+- 模板形参 `template<int N, int& R>` 中，`pre(++N)` 非良构是因为 `N` 是 prvalue，`pre(++R)` 非良构是因为 `R` 按 const 处理；
+- 谓词里的 `[=] mutable { ++p; }` 良构，lambda 体内的 `p` 指的是闭包自己的成员；而按引用捕获的 `i` 在 lambda 里仍然指向那个被当作 const 的外部实体，`++i` 非良构。
 
-¶15 [[g:implicitly-movable-entity|**可隐式移动的实体**]]（implicitly movable entity）是指自动存储期的变量，且它是非 volatile 对象，或者是指向非 volatile 对象类型的右值引用。一个 id 表达式（或 splice 表达式）是 [[g:move-eligible|**move-eligible**]] 的，当且仅当：
+截至写作时，Clang 23 还不支持契约，这些规则无法在本地验证。
 
-- (15.1) 它指代可隐式移动的实体；
-- (15.2) 它是 `return`、`co_return` 语句或 *throw-expression* 的（可加括号的）操作数；
-- (15.3) 从实体的声明处到表达式所在的最内层作用域，中间的每个作用域都是块作用域；对 `throw` 还要求这些块作用域不是 `try` 块的作用域。
+## 值类别 [expr.prim.id.unqual]
 
-move-eligible 的 id 表达式是 xvalue（¶12），于是重载决议自然会优先选择移动构造函数。C++23 起不再需要 C++11–20 的两阶段规则，即先当作右值做一次重载决议，失败后再当作左值做一次。
+¶12 非限定名的值类别：
 
-```cpp run ok
+- move-eligible（见下一节）时是 xvalue；
+- 实体是函数、变量、结构化绑定、结果绑定、数据成员或模板形参对象时是 lvalue；
+- 其他情况（枚举项、标量类型的非类型模板形参等）是 prvalue。
+
+如果名字指代位域，表达式也是位域。
+
+变量包括引用类型的变量。`int&& rr = 1;` 之后，`rr` 是 `int` 类型的 lvalue。常说的有名字的右值引用是左值，就是这条规则。
+
+## 隐式移动 [expr.prim.id.unqual]
+
+<div class="compare" markdown="1">
+
+```cpp ok
 #include <memory>
 using U = std::unique_ptr<int>;
 
-U f1(U p)     { return p; }              // 形参也是自动存储期变量
-U f2()        { U p; return (p); }       // 括号不影响
-U f3(U&& p)   { return p; }              // 右值引用变量：C++23 起 move-eligible
-U&& f4(U&& p) { return p; }              // C++23 起：p 是 xvalue，可绑定到 U&&
-U f5()        { U p; { { return p; } } } // 中间都是块作用域
-void t1()     { U p; throw p; }          // throw 也会移动
-
-int main() { }
+U f1(U p)   { return p; }
+U f2()      { U p; return (p); }
+U f3(U&& p) { return p; }
+U&& f4(U&& p) { return p; }
+U f5() { U p; { { return p; } } }
+void t1()   { U p; throw p; }
 ```
 
 ```cpp error
 #include <memory>
 using U = std::unique_ptr<int>;
 
-void t2() { U p; try { throw p; } catch (...) {} }  // error: try 块作用域介于其间，拷贝 → 删除的拷贝构造
-U f6()    { static U p; return p; }                  // error: 静态存储期，不可隐式移动
-U f7()    { U p; return [&] { return p; }(); }       // error: lambda 作用域介于其间
-struct H { U m; U get() { return m; } };             // error: 数据成员不是"变量"
+void t2() {
+  U p;
+  try { throw p; } catch (...) {}
+}
+U f6() { static U p; return p; }
+U f7() {
+  U p;
+  return [&] { return p; }();
+}
+struct H { U m; U get() { return m; } };
 ```
 
-!!! pitfall "C++23 隐式移动的破坏性变化"
-    C++23 让 `return` 右值引用变量时得到 xvalue，导致下面原本合法的代码变成非良构：
+</div>
+
+左边每个 `p` 都被移动，右边每一处都试图复制 `unique_ptr`，全部报错。区别在于名字是否 move-eligible。
+
+¶15 **可隐式移动的实体**（[[g:implicitly-movable-entity|implicitly movable entity]]）是自动存储期的变量，并且是非 volatile 对象，或者指向非 volatile 对象类型的右值引用。一个 id 表达式是 [[g:move-eligible|**move-eligible**]] 的，当且仅当：
+
+- (15.1) 它指代可隐式移动的实体；
+- (15.2) 它是 `return`、`co_return` 语句或 `throw` 表达式的操作数，可以带括号；
+- (15.3) 从实体的声明到表达式所在的最内层作用域，中间隔着的都是块作用域；对 `throw`，这些块作用域还不能是 `try` 块的作用域。
+
+move-eligible 的名字是 xvalue（¶12），重载决议自然选中移动构造函数。右边四个例子分别是：`try` 块介于其间、静态存储期、lambda 的作用域介于其间、`m` 是数据成员而不是变量。
+
+!!! pitfall "C++23 的不兼容变化"
+    C++23 起，`return` 一个右值引用变量得到 xvalue，下面原本合法的代码变成非良构：
     ```cpp
-    std::string& bad(std::string&& s) { return s; }   // C++20 OK；C++23 起 error：xvalue 不能绑定到非 const 左值引用
+    std::string& bad(std::string&& s) {
+      return s;   // C++20 OK；C++23 error: xvalue 不能绑定到非 const 左值引用
+    }
     ```
-    同样，`decltype(auto) f(T&& x) { return x; }` 在 C++23 起返回 `T&&` 而不是 `T&`。
+    Clang 23 在 `-std=c++20` 下接受，在 `-std=c++23` 下拒绝。
 
-### 契约中的形参与临时对象 {{c++26}}（¶13–14）
+!!! pitfall "只看名字本身"
+    `return s.member;`、`return *p;`、`return std::get<0>(t);`、`return cond ? a : b;` 都不是 move-eligible 的名字，会复制。结构化绑定不是变量，`return b;`（`auto [b] = ...`）也不会隐式移动。
 
-¶13 如果实现以临时对象的方式传递函数的形参（或返回值，¶14）（[[class.temporary]] 允许对平凡可拷贝的小对象这样做，以便放进寄存器），那么：
+<details class="fine" markdown="1"><summary>契约中的形参与临时对象（¶13–14）</summary>
 
-- 在前置条件中，如果前置条件的求值先于形参对象的初始化，名字指代最近初始化的那个临时对象；
-- 在后置条件中，名字指代临时对象还是形参对象是未指定的 {{unspec}}，但在同一次后置条件求值中保持一致。
+¶13 [[class.temporary]] 允许实现用临时对象传递平凡可复制的形参，以便放进寄存器。这时如果函数契约断言的谓词中命名了形参：前置条件的求值若先于形参对象的初始化，名字指代最近初始化的那个临时对象；后置条件中，名字指代临时对象还是形参对象是未指定的，但在同一次求值中保持一致。
 
-¶14 后置条件中的结果绑定同理：如果求值先于结果对象的初始化，就指代最近初始化的临时对象。
+¶14 后置条件中的结果绑定同理：如果求值先于结果对象的初始化，它指代最近初始化的临时对象。
 
-这些规则承认了 ABI 的实际情况：调用者通过寄存器传递，被调用者再把它存到栈上，契约检查可能发生在副本上。只要不依赖对象地址的同一性，这对程序员是透明的。
+这两条承认了调用约定的实际情况，只要不依赖对象地址的同一性，程序员感觉不到差别。
 
-## 限定名（[expr.prim.id.qual]）
+</details>
 
-### 文法与组成名字（¶1–2）
+## 限定名 [expr.prim.id.qual]
 
-*qualified-id* 由 *nested-name-specifier*、可选的 `template` 和 *unqualified-id* 组成。*nested-name-specifier* 可以是 `::`、类型名 `::`、命名空间名 `::`、`decltype(...)::`（*computed-type-specifier*，包括 C++26 的包索引说明符），以及 {{c++26}} 的 `[: r :]::`（*splice-scope-specifier*）。
+*qualified-id* 由嵌套名说明符（*nested-name-specifier*，即 `::` 前面的部分）和一个 *unqualified-id* 组成。嵌套名说明符可以是 `::`、类型名、命名空间名、`decltype(...)`，以及 C++26 的 splice 说明符 `[: r :]`。
 
-¶1 定义了组成名字：*qualified-id* 的组成名字是其 *nested-name-specifier* 和 *unqualified-id* 的组成名字之和。
+### 类外定义只能写在外围作用域
 
-¶2 {{c++26}} splice 说明符后面不跟 `::` 时，永远不会当作 *splice-scope-specifier*。只有前面有 `typename` 时，才能省略 `template [: r :]<args>::` 中的 `template`。这条规则为 splice 语法消歧：在 `[:^^TCls:]<3>::type` 中，`<` 被当作小于号，所以非良构，必须写 `template [:^^TCls:]<3>::type`。
-
-### 声明性的嵌套名说明符（¶3）
-
-¶3 如果 *nested-name-specifier* 出现在类头名、枚举头名、声明符 id（如类外定义 `void N::f() {}`）或显式实例化的详细类型说明符中，它就是[[g:declarative-nested-name-specifier|**声明性的**]]（declarative）。限制有两条：
-
-- 声明性的 *nested-name-specifier* 不能含 `decltype(...)` 或 splice；
-- 使用它的声明要么是友元声明，要么必须位于包含被重声明实体的作用域中。
-
-第二条的意思是，只能在包含目标的外围作用域里做类外定义，不能在不相关的命名空间里定义别人的函数：
+¶3 嵌套名说明符出现在被声明的名字里时，叫做**声明性的**（[[g:declarative-nested-name-specifier|declarative]]），例如类外定义 `void N::f() {}`、类头 `struct N::S { ... };`。它有两条限制：不能含 `decltype(...)` 或 splice；使用它的声明要么是友元声明，要么位于包含被重声明实体的作用域中。
 
 ```cpp error
 namespace N { namespace M { void g(); } void h(); }
 
-void N::h() {}                        // OK：全局作用域包含 N::h
-namespace X { void N::M::g() {} }     // error: X 不包含 N::M::g
+void N::h() {}                      // OK：全局作用域包含 N::h
+namespace X { void N::M::g() {} }   // error: X 不包含 N::M::g
 ```
 
-### nested-name-specifier 指代什么（¶4）
+### 值类别
 
-¶4 依次规定：`::` 指全局命名空间；`decltype(E)::` 指那个类型，它必须是类或枚举；{{c++26}} `[: r :]::` 指 `r` 所反射的类、枚举或命名空间；`template [: r :]<A>::` 指相应的特化（必须是类，或者是指代类或枚举的别名）。
+¶9 限定名在下列情况下是 lvalue，否则是 prvalue：
 
-(4.5) 处理类模板成员的类外定义。在 `template<class T> void TT<T>::f() {}` 中，`TT<T>` 是声明性的，且实参列表涉及模板形参。如果实参列表恰好就是对应 *template-head* 的形参列表（`<T>` 对应 `template<class T>`），就指代主模板，且两个 template-head 必须等价；否则指代对应的部分特化，找不到就非良构。
+- (9.1) 非成员函数或静态成员函数；
+- (9.2) 非静态成员函数，并且限定名是一元 `&` 的操作数；
+- (9.3)–(9.5) 变量、结构化绑定、数据成员。
 
-(4.6) 其余情形就是名字所指的实体；非声明性的 nested-name-specifier 不能指代模板本身（必须带模板实参，例如不能写 `std::vector::size_type`）。
+(9.2) 的意思是，`X::mf` 只在 `&X::mf` 中是 lvalue，这样 `&` 才能作用于它。C++ 中不存在可以单独使用的、非静态成员函数类型的 lvalue。
 
-### 析构函数名的形式限制（¶5）
+¶6–¶8 规定结果就是限定名查找（[[basic.lookup.qual]]）找到的实体，类型就是它的类型；契约谓词中的 const 规则与 [[expr.prim.id.unqual#7]] 相同。
 
-¶5 不允许 `N::~decltype(x)` 与 `decltype(x)::~T` 这两种形式。`~decltype(x)` 只能以非限定形式出现，如 `p->~decltype(*p)()`。
+<details class="fine" markdown="1"><summary>其余条文</summary>
 
-### 类型与值类别（¶6–9）
+¶1 *qualified-id* 的组成名字是它的嵌套名说明符和 *unqualified-id* 的组成名字。**组成名字**（[[g:component-name|component name]]）和**终端名字**（[[g:terminal-name|terminal name]]，词法上最后出现的组成名字，如 `N::C<int>::f` 中的 `f`）是 C++23 重写名字查找时引入的术语，定义在 [[expr.prim.id.unqual#2]]，[[basic.lookup.qual]] 用它们说明哪个名字在哪个作用域里查找。
 
-¶6 结果是限定名查找（[[basic.lookup.qual]]）找到的实体。¶7 规定契约中的 const 化，与 [[expr.prim.id.unqual#7]] 相同。¶8 规定在其他情况下，类型就是结果的类型。
+¶2 {{c++26}} splice 说明符后面不跟 `::` 时，不会被当作嵌套名说明符的一部分。`template [: r :]<args>::` 中的 `template` 只有在前面有 `typename` 时才能省略。所以 `[:^^TCls:]<3>::type v6 = 6;` 非良构，`<` 会被当作小于号。
 
-¶9 规定值类别：当且仅当实体是以下之一时，结果为 lvalue：
+¶4 规定嵌套名说明符指代什么：`::` 指全局命名空间；`decltype(E)::` 指那个类型，它必须是类或枚举；`[: r :]::` 指 `r` 反射的类、枚举或命名空间。(4.5) 处理类模板成员的类外定义：`template<class T> void TT<T>::f() {}` 中，如果实参列表恰好是对应模板头的形参列表，就指代主模板，两个模板头必须等价；否则指代对应的部分特化，不存在就非良构。(4.6) 规定非声明性的嵌套名说明符不能指代模板本身，不能写 `std::vector::size_type`。
 
-- 非成员函数或静态成员函数（9.1）；
-- 非静态成员函数，且该限定名是一元 `&` 的操作数（9.2）；
-- 变量、结构化绑定、数据成员（9.3–9.5）；
+¶5 不允许 `N::~decltype(x)` 与 `decltype(x)::~T` 两种形式。`~decltype(x)` 只能以非限定形式出现，如 `p->~decltype(*p)()`。
 
-否则是 prvalue。(9.2) 比较特别：`X::mf` 在 `&X::mf` 中是 lvalue（这样 `&` 才能作用于它），在其他场合（例如成员函数内 `X::mf()` 变换为 `(*this).X::mf()` 之前的那个名字）则是 prvalue。C++ 中不存在可以单独使用的非静态成员函数类型的 lvalue。
+</details>
 
-## 包索引表达式 {{c++26}}（[expr.prim.pack.index]）
-
-```
-pack-index-expression:
-    id-expression ... [ constant-expression ]
-```
-
-¶1 `P` 必须是指代包的标识符（函数形参包、非类型模板形参包、init-capture 包、结构化绑定包）。
-
-¶2 下标必须是 `std::size_t` 类型的转换常量表达式（[[expr.const.const]]），这意味着禁止窄化：`ts...[-1]` 非良构，而不是环绕成一个很大的数再越界。下标值 `V` 必须满足 `0 ≤ V < sizeof...(P)`。
-
-¶3 包索引表达式本身是一个包展开（[[temp.variadic]]）。这听起来奇怪，因为它的结果只是一个元素，并不产生列表。原因是技术性的：归为包展开之后，出现在其中的 `ts` 就算已经展开，不会被外层的 `...` 再次展开。实例化规则见 [[temp.variadic#11]]：实例化为第 K 个元素的 id 表达式 `E_K`。
-
-¶4 的注释说明，它指代包的第 V 个元素。由于实例化结果就是那个元素的 *id-expression*，其类型、值类别与直接写那个元素的名字完全一样：形参包元素是 lvalue，`decltype(ts...[0])` 给出声明类型，`decltype((ts...[0]))` 给出引用。
+## 包索引 {{c++26}} [expr.prim.pack.index]
 
 ```cpp run ok
 #include <cstddef>
@@ -412,7 +385,7 @@ template<class... Ts> constexpr auto first(Ts... ts) { return ts...[0]; }
 
 template<std::size_t I, class... Ts>
 constexpr decltype(auto) nth(Ts&&... ts) {
-  return std::forward<Ts...[I]>(ts...[I]);   // 类型包索引 Ts...[I]（[[dcl.type.pack.index]]）+ 表达式包索引
+  return std::forward<Ts...[I]>(ts...[I]);   // 类型包索引 + 表达式包索引
 }
 
 template<class... Ts> void g(Ts... ts) {
@@ -421,7 +394,6 @@ template<class... Ts> void g(Ts... ts) {
 }
 
 static_assert(first(1, 2.0, 'c') == 1);
-static_assert(std::is_same_v<decltype(first(1.0, 2)), double>);
 
 int main() {
   g(1, 'x');
@@ -431,122 +403,109 @@ int main() {
 }
 ```
 
+¶1 `ts...[I]` 中的 `ts` 必须是一个指代包的标识符：函数形参包、非类型模板形参包、init-capture 包或结构化绑定包。类型的包索引 `Ts...[I]` 见 [[dcl.type.pack.index]]。
+
+¶2 下标必须是 `std::size_t` 类型的转换常量表达式（[[expr.const.const]]），值 V 满足 0 ≤ V < `sizeof...(ts)`。转换常量表达式禁止窄化，所以 `ts...[-1]` 直接非良构，不会回绕成一个很大的数。
+
 ```cpp error
 template<class... Ts> auto bad(Ts... ts)  { return ts...[3]; }
-int x = bad(1, 2);                                              // error: 下标 3 越界（包大小为 2）
+int x = bad(1, 2);                                               // error: 越界
 
-template<class... Ts> auto bad2(Ts... ts) { return ts...[-1]; } // error: -1 到 size_t 是窄化
+template<class... Ts> auto bad2(Ts... ts) { return ts...[-1]; }  // error: 窄化
 ```
 
-!!! history "C++26 之前"
-    在 C++26 之前，取包的第 N 个元素只能用递归模板、`std::get<N>(std::forward_as_tuple(ts...))` 或基于重载的技巧，编译开销大，可读性差。包索引在 C++26 中由提案 [[P2662R3]] 引入。由于形参声明中的 `T...[N]` 在 C++23 中可以解析为无名的数组形参包，该提案改变了这种写法的含义，这是少见的语法层面的破坏性变化。
+¶3 包索引表达式本身算一个包展开（[[temp.variadic]]），虽然它只产生一个元素。这样规定是技术上的需要：其中的 `ts` 算是已经展开过，不会被外层的 `...` 再展开一次。实例化时它直接替换成第 V 个元素的名字（[[temp.variadic#11]]），所以类型和值类别与直接写那个元素完全一样。
 
-## 析构函数与伪析构函数（[expr.prim.id.dtor]）
+!!! history
+    C++26 之前，取包的第 N 个元素只能用递归模板或 `std::get<N>(std::forward_as_tuple(ts...))`，编译慢，也难读。包索引由 [[P2662R3]] 引入。它改变了一种旧写法的含义：C++23 中 `template<class... T> void f(T...[1]);` 声明一个无名的数组形参包，C++26 中 `T...[1]` 是包索引（[[diff.cpp23.dcl.dcl#2]]）。
 
-¶1 对于指代类型 `T` 的析构函数的 id 表达式（`~T`、`~decltype(...)`），如果 `T` 是类类型，它就命名析构函数（[[class.dtor]]）；否则称它命名一个[[g:pseudo-destructor|**伪析构函数**]]（pseudo-destructor）。
-
-¶2 命名伪析构函数时，`T` 必须是标量类型，并且该 id 表达式必须作为类成员访问的右操作数，而该成员访问又构成函数调用的后缀表达式。也就是说，只能写成 `obj.~T()` 或 `p->~T()` 这样的完整调用形式。注释指出，这样的调用会结束对象的生命周期（[[basic.life]]）。
-
-为什么需要伪析构函数？为了泛型代码：`template<class T> void destroy(T* p) { p->~T(); }` 在 `T = int` 时也要能工作。
+## 伪析构函数 [expr.prim.id.dtor]
 
 ```cpp run ok
-struct C { };
-
-template<class T> void destroy(T* p) { p->~T(); }   // T 为 int 时调用伪析构函数
+template<class T> void destroy(T* p) { p->~T(); }
 
 int main() {
-  C* pc = new C;
-  using C2 = C;
-  pc->C::~C2();           // OK：析构 *pc（限定名查 C，~C2 是别名）
-  ::operator delete(pc);
-
   using T = int;
-  0 .T::~T();             // OK：对 prvalue 0 物化出的临时对象调用伪析构
   int i = 0;
-  i.~T();                 // OK：结束 i 的生命周期（C++20 起）
+  i.~T();             // 结束 i 的生命周期
   int j = 0;
-  j.~decltype(j)();       // OK：~decltype(...) 形式
+  j.~decltype(j)();   // ~decltype(...) 形式
   int k = 0;
-  destroy(&k);
+  destroy(&k);        // T 为 int：伪析构函数调用
 }
 ```
+
+泛型代码需要对任意类型调用析构函数，`destroy<int>` 也要能编译。为此，标量类型也有一个可以调用的析构函数名。
+
+¶1 名字 `~T` 指代类型 `T` 的析构函数。`T` 是类类型时，它就是真正的析构函数（[[class.dtor]]）；否则它命名一个[[g:pseudo-destructor|**伪析构函数**]]（pseudo-destructor）。
+
+¶2 伪析构函数只能用于标量类型，并且只能写成完整的调用形式 `obj.~T()` 或 `p->~T()`。注 1 指出，这样的调用会结束对象的生命周期（[[basic.life]]）。C++17 及以前，伪析构函数调用除了求值左边的表达式外什么也不做；C++20 起它结束生命周期，`std::destroy_at` 对标量和类类型的行为因此一致。之后再读 `i` 就是读取生命周期已结束的对象，常量求值器会拒绝：
 
 ```cpp error
-void f() {
-  int i = 0;
-  i.~int();          // error: ~ 之后必须是 type-name 或 decltype，int 是关键字不是 type-name
+constexpr int g() {
+  int i = 1;
   using T = int;
-  0.T::~T();         // error: 0.T 被词法分析为一个用户定义浮点字面量
+  i.~T();
+  return i;   // 读取生命周期已结束的对象
 }
+constexpr int v = g();   // error: 不是常量表达式
 ```
 
-标准例子中还有一行很有意思：
+¶3 标准的例子还给出了几种边界情况：
 
 ```cpp ub
 struct C { };
 void f() {
-  C().C::~C();       // UB: 临时对象被显式析构一次，在完整表达式结束时又被析构一次
+  C* pc = new C;
+  using C2 = C;
+  pc->C::~C2();   // OK：析构 *pc，~C2 经别名指向 C
+  C().C::~C();    // UB: 临时对象被析构两次
+  using T = int;
+  0 .T::~T();     // OK：没有效果
+  ::operator delete(pc);
 }
 ```
 
-!!! history "伪析构函数从无操作到结束生命周期"
-    在 C++98–17 中，伪析构函数调用的唯一效果是对后缀表达式求值，此外什么也不做。C++20 起（随提案 [[P0593R6]]《隐式创建对象》一同修改），它会结束对象的生命周期。这让 `std::destroy_at` 对标量和类类型的行为一致：调用之后再读 `i`，就是读取生命周期已结束的对象。对常量求值器而言，这一区别是可观察的：在 `constexpr` 函数中对 `int` 调用伪析构函数后再读取它，就不是常量表达式。
+`C().C::~C()` 显式析构了临时对象，完整表达式结束时它又被析构一次。
+
+`0 .T::~T()` 中间的空格必不可少。写成 `0.T::~T()`，`0.T` 会被切成一个记号，标准说它是一个用户定义浮点字面量（[[lex.ext]]），非良构；Clang 23 报告的是 `invalid suffix 'T' on floating constant`。`i.~int()` 也非良构，`~` 后面必须是类型名或 `decltype`，`int` 是关键字。
 
 !!! lawyer "`~T()` 不是析构函数调用"
-    单独写 `~T();`（`T` 为 `int`）是对值初始化的 `T()` 做一元按位取反，结果为 `-1`，与析构无关。[[expr.unary.op]] 专门规定 `~X()` 这种形式按一元运算符解析。只有出现在 `.`/`->` 之后，`~T` 才是析构函数名。
+    单独写 `~T();`（`T` 是 `int`）是对值初始化的 `T()` 做按位取反，结果是 `-1`。[[expr.unary.op]] 规定，`~` 后面跟类型名时，这个歧义按一元运算符解析。只有在 `.` 或 `->` 之后，`~T` 才是析构函数名。
 
 ## 实现视角
 
 !!! impl
-    - **隐式成员访问**在 Clang AST 中表现为一个 `MemberExpr`，其基对象是 `CXXThisExpr` 并带有 `implicit` 标记；`-Xclang -ast-dump` 可以清楚看到 ¶2 的变换结果。
-    - **lambda 中的 `decltype((x))`**：本页的例子在 Clang 上均按 ¶4 的规则通过；在不同编译器之间，这类规则最好用 `static_assert(std::is_same_v<...>)` 当场验证，不要凭记忆。
-    - **包索引**：Clang 19 起开始支持表达式与类型的包索引（参见 Clang 的 C++26 状态页）；它们在实例化时直接替换为对应元素，不产生任何运行期代码。
-    - **伪析构函数**在优化后通常不产生任何指令，但 UBSan 和常量求值器会利用生命周期已结束这一信息诊断后续的读取。
+    在 Clang 的 AST 中，隐式的成员访问是一个 `MemberExpr`，它的对象是一个标记为 implicit 的 `CXXThisExpr`，用 `-Xclang -ast-dump` 可以直接看到 ¶2 的改写。包索引在实例化时直接替换为对应的元素，不产生任何运行时代码。伪析构函数调用在优化后通常不生成指令，但常量求值器和 sanitizer 会利用生命周期已结束这一信息诊断后续的读取。
 
-## 历史与演进
+## 历史
 
 !!! history
-    - **C++98**：成员名的隐式 `this->` 变换已存在于 [class.mfct.non.static]；`sizeof(S::m)` 非良构。
-    - **C++11**：允许在未求值操作数中命名非静态数据成员（¶4.3）；引入 lambda，于是出现了 lambda 内名字的类型问题。
-    - **C++14**：init-capture 引入，lambda 中名字的类型规则随之需要覆盖 init-capture 声明的变量（现行 ¶4.2）。
-    - **C++20**：类类型的非类型模板形参命名模板形参对象（¶9）；伪析构函数结束生命周期；隐式移动扩展到右值引用形参（仍是两阶段决议）。
-    - **C++23**：确定 lambda 尾置返回类型等位置中按值捕获的名字的类型（¶4 的现行形式，提案 [[P2036R3]]）；隐式移动改写为 move-eligible 即 xvalue（提案 [[P2266R3]]）；组成名字、终端名字等术语随名字查找的重写引入；显式对象成员函数不做 `this->` 变换。
-    - **C++26**：包索引（[[P2662R3]]）；契约中名字的 const 化（¶6–8、¶13–14）；反射与 splice 相关规则（(2.3)、¶5、¶2 of qual）。
-
-## 陷阱
-
-!!! pitfall "按值捕获的变量在非 mutable lambda 中是 const"
-    `[v]{ v.push_back(1); }` 非良构：`v` 变换为闭包成员访问，而调用运算符是 const 的。要么加 `mutable`，要么按引用捕获。`decltype((v))` 也会如实给出 `const std::vector<int>&`。
-
-!!! pitfall "move-eligible 只看名字本身"
-    `return s.member;`、`return *p;`、`return std::get<0>(t);`、`return cond ? a : b;` 都不是 move-eligible 的 id 表达式，会拷贝。对结构化绑定写 `return b;`（`auto [b] = ...`）也不会隐式移动，因为结构化绑定不是变量。
-
-!!! pitfall "非类型模板形参不能取地址"
-    `template<int N> void f() { const int* p = &N; }` 非良构：`N` 是 prvalue。如果确实需要地址，可以用 `static constexpr int n = N;`，或者改用类类型形参（模板形参对象是 lvalue）。
+    成员名的隐式 `this->` 从 C++98 起就有。C++11 允许在未求值操作数中使用非静态数据成员（¶4.3），并引入 lambda，从而有了 lambda 中名字的类型问题；C++14 的 init-capture 让这条规则要覆盖 init-capture 声明的变量。C++20 让类类型的非类型模板形参命名模板形参对象，让伪析构函数结束生命周期，并通过 [[P1825R0]] 把隐式移动扩展到右值引用变量，当时仍按先当右值、失败再当左值的两阶段重载决议。C++23 由 [[P2036R3]] 确定了 lambda 尾置返回类型中按值捕获的名字的类型，由 [[P2266R3]] 把隐式移动简化为 move-eligible 的名字就是 xvalue。C++26 加入包索引、契约中的 const 规则和反射相关的规则。
 
 ## 思考题
 
-!!! question "思考题 1"
-    下面各 `decltype` 的结果是什么？
+!!! question "1. 下面三个 `r` 分别是什么类型？"
     ```cpp
     void f() {
       int x = 0;
-      auto a = [x]() mutable { decltype((x)) r = x; };      // #1
-      auto b = [&x] { decltype((x)) r = x; };                 // #2
-      auto c = [y = x] { decltype((y)) r = y; };              // #3
+      auto a = [x]() mutable { decltype((x)) r = x; };   // #1
+      auto b = [&x] { decltype((x)) r = x; };             // #2
+      auto c = [y = x] { decltype((y)) r = y; };          // #3
     }
     ```
 
 <details markdown="1">
 <summary>答案</summary>
 
-- `#1`：`int&`。lambda 是 `mutable`，调用运算符不是 const，闭包成员不加 const。
-- `#2`：`int&`。¶4 只处理按值捕获（(4.3)），按引用捕获时就是外部的 `x` 本身，`decltype((x))` 按普通规则得到 `int&`。
-- `#3`：`const int&`。init-capture `y` 按值捕获，非 mutable，类型为 `const int` 的 lvalue（(4.2) 明确包括 init-capture 声明的变量）。
+`#1` 是 `int&`：lambda 是 `mutable`，调用运算符不是 const，闭包成员不加 const。
+
+`#2` 是 `int&`：¶4 只处理按值捕获（(4.3)），按引用捕获时 `x` 就是外面的变量，`decltype((x))` 按普通规则得到 `int&`。
+
+`#3` 是 `const int&`：(4.2) 明确包括 init-capture 声明的变量，`y` 按值捕获，lambda 不是 `mutable`。
 </details>
 
-!!! question "思考题 2"
-    为什么下面的函数在 C++23 中返回 `std::string&&`，而 C++20 中返回 `std::string&`？
+!!! question "2. 下面的函数在 C++20 和 C++23 中分别是否良构？返回类型是什么？"
     ```cpp
     decltype(auto) pass(std::string&& s) { return s; }
     ```
@@ -554,28 +513,17 @@ void f() {
 <details markdown="1">
 <summary>答案</summary>
 
-`decltype(auto)` 对 `return s;` 按 `decltype(s)` 的规则推导。这里 `s` 不加括号，`decltype(s)` 看的是声明类型，所以本来就是 `std::string&&`。实际上，C++20 中 `decltype(auto)` 推导出 `std::string&&`，然后 `return s;` 要用左值 `s` 去初始化 `std::string&&`，这是非良构的。C++23 起 `s` 是 move-eligible 的 xvalue，可以绑定，函数良构，返回 `std::string&&`。所以题干的说法有误：差别不在返回类型，而在于这个函数在 C++20 中根本编译不过。（这类故意设错的题干在 language lawyer 的讨论中很常见，实际验证总比记忆可靠。）
+返回类型在两个版本中都是 `std::string&&`：`decltype(auto)` 对不加括号的 `s` 给出声明类型。差别在于能否用 `s` 初始化这个返回值。
+
+C++20 中，`s` 是 lvalue。[[P1825R0]] 的两阶段规则只用于选择构造函数，而这里是绑定引用，不涉及构造函数，于是 lvalue 不能绑定到 `std::string&&`，函数非良构。
+
+C++23 中，`s` 是 move-eligible 的 xvalue，可以绑定，函数良构。Clang 23 的表现与此一致：`-std=c++20` 下报告 `rvalue reference to type ... cannot bind to lvalue`，`-std=c++23` 下通过。
 </details>
 
-!!! question "思考题 3"
-    在类 `X` 的成员函数中，`&X::m` 和 `&(X::m)` 的类型分别是什么？如果 `m` 是 `X` 的基类 `B` 的成员，`&X::m` 的类型又是什么？
+!!! question "3. 在类 `X` 的成员函数中，`&X::m` 和 `&(X::m)` 分别是什么类型？如果 `m` 声明在 `X` 的基类 `B` 中，`&X::m` 又是什么类型？"
 
 <details markdown="1">
 <summary>答案</summary>
 
-`&X::m` 不变换（(2.4)），形成成员指针 `int X::*`；`&(X::m)` 带括号，(2.4) 不适用，变换为 `&(*this).X::m`，得到 `int*`。如果 `m` 声明在基类 `B` 中，`&X::m` 的类型是 `int B::*`，因为 [[expr.unary.op]] 规定成员指针的类是声明该成员的类，而不是限定名中写的类（它可以隐式转换为 `int X::*`）。
+`&X::m` 不改写（(2.4)），形成成员指针 `int X::*`；`&(X::m)` 带括号，(2.4) 不适用，改写为 `&(*this).X::m`，得到 `int*`。如果 `m` 声明在基类 `B` 中，`&X::m` 的类型是 `int B::*`：[[expr.unary.op]] 规定成员指针的类是声明该成员的类，而不是限定名里写的类。它可以隐式转换为 `int X::*`。
 </details>
-
-## 小结
-
-!!! summary
-    | 主题 | 要点 |
-    |---|---|
-    | 隐式成员访问 | 当前类的非静态成员名 → `(*this).m`；未求值且无关的类成员不变换；`&X::m` 不变换、`&(X::m)` 变换 |
-    | 使用限制 | 非静态成员只能：成员访问、形成成员指针、（数据成员）在未求值操作数中 |
-    | 类型 | lambda 按值捕获 → 闭包成员的类型（常带 const）；协程形参 → 帧中拷贝；契约谓词 → const {{c++26}}；模板形参对象 → `const T` |
-    | 值类别 | move-eligible → xvalue；函数/变量/结构化绑定/数据成员/模板形参对象 → lvalue；其余（枚举项、标量 NTTP）→ prvalue |
-    | 隐式移动 | 自动变量或右值引用，作为 `return`/`co_return`/`throw` 的（可带括号）操作数，中间只有块作用域 |
-    | 限定名 | 声明性 nested-name-specifier 不能用 `decltype`/splice，且只能在包含目标的作用域中使用 |
-    | 包索引 {{c++26}} | `ts...[I]`：I 为 `size_t` 转换常量表达式，必须在范围内；本身算包展开 |
-    | 伪析构 | 标量类型的 `p->~T()`；C++20 起结束生命周期 |
