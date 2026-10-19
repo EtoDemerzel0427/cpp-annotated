@@ -1,38 +1,43 @@
 ---
 title: owner_less、owner_hash 与 owner_equal
-summary: 按所有权（控制块）而非存储指针比较与散列 shared_ptr/weak_ptr——让 weak_ptr 能做 std::map 键（owner_less）和 C++26 起做无序容器键（owner_hash + owner_equal）
+summary: 三个按所有权（控制块）而不是存储指针比较和散列 shared_ptr、weak_ptr 的函数对象：owner_less 让 weak_ptr 做有序容器的键，C++26 的 owner_hash 与 owner_equal 让它做无序容器的键。
 status: done
 covers: util.smartptr.owner.hash, util.smartptr.owner.equal
 related: util.smartptr.shared, util.smartptr.weak, util.sharedptr, smartptr, alg.sorting, unord.req
 tags: 标准库, 智能指针, weak_ptr, 关联容器
 papers: P1901R2
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-`shared_ptr` 有两种"相等"：
+!!! tldr
+    - `shared_ptr` 有两种相等：`==` 比较存储指针，所有权等价比较是否属于同一个所有权组。两者可以不一致。
+    - `weak_ptr` 只有所有权意义上的比较，因为它的存储指针可能悬空。
+    - `owner_less` 给出按所有权的严格弱序，`std::map<std::weak_ptr<X>, V, std::owner_less<>>` 是常见用法。
+    - 对象销毁后，`weak_ptr` 键的比较结果不变，容器的不变式不会被破坏。
+    - C++26 的 `owner_hash` 和 `owner_equal` 让 `weak_ptr` 可以做无序容器的键；本机 libc++ 尚未实现它们。
 
-- **值相等**：`a == b` 比较存储指针 `get()`；
-- **所有权等价**：`a` 与 `b` 属于同一个所有权组（共享同一个控制块），或都为空。
+## 两种相等
 
-二者可以不一致：别名构造的 `shared_ptr<int>(sp, &sp->b)` 与 `sp` 所有权等价但值不等；两个都持有 `nullptr` 的 `shared_ptr`（一个空的、一个拥有空指针加删除器的）值相等但所有权不等价。`weak_ptr` 则**只有**所有权意义上的比较——它的存储指针可能悬空，没有 `get()`、没有 `==`。
-
-本页三个函数对象把成员函数 `owner_before`、`owner_hash`、`owner_equal`（见 [[util.smartptr.shared]]）包装成可用于容器的比较器与散列器。
-
-## `owner_less`（[util.smartptr.ownerless]）
-
-```cpp
-template<class T = void> struct owner_less;
-template<class T> struct owner_less<shared_ptr<T>>;   // 三个 operator()，混合 shared/weak
-template<class T> struct owner_less<weak_ptr<T>>;
-template<> struct owner_less<void>;                    // C++17，透明，任意 T、U
+```cpp run title="two-equalities.cpp" ok
+#include <memory>
+#include <cstdio>
+int main() {
+    std::shared_ptr<int> a, b;
+    std::shared_ptr<int> c(nullptr, [](int*) {});
+    std::printf("a,b: == %d  owner %d\n", a == b,
+                !a.owner_before(b) && !b.owner_before(a));
+    std::printf("a,c: == %d  owner %d\n", a == c,
+                !a.owner_before(c) && !c.owner_before(a));
+}
 ```
 
-- ¶1：允许对共享指针与弱指针做**基于所有权的混合比较**。
-- ¶2：`operator()(x, y)` 返回 `x.owner_before(y)`。注 1：它构成严格弱序（[[alg.sorting]]），且 `!op(a, b) && !op(b, a)` 当且仅当 `a.owner_equal(b)`。
+本机输出 `a,b: == 1  owner 1` 和 `a,c: == 1  owner 0`。`a` 和 `b` 都是空的，按两种标准都相等。`c` 拥有一个空指针和一个删除器，不是空的，它与 `a` 的存储指针都为空，所以 `==` 为真，但它们不属于同一个所有权组。反过来，别名构造的 `shared_ptr<int>(sp, &sp->b)` 与 `sp` 所有权等价，`==` 却为假（[[util.smartptr.shared]]）。
 
-`owner_less<void>` 的 `is_transparent` 使得 `std::map<std::weak_ptr<X>, V, std::owner_less<>>` 可以直接用 `shared_ptr<X>` 查找而无需构造临时 `weak_ptr`（[[associative.reqmts]] 的异构查找）。
+所有权等价的精确定义在成员函数 `owner_equal` 里：两者共享所有权，或者都为空。`owner_before` 给出与之一致的严格弱序，`owner_hash` 给出与之一致的散列值。`owner_less`、`owner_hash`、`owner_equal` 这三个函数对象只是把这三个成员函数包装成容器能用的比较器和散列器。
 
-```cpp title="owner-less-map.cpp" ok
+## owner_less [util.smartptr.ownerless]
+
+```cpp run title="owner-less-map.cpp" ok
 #include <memory>
 #include <map>
 #include <cassert>
@@ -41,60 +46,51 @@ int main() {
     auto sp = std::make_shared<P>();
     std::shared_ptr<int> alias(sp, &sp->b);
     std::weak_ptr<P> w = sp;
-    std::map<std::weak_ptr<void>, int, std::owner_less<>> m;   // weak_ptr 作键：按所有权排序
+    std::map<std::weak_ptr<void>, int, std::owner_less<>> m;
     m[w] = 1;
-    m[alias] = 2;                       // 与 w 共享所有权 → 同一个键
+    m[alias] = 2;                     // 与 w 同组：同一个键
     assert(m.size() == 1 && m.begin()->second == 2);
-    assert(!(sp.owner_before(alias) || alias.owner_before(sp)));
-    sp.reset(); alias.reset();
-    assert(w.expired() && m.size() == 1);   // 过期的 weak_ptr 键仍然有效、仍可比较
+    sp.reset();
+    alias.reset();
+    assert(w.expired() && m.find(w) != m.end());   // 过期的键仍可查找
 }
 ```
 
-最后一行是关键：键过期后，控制块仍然存在（弱计数非零，`map` 里的 `weak_ptr` 本身就是一个弱引用），`owner_before` 比较的控制块地址不变，`map` 的有序性不被破坏。若改用"按 `lock().get()` 比较"，过期键会突然变成"空指针"，与其他过期键相等，红黑树的不变式就被悄悄破坏了。
+¶1 `owner_less` 允许对共享指针和弱指针做基于所有权的混合比较。它有三种形式：`owner_less<shared_ptr<T>>` 和 `owner_less<weak_ptr<T>>` 各有三个 `operator()`，接受 `shared_ptr` 与 `weak_ptr` 的各种组合；C++17 起的 `owner_less<void>`（主模板的默认实参就是 `void`）接受任意 `T`、`U`，并带有 `is_transparent`，可以用 `shared_ptr` 直接在以 `weak_ptr` 为键的容器里查找，不必先构造一个临时的 `weak_ptr`。
 
-## `owner_hash`（[util.smartptr.owner.hash]）{{c++26}}
+¶2 `operator()(x, y)` 返回 `x.owner_before(y)`。注 1 指出，它是一个严格弱序（[[alg.sorting]]），而且 `!op(a, b) && !op(b, a)` 当且仅当 `a.owner_equal(b)`。
 
-```cpp
-struct owner_hash {
-  template<class T> size_t operator()(const shared_ptr<T>&) const noexcept;
-  template<class T> size_t operator()(const weak_ptr<T>&) const noexcept;
-  using is_transparent = unspecified;
-};
-```
+上例最后一行说明了按所有权比较的价值。键过期后，控制块仍然存在（map 里的 `weak_ptr` 本身就让弱计数非零），它的地址不变，比较结果也就不变。如果改成按 `lock().get()` 比较，过期的键会突然变成空指针，与其他过期的键相等，红黑树的有序性就悄悄被破坏了。
 
-¶2：返回 `x.owner_hash()`。¶3 注：对任何 `x.owner_equal(y)` 的 `y`，`x.owner_hash() == y.owner_hash()`——满足无序容器对散列与相等一致的要求（[[unord.req]]）。
+## owner_hash 与 owner_equal {{c++26}}
 
-## `owner_equal`（[util.smartptr.owner.equal]）{{c++26}}
+### owner_hash [util.smartptr.owner.hash]
 
-```cpp
-struct owner_equal {
-  template<class T, class U> constexpr bool operator()(const shared_ptr<T>&, const shared_ptr<U>&) const noexcept;
-  // 以及 shared/weak、weak/shared、weak/weak 三种组合
-  using is_transparent = unspecified;
-};
-```
+¶1 `owner_hash` 提供基于所有权的散列。它对 `shared_ptr<T>` 和 `weak_ptr<T>` 各有一个 `operator()`，并带有 `is_transparent`。¶2 `operator()(x)` 返回 `x.owner_hash()`。¶3 注 1：对任何满足 `x.owner_equal(y)` 的 `y`，`x.owner_hash() == y.owner_hash()`，满足无序容器对散列和相等一致的要求（[[unord.req]]）。
 
-¶2：返回 `x.owner_equal(y)`；¶3 注：当且仅当 `x`、`y` 共享所有权或都为空时为真。它是 `constexpr` 的——判断两者是否指向同一个控制块，常量求值中可以做到；而 `owner_hash` 与 `owner_before` 需要控制块地址的**数值**，不是 `constexpr`。
+### owner_equal [util.smartptr.owner.equal]
 
-二者配合，`std::unordered_map<std::weak_ptr<X>, V, std::owner_hash, std::owner_equal>` 成为可能。在 C++26 之前（[[P1901R2]] 之前），`weak_ptr` 只能放进有序容器——标准没有任何可移植的方式拿到"控制块的身份"来散列。
+¶1 `owner_equal` 提供基于所有权的混合相等比较，有 `shared_ptr` 与 `weak_ptr` 两两组合的四个 `operator()`，也带有 `is_transparent`。¶2 `operator()(x, y)` 返回 `x.owner_equal(y)`，¶3 注 1 说明它当且仅当 `x` 和 `y` 共享所有权或都为空时为真。
 
-截至写作时，本机 libc++ 尚未实现 `owner_hash`/`owner_equal`（`__cpp_lib_smart_ptr_owner_equality` 被注释掉），相应示例无法在本地验证。
+`owner_equal` 是 `constexpr` 的：判断两者是否指向同一个控制块，常量求值中可以做到。`owner_hash` 和 `owner_before` 需要控制块地址的数值，所以不是 `constexpr`。
+
+二者配合，就可以写 `std::unordered_map<std::weak_ptr<X>, V, std::owner_hash, std::owner_equal>`。在 [[P1901R2]] 之前，标准没有任何可移植的方式拿到控制块的身份来做散列，`weak_ptr` 只能放进有序容器。截至写作时，本机 libc++ 没有定义 `__cpp_lib_smart_ptr_owner_equality`，也不提供这两个类，所以本节没有可编译的例子。
 
 ## 思考题
 
-<details markdown="1">
-<summary>1. 两个默认构造的 `shared_ptr<int>` 与 `shared_ptr<int>(nullptr, [](int*){})` 之间，`owner_equal` 与 `==` 分别给出什么？</summary>
+!!! question "思考题"
+    能不能用 `std::set<std::shared_ptr<X>>` 代替 `std::set<std::shared_ptr<X>, std::owner_less<>>`？两者什么时候行为不同？
 
-两个默认构造的：都为空，`owner_equal` 为真；`get()` 都为空，`==` 为真。默认构造的与带删除器的空指针版本：后者**拥有**（一个空指针和一个删除器），不是空的，它们不共享所有权，`owner_equal` 为假；但 `get()` 都是空指针，`==` 为真。
+<details markdown="1">
+<summary>答案</summary>
+
+默认的 `std::less<std::shared_ptr<X>>` 用 `<=>` 比较存储指针（[[util.smartptr.shared]] 的比较部分）。只要集合里没有别名构造的 `shared_ptr`，也没有拥有空指针的 `shared_ptr`，两者的分组结果相同。差异出现在两种情况：两个指向同一对象不同成员的别名 `shared_ptr` 在 `owner_less<>` 下等价、在默认比较下不等价；一个空的 `shared_ptr` 和一个拥有空指针的 `shared_ptr` 在默认比较下等价、在 `owner_less<>` 下不等价。对 `shared_ptr` 两种都可以用，对 `weak_ptr` 只能用 `owner_less`。
 </details>
 
 ## 小结
 
 | 工具 | 依据 | 用途 |
 |---|---|---|
-| `==`、`<=>`、`hash<shared_ptr>` | 存储指针 `get()` | 按"指向哪里"区分 |
-| `owner_less` | 控制块的严格弱序 | `weak_ptr`/`shared_ptr` 作有序容器键 |
-| `owner_hash` + `owner_equal` {{c++26}} | 控制块身份 | 作无序容器键 |
-
-所有权比较在 `weak_ptr` 过期后依然稳定，这是它能作为容器键的根本原因。
+| `==`、`<=>`、`hash<shared_ptr>` | 存储指针 `get()` | 区分指向哪里 |
+| `owner_less` | 控制块的严格弱序 | `weak_ptr`、`shared_ptr` 做有序容器的键 |
+| `owner_hash` + `owner_equal` {{c++26}} | 控制块的身份 | 做无序容器的键 |
