@@ -1,54 +1,63 @@
 ---
 title: 比较概念
-summary: 说明专用概念 boolean-testable 的来龙去脉（为什么不直接要求 convertible_to<bool>、"取消资格的声明"到底在防什么）、跨类型比较所依赖的 comparison-common-type-with 与 CONVERT_TO_LVALUE、equality_comparable(_with) 与 totally_ordered(_with) 的语法与语义要求。
+summary: equality_comparable、totally_ordered 及其跨类型版本要求什么；它们依赖的两个说明专用概念 boolean-testable（比较结果像 bool 一样可用）和 comparison-common-type-with（两种类型在同一个值域里比较）。
 status: done
 covers: *
 since: c++20
 papers: P0898R3, P1964R2, P2404R3
 related: concepts, concepts.lang, cmp.concept, class.compare, expr.log.and, expr.log.or, over.match.oper, basic.lookup.argdep
 tags: 标准库, 概念, 比较, boolean-testable, equality_comparable, totally_ordered
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[concepts.compare] 描述"在可能不同的对象类型的值之间建立关系与顺序"的概念（[concepts.compare.general] ¶1）。表面上只有四个公开概念——`equality_comparable`、`equality_comparable_with`、`totally_ordered`、`totally_ordered_with`——但它们站在两个说明专用（exposition-only）的地基上：
+!!! tldr
+    - `equality_comparable<T>` 要求 `==` 精确反映值的相等，因此 `==` 必须是等价关系。
+    - 跨类型的 `equality_comparable_with<T, U>` 和 `totally_ordered_with<T, U>` 还要求：直接比较 `t` 和 `u` 的结果，与把两者转换到公共类型后再比较的结果一致。
+    - 比较结果不必是 `bool`，但必须是 *boolean-testable* 的：能转换为 `bool`，`!` 是取反，并且 `&&`、`||` 不会被用户重载劫持。最后一条编译器不检查。
+    - `totally_ordered<T>` 要求三歧性：任意两个值恰有 `<`、`>`、`==` 之一成立。`double` 也建模它，因为 NaN 不在定义域内。
 
-- *`boolean-testable`*：比较运算的结果"像 `bool` 一样可用"意味着什么；
-- *`comparison-common-type-with`*：两个不同类型的值"在同一个值域里比较"意味着什么。
+[concepts.compare] 描述在可能不同的对象类型的值之间建立关系和顺序的概念（[concepts.compare.general] ¶1）。公开的概念只有四个：`equality_comparable`、`equality_comparable_with`、`totally_ordered`、`totally_ordered_with`。它们依赖两个**说明专用**（exposition-only）的概念，即只在标准里用来写规格、程序不能直接使用的概念：
 
-`<compare>` 中的 `three_way_comparable(_with)`（[[cmp.concept]]）也直接复用这两块地基，以及在那里定义的 *`partially-ordered-with`*。
+- *boolean-testable*：比较的结果像 `bool` 一样可用是什么意思；
+- *comparison-common-type-with*：两种类型的值在同一个值域里比较是什么意思。
 
-阅读前提：[[concepts]]（保持相等性、满足 vs 建模）、[[concept.commonref]]（公共引用）。
+`<compare>` 的 `three_way_comparable`（[[cmp.concept]]）也用到这两个概念。下文的满足、建模、保持相等性等词见 [[concepts]]，公共引用见 [[concept.commonref]]。
 
-## *CONVERT_TO_LVALUE*（[concepts.compare.general] ¶2）
+## 比较结果要像 `bool`：*boolean-testable*
 
-对表达式 `E` 和类型 `C`，*`CONVERT_TO_LVALUE`*`<C>(E)` 定义为：
+### 问题：能转换为 `bool` 还不够
 
-- ¶2.1：若有效，则为 `static_cast<const C&>(as_const(E))`；
-- ¶2.2：否则为 `static_cast<const C&>(std::move(E))`。
+```cpp run title="hijacked-and.cpp" ok
+#include <concepts>
+#include <cstdio>
 
-它只出现在语义要求中，用来表达"把 `E` 转换到公共引用类型 `C` 后再比较"。优先从 const 左值转换（不移动源对象）；只有 const 左值不能转换时（例如只能从右值构造 `C`），才退而从右值转换。这个两步定义是为了支持**仅可移动**（move-only）类型，见下文的历史部分。
+struct Weird {   // == 的结果类型，重载了 &&
+  bool b;
+  operator bool() const { return b; }
+  friend Weird operator&&(Weird, Weird) {
+    std::puts("user &&");
+    return {false};
+  }
+};
+struct X {
+  int v;
+  friend Weird operator==(X a, X b) { return {a.v == b.v}; }
+  friend Weird operator!=(X a, X b) { return {a.v != b.v}; }
+};
+static_assert(std::equality_comparable<X>);   // 满足
 
-## *boolean-testable*（[concept.booleantestable]）
-
-### 问题：`convertible_to<bool>` 不够
-
-（术语速查：[[g:boolean-testable]]。）
-
-C++20 之前，库对比较结果的要求通常是"可以按语境转换为 `bool`"（*contextually convertible to bool*）。但泛型代码对比较结果做的事远不止 `if (a == b)`，它还会写：
-
-```cpp
-if (!(a < b) && pred(x)) ...
-return a == b || c == d;
+int main() {
+  X a{1}, b{1};
+  if (a == b && a == b) std::puts("true");
+  else std::puts("false");   // 打印 user && 和 false
+}
 ```
 
-如果 `a == b` 返回一个自定义类型 `R`，那么：
+泛型代码对比较结果做的事不只是 `if (a == b)`，还有 `!(a < b) && pred(x)`、`a == b || c == d`。如果 `==` 返回的类型重载了 `&&`，这些表达式会调用用户的函数：失去短路求值（[[expr.log.and]]），结果也可能毫无布尔含义。`X` 的 `==` 返回的 `Weird` 能转换为 `bool`，却让 `a == b && a == b` 得到了 `false`。
 
-- `!r` 调用的可能是 `R::operator!`，返回一个奇怪的东西；
-- `r1 && r2` 调用的可能是用户重载的 `operator&&`——**失去短路求值**（[[expr.log.and]]），而且返回值可能根本不是布尔语义。
+¶1 说明 *boolean-testable* 描述的就是这样的表达式：能转换为 `bool`，并且逻辑运算符 `&&`、`||`、`!` 具有常规的含义。
 
-所以"能转换为 `bool`"不足以保证泛型代码中的逻辑运算符按"常规语义"工作。¶1 正是这个意思：*`boolean-testable`* 规定了可转换为 `bool`、并且逻辑运算符 `&&`、`||`、`!` 具有常规语义的表达式需要满足什么。
-
-### 语法部分（¶1、¶6）
+### 编译器检查的部分（¶1、¶6）
 
 ```cpp
 template<class T>
@@ -61,59 +70,17 @@ template<class T>
     };
 ```
 
-编译器只检查两件事：`T` 能（隐式且显式地）转换为 `bool`；`!t` 的结果也能转换为 `bool`。
+编译器只检查两件事：`T` 能隐式且显式地转换为 `bool`，`!t` 的结果也能转换为 `bool`。`&&` 和 `||` 不在语法要求里，因为"这个调用必须选中内建运算符"无法写成 requires 表达式。它们被放进了语义要求，所以上面的 `X` 满足 `equality_comparable`，但不建模它。
 
-注意：**`&&` 和 `||` 不在语法要求里**。它们被放进了语义要求——因为"不存在会劫持 `&&` 的重载"这件事无法用 requires 表达式表达（你无法在 requires 表达式里写"这个调用必须选中内建运算符"）。
+`!` 被删除的类型连语法都不满足：
 
-### 语义部分：取消资格的声明（¶2–¶5）
-
-¶2：设 `e` 的 `decltype((e))` 为 `T`。`T` **建模** *`boolean-testable-impl`* 仅当：
-
-- ¶2.1：`remove_cvref_t<T>` 不是类类型，或者在它的作用域里查找 `operator&&` 与 `operator||` 什么也找不到（即没有成员形式的重载）；并且
-- ¶2.2：以 `T` 为唯一实参类型对 `operator&&`、`operator||` 进行**实参依赖查找**（[[basic.lookup.argdep]]）找不到任何**取消资格的声明**（*disqualifying declaration*）。
-
-¶3–¶5 用三个层层递进的定义刻画"取消资格的声明"：
-
-1. **取消资格的形参**（¶3）：声明类型为 `P` 的函数形参，且
-    - ¶3.1：`P` 不依赖模板参数，并且存在从 `e` 到 `P` 的隐式转换序列（[[over.best.ics]]）——这个非模板重载有可能接受 `e`；或
-    - ¶3.2：`P` 依赖模板参数，并且要么 ¶3.2.1 `P` 中没有参与推导的模板参数，要么 ¶3.2.2 以 `e` 为实参的函数调用模板实参推导（[[temp.deduct.call]]）成功——这个模板重载有可能接受 `e`。
-2. **关键形参**（*key parameter*，¶4）：函数模板 `D` 中类型为 `cv X`（或其引用）的形参，`X` 是某个类模板的特化，该类模板与 `D` 有相同的最内层非内联命名空间，且 `X` 至少含一个参与推导的模板参数。例 1 中 `Z::operator&&(C<T> x, T y)` 有一个关键形参 `C<T> x`；`Z::operator||(C<type_identity_t<T>> x, T y)` 没有（`type_identity_t<T>` 处于非推导语境）。
-3. **取消资格的声明**（¶5）：
-    - ¶5.1：含至少一个取消资格形参的**非模板**函数声明；或
-    - ¶5.2：含至少一个取消资格形参的**函数模板**声明，并且 ¶5.2.1 至少一个取消资格形参是关键形参，或 ¶5.2.2 声明没有任何关键形参，或 ¶5.2.3 它声明的函数模板没有绑定任何名字（[[dcl.meaning]]）。
-
-¶6 注 1 说明意图：对两个都建模 *`boolean-testable-impl`* 的类型 `T1`、`T2`，`declval<T1>() && declval<T2>()` 与 `||` 必须决议到**内建**运算符。
-
-为什么规则这么复杂，而不是简单地说"`&&` 必须选中内建运算符"？因为后者需要知道**另一个**操作数的类型——而概念只拿到一个类型 `T`。¶2–¶5 的设计是一种"单类型的保守近似"：只看与 `T` 相关的那些重载，只要它们中的任何一个**有可能**在与某个其他 boolean-testable 类型组合时被选中，就取消 `T` 的资格。关键形参的规则则是为了不误伤：像 `Z::operator&&(C<T>, T)` 这种只对特定类模板生效的运算符模板，如果 `e` 根本推导不出来，就不算数。
-
-### ¶7：`!` 的语义
-
-`T` 建模 *`boolean-testable`* 仅当 `bool(e) == !bool(!e)`——`!` 必须真的是"取反"。
-
-¶8 例 2：`bool`、`true_type`、`int*`、`bitset<N>::reference` 都建模 *`boolean-testable`*。
-
-### 满足但不建模的例子
-
-```cpp run title="boolean-testable.cpp" ok
+```cpp run title="no-bang.cpp" ok
 #include <concepts>
-#include <cstdio>
 
-// == 返回一个重载了 && 的类型
-struct Weird {
-  bool b;
-  operator bool() const { return b; }
-  friend Weird operator&&(Weird, Weird) { std::puts("user &&"); return {false}; }
+struct NoBang {
+  operator bool() const { return true; }
+  void operator!() const = delete;
 };
-struct X {
-  int v;
-  friend Weird operator==(X a, X b) { return {a.v == b.v}; }
-  friend Weird operator!=(X a, X b) { return {a.v != b.v}; }
-};
-static_assert(std::equality_comparable<X>);   // 满足：&& 不在语法要求里
-                                              // 但 ADL 找到取消资格的 operator&& → 不建模
-
-// ! 被删除：连语法都不满足
-struct NoBang { operator bool() const { return true; } void operator!() const = delete; };
 struct Y {
   friend NoBang operator==(Y, Y) { return {}; }
   friend NoBang operator!=(Y, Y) { return {}; }
@@ -123,15 +90,35 @@ static_assert(!std::equality_comparable<Y>);
 int main() {}
 ```
 
-`X` 满足 `equality_comparable` 但不建模（经由 *`boolean-testable`* 的语义要求），把它交给任何依赖 `equality_comparable` 的库组件都是 {{ifndr}}（[[res.on.requirements]]）。
+### 不检查的部分：取消资格的声明（¶2–¶5）
+
+¶2 设 `e` 是 `decltype((e))` 为 `T` 的表达式。`T` 建模 *boolean-testable-impl* 需要：
+
+- ¶2.1 `remove_cvref_t<T>` 不是类类型，或者在它的作用域中查找 `operator&&` 和 `operator||` 什么也找不到，即没有成员形式的重载；
+- ¶2.2 以 `T` 为唯一实参类型，对 `operator&&` 和 `operator||` 做实参依赖查找（[[basic.lookup.argdep]]），找不到任何**取消资格的声明**（disqualifying declaration）。
+
+取消资格的声明由三个层层递进的定义刻画。大意是：凡是有可能接受 `e` 作为操作数的 `&&`、`||` 重载，都会取消 `T` 的资格。
+
+1. ¶3 **取消资格的形参**：声明类型为 `P` 的函数形参，满足下列之一。
+    - ¶3.1 `P` 不依赖模板参数，且存在从 `e` 到 `P` 的隐式转换序列（[[over.best.ics]]）；
+    - ¶3.2 `P` 依赖模板参数，并且 `P` 中没有参与推导的模板参数，或者以 `e` 为实参的模板实参推导（[[temp.deduct.call]]）成功。
+2. ¶4 **关键形参**（key parameter）：函数模板 `D` 中类型为 `cv X` 或其引用的形参，其中 `X` 是某个类模板的特化，该类模板与 `D` 的最内层非内联命名空间相同，且 `X` 至少含一个参与推导的模板参数。例 1 里 `Z::operator&&(C<T> x, T y)` 有一个关键形参 `C<T> x`；`Z::operator||(C<type_identity_t<T>> x, T y)` 没有，因为 `type_identity_t<T>` 不参与推导。
+3. ¶5 **取消资格的声明**：至少含一个取消资格形参的非模板函数声明（¶5.1）；或者至少含一个取消资格形参的函数模板声明，并且满足下列之一（¶5.2）：某个取消资格形参是关键形参，声明没有关键形参，或者它声明的函数模板没有绑定任何名字（[[dcl.meaning]]）。
+
+¶6 注 1 说明了意图：对两个都建模 *boolean-testable-impl* 的类型 `T1`、`T2`，`declval<T1>() && declval<T2>()` 和 `||` 必须决议到内建运算符。
+
+规则写得这么绕，是因为概念只拿到一个类型 `T`，看不到另一个操作数的类型。¶2–¶5 是只看一个类型的保守近似：只要与 `T` 相关的某个重载有可能在与其他类型组合时被选中，就取消 `T` 的资格。关键形参的规则用来避免误伤：像 `Z::operator&&(C<T>, T)` 这种只对某个类模板的特化起作用的运算符，如果 `e` 推导不出 `C<T>`，就不算数。
+
+### `!` 必须是取反（¶7–¶8）
+
+¶7 `T` 建模 *boolean-testable* 还需要 `bool(e) == !bool(!e)`。¶8 例 2 列出了建模它的类型：`bool`、`true_type`、`int*`、`bitset<N>::reference`。
 
 !!! history
-    *`boolean-testable`* 由 [[P1964R2]] 在 C++20 定稿前引入，取代了 Ranges TS/早期 C++20 草案中一个名为 `boolean` 的**公开**概念。旧的 `boolean` 试图用语法要求穷举 `&&`、`||`、`!`、`==`、`!=` 在各种类型组合下的结果，导致定义庞大、编译慢，而且仍然不能阻止 `&&` 被劫持。新方案把语法要求压缩到最小，把"不得劫持"移入语义要求，并降为说明专用概念——用户不能直接使用它。
+    *boolean-testable* 由 [[P1964R2]] 在 C++20 发布前引入，取代了早期草案中一个公开的概念 `boolean`。旧概念试图用语法要求穷举 `&&`、`||`、`!`、`==`、`!=` 在各种类型组合下的结果，定义庞大、编译慢，仍然拦不住 `&&` 被重载。新方案把语法要求压到最小，把不得劫持写成语义要求，并且不再公开。
 
-!!! impl "libc++ 的实现"
-    libc++ 在 `<__concepts/boolean_testable.h>` 中把它实现为 `__boolean_testable_impl`（`convertible_to<_Tp, bool>`）和 `__boolean_testable`，与标准的语法部分逐字对应；语义部分（取消资格的声明）当然无法、也没有被检查。
+## 跨类型比较的公共值域：*comparison-common-type-with*
 
-## *comparison-common-type-with*（[concept.comparisoncommontype]）
+`std::string` 和 `const char*` 可以用 `==` 比较。这个比较应该是什么含义？标准的回答是：它必须与把两边都转换到公共类型 `std::string` 之后再比较的结果一样。*comparison-common-type-with* 规定了这个公共类型要满足什么。
 
 ```cpp
 template<class T, class U, class C = common_reference_t<const T&, const U&>>
@@ -148,16 +135,18 @@ template<class T, class U>
     comparison-common-type-with-impl<remove_cvref_t<T>, remove_cvref_t<U>>;
 ```
 
-它表达的是：`T` 与 `U` 之间有一个公共的"比较域" `C`（`const T&` 与 `const U&` 的公共引用），双方都能转换到 `const C&`——优先从 const 左值，退而从右值。
+公共值域 `C` 是 `const T&` 和 `const U&` 的公共引用类型，两边都要能转换到 `const C&`，可以从 const 左值转换，也可以从右值转换。
 
-¶1 语义要求（与 [[concept.commonref]] 平行）：对 `remove_cvref_t<T>` 的保持相等性的左值 `t1`、`t2`，*`CONVERT_TO_LVALUE`*`<C>(t1)` 等于 *`CONVERT_TO_LVALUE`*`<C>(t2)` **当且仅当** `t1` 等于 `t2`；对 `u` 同理。即转换到比较域是保持相等的单射。
+语义要求里用到的转换写成 *CONVERT_TO_LVALUE*`<C>(E)`（[concepts.compare.general] ¶2）。如果 `static_cast<const C&>(as_const(E))` 有效，就是它（¶2.1）；否则是 `static_cast<const C&>(std::move(E))`（¶2.2）。也就是先尝试不动源对象的转换，不行再从右值转换。
+
+[concept.comparisoncommontype] ¶1 的语义要求与 [[concept.commonref]] 平行：设 `t1`、`t2` 是 `remove_cvref_t<T>` 类型的保持相等性的左值，则 *CONVERT_TO_LVALUE*`<C>(t1)` 等于 *CONVERT_TO_LVALUE*`<C>(t2)` 当且仅当 `t1` 等于 `t2`；对 `U` 一方也一样。转换到公共值域既不能合并不同的值，也不能拆开相等的值。
 
 !!! history "为什么不直接用 `common_reference_with`"
-    C++20 原始定义中，`equality_comparable_with<T, U>` 要求 `common_reference_with<const T&, const U&>`，后者要求 `convertible_to<const T&, common_reference_t<...>>`。对 `unique_ptr<int>` 与 `nullptr_t`，公共引用是 prvalue 类型 `unique_ptr<int>`，从 `const unique_ptr<int>&` 转换过去需要**复制**——仅可移动类型因此不满足，尽管 `p == nullptr` 显然是有意义的比较。[[P2404R3]]（C++23）引入 *`comparison-common-type-with`* 与 *`CONVERT_TO_LVALUE`*，把要求放宽为"能绑定到 `const C&`"，并同样修改了 `totally_ordered_with` 与 `three_way_comparable_with`。
+    C++20 最初的 `equality_comparable_with<T, U>` 要求 `common_reference_with<const T&, const U&>`。对 `unique_ptr<int>` 和 `nullptr_t`，公共引用类型是非引用的 `unique_ptr<int>`，从 `const unique_ptr<int>&` 转换过去需要复制，所以只能移动的类型不满足，尽管 `p == nullptr` 显然有意义。C++23 的 [[P2404R3]] 引入了 *comparison-common-type-with* 和 *CONVERT_TO_LVALUE*，把要求放宽为能转换到 `const C&`，并同样修改了 `totally_ordered_with` 和 `three_way_comparable_with`。
 
 ## `equality_comparable`（[concept.equalitycomparable]）
 
-### *weakly-equality-comparable-with*（¶1）
+### 四个方向（¶1）
 
 ```cpp
 template<class T, class U>
@@ -170,11 +159,11 @@ template<class T, class U>
     };
 ```
 
-四个方向都要可用、结果都要 *`boolean-testable`*。在 C++20 之后，由于重写候选（[[over.match.oper]]、[[class.compare]]），只定义一个 `operator==` 就能让四个表达式都有效。
+四个方向都要可用，结果都要是 *boolean-testable*。C++20 起有了重写候选（[[over.match.oper]]、[[class.compare]]），只定义一个 `operator==` 就能让四个表达式都有效。
 
-¶1 语义要求：四个表达式**定义域相同**（¶1.1）；`u == t` 与 `t == u` 结果相同（¶1.2，对称）；`t != u` 是 `t == u` 的否定（¶1.3）；`u != t` 与 `t != u` 结果相同（¶1.4）。
+¶1 的语义要求：四个表达式定义域相同（¶1.1）；`u == t` 与 `t == u` 结果相同（¶1.2）；`t != u` 是 `t == u` 的否定（¶1.3）；`u != t` 与 `t != u` 结果相同（¶1.4）。
 
-### `equality_comparable<T>`（¶2–¶3）
+### `==` 就是相等（¶2–¶3）
 
 ```cpp
 template<class T>
@@ -184,16 +173,14 @@ template<class T>
 !!! std
     T models equality_comparable only if bool(a == b) is true when a is equal to b, and false otherwise.
 
-    `T` 建模 `equality_comparable` 仅当：`a` 与 `b` **相等**时 `bool(a == b)` 为 `true`，否则为 `false`。
+¶2 这一句把抽象的相等（[[concepts.equality]]）和 `==` 运算符连在一起：`a` 与 `b` 相等时 `a == b` 为真，否则为假。¶3 注 1 补充，`a == b` 被要求保持相等性，由此可推出 `==` 对称且传递；再加上任何值都等于自身，`==` 就是一个等价关系。
 
-这是整个概念库中把"抽象的相等"与"`==` 运算符"连接起来的那一条：`==` 必须**精确地**反映值的相等（[[concepts.equality]]）。¶3 注 1：由于 `a == b` 被要求保持相等性，可以推出 `==` 是传递的、对称的——结合本条（`a` 与自身相等，所以 `a == a` 为真）就得到了等价关系。
+这条要求有两个直接的后果：
 
-后果：
+- `double` 建模 `equality_comparable`。NaN 不在 `==` 的定义域内（[[structure.requirements#8]]），不影响建模，但含 NaN 的数据不能指望依赖这个概念的算法给出有意义的结果。
+- 一个忽略大小写比较名字的 `==`，只有当忽略大小写后相同本来就是这个类型的值相等时才建模它。如果某个保持相等性的操作（比如访问器 `name()`）能区分大小写不同的两个对象，`a == b` 为真而 `a.name() != b.name()`，`==` 就不再等同于相等。
 
-- `double` 满足 `equality_comparable`，也建模它——NaN 不在 `==` 的定义域内（[[structure.requirements#8]]），不影响建模；但如果你的数据里有 NaN，就不能指望依赖 `equality_comparable` 的算法给出有意义的结果。
-- 一个"按名字忽略大小写比较"的 `==` 只有在"忽略大小写后相同"本来就是该类型的**值相等**时才建模它——即该类型的其他保持相等性的操作（例如 `name()` 访问器）也必须不能区分大小写不同的两个对象，否则 `a == b` 为真但 `a.name() != b.name()`，违反了 `==` 与"相等"的对应。
-
-### `equality_comparable_with<T, U>`（¶4）
+### 跨类型版本（¶4）
 
 ```cpp
 template<class T, class U>
@@ -205,35 +192,36 @@ template<class T, class U>
     weakly-equality-comparable-with<T, U>;
 ```
 
-跨类型的相等比较不是"有个 `operator==(T, U)` 就行"。它要求：
+跨类型的相等比较不只是有一个 `operator==(T, U)`。两边各自要能比较相等，要有公共值域 `C`，`C` 本身也要能比较相等，最后才是跨类型的四个运算。
 
-1. 两边**各自**都是 `equality_comparable` 的；
-2. 存在公共比较域 `C`，且 `C` 本身也是 `equality_comparable` 的；
-3. 跨类型的四个运算都可用。
-
-¶4 语义要求：设 `t`、`t2` 是表示**不同但相等**对象的左值（类型分别为 `const remove_reference_t<T>` 与 `remove_cvref_t<T>`），`u`、`u2` 同理，则
+¶4 的语义要求：设 `t` 和 `t2` 是表示不同但相等的对象的左值，类型分别是 `const remove_reference_t<T>` 和 `remove_cvref_t<T>`，`u`、`u2` 同理，则
 
 ```cpp
 bool(t == u) == bool(CONVERT_TO_LVALUE<C>(t2) == CONVERT_TO_LVALUE<C>(u2))
 ```
 
-即**跨类型比较的结果必须与"都转换到公共类型后再比较"一致**。这条要求把"`string == const char*`"这类混合比较的含义钉死为"按 `string` 的值比较"，而不是比较指针或者别的什么。
+这就把 `string == const char*` 的含义固定为按 `string` 的值比较，而不是比较指针。
 
 ```cpp run title="equality-comparable-with.cpp" ok
 #include <concepts>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
 
-static_assert(std::equality_comparable_with<std::string, const char*>);
-static_assert(std::equality_comparable_with<std::string, std::string_view>);
-static_assert(!std::equality_comparable_with<int, std::string>);
-static_assert(std::equality_comparable_with<std::unique_ptr<int>, std::nullptr_t>);  // 自 P2404R3 起
+using std::equality_comparable_with;
+
+static_assert(equality_comparable_with<
+  std::string, const char*>);
+static_assert(equality_comparable_with<
+  std::string, std::string_view>);
+static_assert(!equality_comparable_with<int, std::string>);
+// 自 P2404R3 起成立
+static_assert(equality_comparable_with<
+  std::unique_ptr<int>, std::nullptr_t>);
 
 int main() {}
 ```
-
-（libc++ 在 `-std=c++20` 下也采用 P2404R3 之后的定义，上面最后一条同样成立。）
 
 ## `totally_ordered`（[concept.totallyordered]）
 
@@ -242,65 +230,56 @@ template<class T>
   concept totally_ordered = equality_comparable<T> && partially-ordered-with<T, T>;
 ```
 
-*`partially-ordered-with`* 定义在 [[cmp.concept]]：`<`、`>`、`<=`、`>=` 在两个方向上共 8 个表达式都可用且结果 *`boolean-testable`*；其语义要求包括 8 个表达式定义域相同、`t < u` 与 `u > t` 一致、`t <= u` 与 `u >= t` 一致等。
+*partially-ordered-with* 定义在 [[cmp.concept]]：`<`、`>`、`<=`、`>=` 在两个方向上共 8 个表达式都可用，结果是 *boolean-testable*，并且 `t < u` 与 `u > t` 一致、`t <= u` 与 `u >= t` 一致。
 
-¶1 语义要求：对 `const remove_reference_t<T>` 的左值 `a`、`b`、`c`：
+¶1 的语义要求：对 `const remove_reference_t<T>` 类型的左值 `a`、`b`、`c`，
 
-- ¶1.1：**三歧性**（trichotomy）：`a < b`、`a > b`、`a == b` 恰有一个为真；
-- ¶1.2：`<` **传递**；
-- ¶1.3：`a <= b` 等价于 `!(b < a)`；
-- ¶1.4：`a >= b` 等价于 `!(a < b)`。
+- ¶1.1 `bool(a < b)`、`bool(a > b)`、`bool(a == b)` 恰有一个为真，这叫**三歧性**（trichotomy）；
+- ¶1.2 `a < b` 且 `b < c` 时 `a < c`；
+- ¶1.3 `bool(a <= b) == !bool(b < a)`；
+- ¶1.4 `bool(a >= b) == !bool(a < b)`。
 
-三歧性加上 `==` 的"等于即相等"，意味着 `<` 是**全序**：任意两个不相等的值必可比较。这比 `strict_weak_order`（[[concept.strictweakorder]]）严格——后者允许"不可区分但不相等"的等价类。
+三歧性加上 `==` 就是相等，意味着 `<` 是全序：任意两个不相等的值都能分出大小。这比比较器的 `strict_weak_order`（[[concept.strictweakorder]]）严格，后者允许存在不可区分却不相等的元素。
 
-`totally_ordered_with<T, U>`（¶2）的结构与 `equality_comparable_with` 平行：双方各自全序、可跨类型相等比较、公共比较域全序、跨类型的 8 个运算可用；语义要求 ¶2.1–¶2.8 逐一规定跨类型的 `<`、`>`、`<=`、`>=`（两个方向）必须与"转换到 `C` 后比较"一致。
+¶2 的 `totally_ordered_with<T, U>` 与 `equality_comparable_with` 结构相同：两边各自全序，能跨类型比较相等，公共值域全序，跨类型的 8 个运算可用。¶2.1–¶2.8 要求每个跨类型的 `<`、`>`、`<=`、`>=` 都与转换到 `C` 后比较的结果一致。
 
 ```cpp run title="totally-ordered.cpp" ok
 #include <concepts>
 #include <cmath>
 
-static_assert(std::totally_ordered<double>);           // 满足，也建模：NaN 只是不在定义域内
+static_assert(std::totally_ordered<double>);
 static_assert(std::totally_ordered_with<int, double>);
 
 int main() {
-    double nan = std::nan("");
-    // nan < 1.0、nan > 1.0、nan == 1.0 全为 false，违反三歧性——
-    // 但这只说明 NaN 不在定义域内（[structure.requirements]/8）。
-    return (nan < 1.0 || nan > 1.0 || nan == 1.0) ? 1 : 0;
+  double nan = std::nan("");
+  // 三个都为 false，违反三歧性，
+  // 只说明 NaN 不在定义域内
+  return (nan < 1.0 || nan > 1.0 || nan == 1.0) ? 1 : 0;
 }
 ```
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "返回自定义类型的比较运算符"
-    表达式模板库（如某些线性代数库、SQL DSL）让 `a == b` 返回一个"延迟求值的表达式"，并重载 `&&`、`||` 来拼接表达式。这些类型可以满足 `equality_comparable`（只要结果能转 `bool`、`!` 也行），但几乎必然不建模 *`boolean-testable`*。把这样的类型放进 `ranges::find`、`ranges::sort` 是 IFNDR。
+!!! pitfall "比较运算符返回自定义类型"
+    表达式模板库（某些线性代数库、SQL DSL）让 `a == b` 返回一个延迟求值的表达式对象，并重载 `&&`、`||` 来拼接表达式。这样的类型可以满足 `equality_comparable`，但几乎不可能建模 *boolean-testable*。把它们交给 `ranges::find`、`ranges::sort` 是 {{ifndr}}（[[res.on.requirements]]）。
 
-!!! pitfall "只为一个方向提供异质比较"
-    C++20 之前写 `bool operator==(const S&, const char*)` 还需要写反方向和 `!=`。C++20 的重写候选会自动补齐，所以 `weakly-equality-comparable-with` 通常自动满足——但前提是你写的是 `operator==` 而不是只写了 `operator!=`；`!=` 不会被用来重写 `==`。
+!!! pitfall "只写 `operator!=`"
+    C++20 的重写候选能从一个 `operator==` 补齐 `!=` 和反方向的比较，所以 *weakly-equality-comparable-with* 通常自动满足。反过来不行：只写 `operator!=` 时，`!=` 不会被用来重写 `==`。
 
-!!! pitfall "跨类型比较与公共类型不一致"
-    如果 `S == int` 比较的是 `S::id`，而 `common_reference_t<const S&, const int&>`（通过某个转换）却得到别的东西，`equality_comparable_with<S, int>` 就满足但不建模。为一对类型定义异质比较时，应当同时确保它们的公共类型给出同样的结论，或者干脆不要提供能产生公共类型的隐式转换。
+!!! pitfall "跨类型比较与公共类型的结论不一致"
+    如果 `S == int` 比较的是 `S::id`，而 `common_reference_t<const S&, const int&>` 经某个转换得到的是别的东西，`equality_comparable_with<S, int>` 就是满足但不建模。为一对类型定义跨类型比较时，要保证它们的公共类型给出同样的结论，或者干脆不提供能产生公共类型的隐式转换。
 
 ## 思考题
 
 !!! question "思考题"
-    1. 为什么 *`boolean-testable`* 的语法部分要求 `{ !std::forward<T>(t) } -> boolean-testable-impl`，却不要求 `!t` 本身也是 *`boolean-testable`*（递归）？
-    2. `std::equality_comparable_with<int, double>` 为真吗？它的语义要求被建模吗（考虑大整数）？
-    3. 一个类型只定义了 `operator<=>`（`= default`），没有定义 `operator==`，它满足 `totally_ordered` 吗？
+    1. *boolean-testable* 为什么只要求 `!t` 的结果能转换为 `bool`，而不要求 `!t` 本身也是 *boolean-testable*？
+    2. `std::equality_comparable_with<int, double>` 为真吗？语义要求被建模吗？换成 `long long` 和 `double` 呢？
+    3. 一个类型只写了 `auto operator<=>(const S&) const = default;`，没有写 `operator==`，它满足 `totally_ordered` 吗？如果 `operator<=>` 是用户自己实现的呢？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-1. 递归定义会导致无限展开（`!!t`、`!!!t`……）。标准只要求一层：`!t` 的结果能转换为 `bool` 即可；语义要求 ¶7 `bool(e) == !bool(!e)` 保证这一层的含义正确。至于对 `!t` 的结果再做 `&&`，它的资格由 ¶2 对**那个**类型的要求决定——但那是另一个类型，标准在这里刻意止步。
-2. 为真：公共引用是 `double`，四个比较都可用。是否建模取决于"相等"的定义域：`int` 都能精确表示为 IEEE 双精度（`int` 为 32 位时），所以转换到 `double` 是保持相等的单射，比较结果与"转换后比较"一致——被建模。若是 `long long` 与 `double`，超过 2^53 的值转换后会合并，转换不再是单射，`comparison-common-type-with` 的语义要求（¶1）被违反。
-3. 满足。按 [[class.compare.default]]，`= default` 的 `operator<=>` 会隐式声明一个 `= default` 的 `operator==`；于是 `==`、`!=`（重写）、`<` 等（经 `<=>` 重写）都可用。若是**用户提供**（非 defaulted）的 `operator<=>`，则不会隐式声明 `==`，`equality_comparable` 不满足，`totally_ordered` 也就不满足。
+1. 递归的定义会无限展开（`!!t`、`!!!t`……）。标准只要求一层，¶7 的 `bool(e) == !bool(!e)` 保证这一层的含义正确。
+2. 为真：公共引用类型是 `double`，四个比较都可用。在 `int` 为 32 位时也建模：每个 `int` 都能精确表示为双精度浮点数，转换到 `double` 不合并任何值。`long long` 和 `double` 则不然，超过 2^53 的不同值转换后可能相等，违反 [concept.comparisoncommontype] ¶1。
+3. 满足。按 [[class.compare.default]]，预置的 `operator<=>` 会隐式声明一个预置的 `operator==`，于是 `==`、`!=` 以及经 `<=>` 重写的 `<` 等都可用。用户自己实现的 `operator<=>` 不会带来 `operator==`，`equality_comparable` 不满足，`totally_ordered` 也就不满足。
 </details>
-
-## 小结
-
-!!! summary
-    - *`CONVERT_TO_LVALUE`*`<C>(E)`：转到 `const C&`，优先从 const 左值，否则从右值——为仅可移动类型而设。
-    - *`boolean-testable`*：语法上只要求可转 `bool`、`!` 的结果可转 `bool`；语义上要求 `&&`、`||` 必然决议到内建运算符（由"取消资格的声明"刻画）且 `!` 真的是取反。
-    - *`comparison-common-type-with`*：对称的公共引用 `C`，双方可绑定到 `const C&`，且转换是保持相等的单射（[[P2404R3]]，C++23）。
-    - `equality_comparable`：`==` 精确反映值相等 ⇒ 等价关系；`_with` 版本要求跨类型比较与"转到公共类型后比较"一致。
-    - `totally_ordered`：在 `equality_comparable` 之上要求三歧性、传递性和 `<=`/`>=` 与 `<` 的一致性；NaN 不在定义域内，不影响 `double` 建模它。
