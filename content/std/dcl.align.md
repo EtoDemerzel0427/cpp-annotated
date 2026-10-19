@@ -1,191 +1,186 @@
 ---
 title: 对齐说明符
-summary: alignas 可用于变量、数据成员和类，不能用于位域、函数形参、异常声明；取最严格的非零对齐；不能比自然对齐更弱；所有声明的对齐必须一致（跨 TU 不一致为 IFNDR）
+summary: alignas 用在变量、数据成员和类上，可以加强对齐但不能削弱；写了多个时取最严格的；同一实体的各个声明必须给出一致的对齐。
 status: done
 papers: N2341, P0035R4
 related: basic.align, dcl.attr.grammar, expr.alignof, expr.new, class.mem, intro.object
 tags: 属性, 对齐, 布局
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-`alignas` 是 C++11 引入的**对齐说明符**（alignment-specifier）。语法上它是一种 *attribute-specifier*（[[dcl.attr.grammar]]），所以出现的位置规则与属性一致。但和标准属性不同，它确实改变程序语义：对齐要求会影响布局、`sizeof`、`alignof` 和动态分配。
+!!! tldr
+    - `alignas` 可以用于变量、数据成员和类，不能用于函数、函数形参、位域和 `catch` 的形参；它也不是类型的一部分，`using` 别名带不上它。
+    - `alignas(T)` 等价于 `alignas(alignof(T))`；同一声明写了多个时，取最严格（最大）的那个。
+    - `alignas` 只能加强对齐。合并结果弱于实体本来需要的对齐，程序非良构；要打包结构体只能用编译器扩展。
+    - 只要有一个声明写了 `alignas`，定义就必须写同样的对齐；跨翻译单元不一致不要求诊断。
+    - C++17 起，`new` 一个对齐超过默认值的类型会调用带 `std::align_val_t` 的分配函数，得到正确对齐的内存。
 
-读本页前需要知道对齐值（alignment）、基本对齐与扩展对齐的概念，见 [[basic.align]]。对齐值是 2 的非负整数次幂；不超过 `alignof(std::max_align_t)` 的是基本对齐（fundamental alignment），更大的是扩展对齐（extended alignment），是否支持扩展对齐、在哪些上下文中支持由实现定义。
+## 用 alignas 加强对齐
 
-```text
-alignment-specifier:
-    alignas ( nofun-type-id ...(opt) )
-    alignas ( constant-expression ...(opt) )
+```cpp run ok
+struct alignas(64) CacheLine { int v; };
+static_assert(alignof(CacheLine) == 64);
+static_assert(sizeof(CacheLine) == 64);
+
+struct Pair { alignas(64) int a; alignas(64) int b; };
+static_assert(sizeof(Pair) == 128);   // a、b 各占一条缓存行
+
+int main() {}
 ```
+
+一个对象的地址必须是它的**对齐**（alignment）的整数倍。对齐值是 2 的幂，例如常见平台上 `int` 是 4，`double` 是 8，详见 [[basic.align]]。`alignas` 是 C++11 引入的**对齐说明符**（alignment-specifier），用来要求比默认更严格的对齐。
+
+常见用途是让对象从缓存行或 SIMD 寄存器宽度的边界开始。上例中 `Pair` 的两个成员各自 64 字节对齐，于是分别落在两条缓存行上，两个线程分别写 `a` 和 `b` 时不会互相干扰（避免伪共享）。
+
+语法上 `alignas(...)` 是一种 *attribute-specifier*（[[dcl.attr.grammar]]），所以它能写的位置与属性相同。但它和标准属性不同，会真正改变程序的含义：对齐影响布局、`sizeof`、`alignof` 和动态分配。
 
 ## 能用在哪里（¶1）
 
-按 ¶1，`alignas` 可以用于：
+```cpp run error
+struct alignas(16) V { int i; };      // OK：类
+alignas(32) int g;                    // OK：变量
+struct M { alignas(8) char c; };      // OK：数据成员
 
-- 变量；
-- 类的数据成员；
-- 类的声明（在 *class-head* 或 *elaborated-type-specifier* 中）。
-
-它不能用于位域、函数形参和异常声明（*exception-declaration*，即 `catch` 的形参）。带省略号的 `alignas` 是包展开。
-
-```cpp title="align-where.cpp" error
-struct alignas(16) V { int i; };       // OK: 类
-alignas(32) int g;                     // OK: 变量
-struct M { alignas(8) char c; };       // OK: 数据成员
-
-alignas(double) void f();              // error: 不能用于函数
-void h(alignas(8) int p);              // error: 不能用于函数形参
-struct BF { alignas(4) int b : 3; };   // error: 不能用于位域
-using T = alignas(16) int;             // error: 不能出现在类型别名的类型中
+alignas(double) void f();             // error: 函数
+void h(alignas(8) int p);             // error: 函数形参
+struct BF { alignas(4) int b : 3; };  // error: 位域
+using T = alignas(16) int;            // error: 不是类型的一部分
 ```
 
-为什么函数形参不行？形参的存储由调用约定决定（可能在寄存器中，可能在调用方的栈帧里），被调函数无法单方面要求更高的对齐；异常对象的存储由运行时库分配，道理相同。位域没有地址，谈不上对齐。如果需要高对齐的形参，就传指针或引用。
+¶1 `alignas` 可以用于变量、类的数据成员，以及类的声明（写在 *class-head* 或 *elaborated-type-specifier* 里）。它不能用于位域、函数形参和异常声明（`catch` 的形参）。
 
-`alignas` 也不是类型的一部分。并不存在 `alignas(16) int` 这样的类型，`typedef`/`using` 也不能携带它。想要一个高对齐的类型，就定义一个带 `alignas` 的类。
+形参和异常对象的存储位置不由被声明的那一方决定：形参由调用约定安排，可能在寄存器里；异常对象由运行时库分配。位域甚至没有地址。需要高对齐的形参时，传指针或引用。
 
-```cpp title="align-pack.cpp" ok
+`alignas` 也不是类型的一部分。没有 `alignas(16) int` 这样的类型，`typedef` 和 `using` 都带不上它，`decltype` 也看不到变量上的 `alignas`。想要一个可以复用的高对齐类型，就定义一个带 `alignas` 的类，比如 `struct alignas(16) A16 { int v; };`。
+
+带 `...` 的 `alignas` 是包展开，展开成多个对齐说明符：
+
+```cpp run ok
 template<class... Ts>
-struct alignas(Ts...) Storage {    // 包展开：等价于 alignas(T1) alignas(T2) ...
-    unsigned char data[16];
+struct alignas(Ts...) Storage {   // alignas(T1) alignas(T2) ...
+  unsigned char data[16];
 };
-static_assert(alignof(Storage<char, double, int>) == alignof(double));
-
+static_assert(alignof(Storage<char, double, int>)
+              == alignof(double));
 int main() {}
 ```
 
-## 两种形式（¶2–¶3）
+## 两种写法（¶2–¶3）
 
-¶2 规定了 `alignas( constant-expression )` 形式：
-
-- ¶2.1：表达式必须是整型常量表达式；
-- ¶2.2：如果值不是对齐值（[[basic.align]]），或者是实现在该声明的上下文中不支持的扩展对齐，程序非良构。
-
-¶3：`alignas( nofun-type-id )` 等价于 `alignas(alignof( nofun-type-id ))`（[[expr.alignof]]）。（*nofun-type-id* 是不允许为函数类型的 *type-id*。）
-
-```cpp title="align-values.cpp" error
-alignas(3) int a;              // error: 3 不是 2 的幂
-alignas(double) char b[8];     // OK: 等同 alignas(alignof(double))
-alignas(1 << 20) char huge;    // 实现定义：扩展对齐，可能不被支持（Clang 在 macOS/Linux 上接受）
+```cpp run error
+alignas(3) int a;             // error: 3 不是 2 的幂
+alignas(double) char b[8];    // OK：即 alignas(alignof(double))
+alignas(1 << 20) char huge;   // 能否接受由实现决定
 ```
+
+¶2 `alignas(表达式)` 里的表达式必须是整型常量表达式（¶2.1）。如果它的值不是一个合法的对齐值，或者是一个**扩展对齐**（extended alignment，超过 `alignof(std::max_align_t)` 的对齐），而实现在这个声明的上下文中不支持它，程序就是非良构的（¶2.2）。
+
+能否支持扩展对齐取决于上下文。静态存储期的对象受目标文件格式和加载器的限制，栈上的变量受编译器重新对齐栈的能力限制，所以同一个 `alignas(N)` 可能在一处可行、在另一处非良构。本机 Clang 23 在全局和局部变量上都接受 `alignas(1 << 20)`。
+
+¶3 `alignas(类型)` 等价于 `alignas(alignof(类型))`（[[expr.alignof]]）。这里的类型不能是函数类型。
 
 !!! lawyer "alignas(0)"
-    C++11 的原文明确写着：常量表达式求值为 0 时，对齐说明符没有效果。当前草案的 ¶2 里已经没有这句话，¶2.2 只说不是对齐值就非良构。0 不是 2 的幂，按字面读，`alignas(0)` 应当非良构；但 ¶4 仍然保留着“最严格的非零对齐……否则没有效果”的措辞，暗示 0 仍应合法且没有效果。Clang 23 接受 `alignas(0) int y;` 且不警告。这是措辞上的灰色地带，建议不要依赖它（模板代码中 `alignas(N)` 的 `N` 可能为 0 时尤其要注意）。
+    C++11 明文规定 `alignas(0)` 没有效果。当前草案的 ¶2 已经没有这句话，按 ¶2.2，0 不是对齐值（对齐值是 2 的幂），应当非良构；可是 ¶4 仍然说取最严格的非零对齐、否则没有效果，又像是默认 0 是合法的。本机 Clang 23 接受 `alignas(0) int y;` 而且没有警告。模板里 `alignas(N)` 的 `N` 可能为 0 时，不要依赖这一点。
 
-## 多个 alignas：取最严格（¶4）
+## 写了多个：取最严格的（¶4）
 
-按 ¶4，实体的对齐要求是其所有对齐说明符所指定的**最严格的非零对齐**；如果没有对齐说明符（或全为零），对齐说明符没有效果。
+¶4 实体的对齐要求是它的各个对齐说明符中最严格的非零对齐。没有对齐说明符时，它们当然不起作用。
 
-```cpp title="align-strictest.cpp" ok
-alignas(4) alignas(16) alignas(8) int z;     // 对齐为 16
-struct Pair { alignas(64) int a; alignas(64) int b; };
-static_assert(sizeof(Pair) == 128);          // 每个成员独占一条 64 字节缓存行
-
-int main() {}
+```cpp run ok
+alignas(4) alignas(16) alignas(8) int z;
+int main() { return alignof(decltype(z)) == 4 ? 0 : 1; }   // z 本身按 16 对齐
 ```
+
+最后一行也说明了 `alignas` 不进入类型：`decltype(z)` 就是 `int`，对齐仍是 4。
 
 ## 不能削弱（¶5）
 
-按 ¶5，一个声明中所有对齐说明符的合并效果，不得弱于去掉这些对齐说明符时该实体本来需要的对齐。
-
-```cpp title="align-weaken.cpp" error
+```cpp run error
 struct alignas(8) S {};
 struct alignas(1) U {
-    S s;
-};                        // error: U 指定的对齐比去掉 alignas(1) 时更弱（本来需要 8）
+  S s;
+};                     // error: U 本来需要 8，alignas(1) 更弱
 
-alignas(1) int weak;      // error: int 本来需要 4（在常见平台上）
+alignas(1) int weak;   // error: int 本来需要 4
 ```
 
-**`alignas` 只能加强对齐，不能减弱。** 要减弱对齐（打包结构体），只能用 `#pragma pack`、`[[gnu::packed]]` 等实现扩展。它们不在标准之内，访问打包成员可能产生未对齐访问。
+¶5 一个声明中全部对齐说明符的合并效果，不得弱于去掉它们之后该实体本来需要的对齐。也就是说，`alignas` 只能加强对齐，不能减弱。
 
-¶7 的标准例子给出了一个惯用法，用来声明一个对齐为 A、能放 N 个 T 的缓冲区：
+要减弱对齐（打包结构体），只能用 `#pragma pack`、`[[gnu::packed]]` 这类实现扩展。它们不在标准之内，访问打包成员可能产生未对齐访问。
+
+¶5 检查的是合并后的效果，不是每个说明符单独检查。¶7 的例子利用这一点写出了一个通用的缓冲区声明，对齐为 A、能放 N 个 T：
 
 ```cpp
 alignas(T) alignas(A) T buffer[N];
 ```
 
-加上 `alignas(T)` 是为了保证最终对齐不弱于 `alignof(T)`。如果 A 比 `alignof(T)` 小，单独写 `alignas(A)` 会违反 ¶5 而非良构；有了 `alignas(T)`，¶4 取最严格对齐的规则会自动选出正确的值。
+如果 A 小于 `alignof(T)`，单写 `alignas(A)` 会违反 ¶5；加上 `alignas(T)` 之后，¶4 取两者中较严格的，结果总是合法的。
 
 ## 所有声明必须一致（¶6）
 
-¶6 包含三条要求：
-
-- 如果实体的定义性声明有对齐说明符，它的任何非定义性声明要么指定等价的对齐，要么不带对齐说明符；
-- 反过来，如果实体的任何声明有对齐说明符，每个定义性声明都必须指定等价的对齐；
-- 如果不同 TU 中的声明对齐说明符不同，不要求诊断（IFNDR {{ifndr}}）。
-
-```cpp title="align-redecl.cpp" error
-alignas(double) unsigned char c[sizeof(double)];   // 定义：适合存放 double 的字符数组
-extern unsigned char c[sizeof(double)];            // OK: 非定义声明可以不写 alignas
+```cpp run error
+alignas(double) unsigned char c[sizeof(double)];  // 定义
+extern unsigned char c[sizeof(double)];   // OK：可以不写
 alignas(float)
-    extern unsigned char c[sizeof(double)];        // error: 与定义的对齐不同
+  extern unsigned char c[sizeof(double)]; // error: 对齐不同
 ```
+
+¶6 有三条要求：
+
+- 定义带了对齐说明符，那么其他非定义的声明要么写等价的对齐，要么不写；
+- 反过来，只要任何一个声明写了对齐说明符，每个定义都必须写等价的对齐；
+- 不同翻译单元里的声明对齐说明符不同，程序非良构，但不要求诊断（{{ifndr}}，编译器不必报错，程序也没有任何保证）。
 
 ```cpp title="tu1.cpp"
 struct S { int x; } s, *p = &s;
 ```
 
 ```cpp title="tu2.cpp" ifndr
-struct alignas(16) S;     // IFNDR: S 的定义（在 tu1 中）没有这个对齐
+struct alignas(16) S;   // 但 tu1 中 S 的定义没有这个对齐
 extern S* p;
 ```
 
-这条规则是有方向的。非定义声明可以省略 `alignas`（使用者不需要知道对齐细节也能声明 `extern`），但只要有一个声明写了，定义就必须写一致的。原因在于，对齐影响的是对象的存储如何分配，而只有定义才分配存储。如果某个 TU 看到 `alignas(16)` 的声明，就假设对象 16 字节对齐（例如生成了对齐的 SIMD 加载指令），而定义却没有给出这个对齐，运行期就会崩溃。编译器无法检查这类跨 TU 的不一致，所以规定为 IFNDR。
+这条规则有方向。只是使用一个对象的翻译单元可以不关心对齐，写一个不带 `alignas` 的 `extern` 声明就行。但只要某个翻译单元看到了 `alignas(16)`，它就可能据此生成要求 16 字节对齐的 SIMD 加载指令；而分配存储的是定义，定义没有给出这个对齐，运行时就会出错。编译器一次只看一个翻译单元，查不出这种不一致，所以规定为 IFNDR。
 
-## 与动态分配
+## 动态分配
 
-如果用 `alignas` 声明的类型具有扩展对齐（大于 `alignof(std::max_align_t)`，它在 x86-64 Linux 上是 16，在 arm64 macOS 上是 8），C++17 之前的 `new` 并不保证满足它，因为 `operator new` 只保证基本对齐。C++17（[[P0035R4]]）为此加入了带 `std::align_val_t` 参数的分配函数；如果类型具有新扩展对齐（new-extended alignment，即超过 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 的对齐，[[basic.align]]），`new` 表达式会自动调用它们（[[expr.new]]、[[basic.stc.dynamic.allocation]]）。
+`alignas` 声明的类型如果需要扩展对齐，C++17 之前的 `new` 并不保证满足它，因为 `operator new` 只保证基本对齐。C++17 的 [[P0035R4]] 加入了带 `std::align_val_t` 参数的分配函数。类型的对齐超过 `__STDCPP_DEFAULT_NEW_ALIGNMENT__` 时，`new` 表达式会自动调用它们（[[expr.new]]、[[basic.stc.dynamic.allocation]]）。
 
-```cpp run title="align-new.cpp" ok
+```cpp run ok
 #include <cstdint>
 #include <cstdio>
 #include <cstddef>
 
 struct alignas(64) CacheLine { int v; };
-static_assert(sizeof(CacheLine) == 64 && alignof(CacheLine) == 64);
 
 int main() {
-    auto* p = new CacheLine[3];                       // C++17：调用 operator new[](size_t, align_val_t)
-    std::printf("misalign=%d max_align=%zu\n",
-                static_cast<int>(reinterpret_cast<std::uintptr_t>(p) % 64),
-                alignof(std::max_align_t));
-    delete[] p;
+  auto* p = new CacheLine[3];   // 调用 operator new[](size_t, align_val_t)
+  auto addr = reinterpret_cast<std::uintptr_t>(p);
+  std::printf("misalign=%d max_align=%zu\n",
+              static_cast<int>(addr % 64), alignof(std::max_align_t));
+  delete[] p;
 }
-// 输出：misalign=0；max_align 在 arm64 macOS 上是 8，在 x86-64 Linux 上是 16
 ```
 
-## 实现视角
+本机（arm64 macOS）输出 `misalign=0 max_align=8`；x86-64 Linux 上 `max_align_t` 的对齐是 16。`std::malloc` 只保证基本对齐，不理会 `alignas`，需要超对齐的内存时用 `new` 或 `std::aligned_alloc`。
 
-!!! impl "实现细节"
-    - GCC/Clang 把 `alignas` 映射到与 `__attribute__((aligned(N)))` 相同的内部机制，但标准语法禁止削弱对齐，而 GNU 的 `aligned` 属性在某些位置（如 typedef 上）可以用来降低对齐，那属于扩展。
-    - 栈上的超对齐变量（如 `alignas(64)` 的局部数组）要求编译器在函数序言中重新对齐栈指针（x86-64 上会看到 `and rsp, -64` 之类的指令），并可能需要帧指针。
-    - 静态存储期对象的对齐受目标文件格式与加载器限制，自动变量的对齐受栈重新对齐能力限制，不同平台的上限不同。¶2.2 所说的“实现在该声明的上下文中不支持”就是指这种情况：同一个 `alignas(N)` 在一个上下文中可行，在另一个上下文中可能非良构。
-    - 硬件破坏性干扰尺寸 `std::hardware_destructive_interference_size`（C++17，`<new>`）常与 `alignas` 一起用于避免伪共享。
+!!! impl "实现视角"
+    - GCC 和 Clang 把 `alignas` 映射到与 `__attribute__((aligned(N)))` 相同的机制。GNU 的 `aligned` 属性在 typedef 上可以降低对齐，这属于扩展，标准写法不允许。
+    - 栈上的超对齐变量要求编译器在函数开头重新对齐栈指针，x86-64 上会看到 `and rsp, -64` 之类的指令，通常还需要帧指针。
+    - `std::hardware_destructive_interference_size`（C++17，`<new>`）给出避免伪共享所需的间隔，常和 `alignas` 一起使用。
 
 ## 历史与演进
 
-!!! history "C++11 → C++26"
-    - C++11：`alignas`、`alignof`、`std::aligned_storage`（[[N2341]]）；`alignas(0)` 明确无效果。
-    - C++17：`new` 支持超对齐类型（[[P0035R4]]）；`std::hardware_destructive_interference_size`。
-    - C++23：弃用 `std::aligned_storage` 和 `std::aligned_union`，推荐直接用 `alignas(T) std::byte buf[sizeof(T)];`。
-    - 当前草案：`alignas(0)` 的特殊规则从 ¶2 中消失，¶4 保留“非零”字样（见上文 lawyer 框）。
-
-## 陷阱
-
-!!! pitfall "`alignas` 不是类型的一部分"
-    `using A16 = alignas(16) int;` 非良构；`alignas` 加在变量上不影响 `decltype(var)`。需要可复用的高对齐类型，就写 `struct alignas(16) A16 { int v; };`。
-
-!!! pitfall "成员上的 alignas 会改变类的 sizeof"
-    类的对齐是其成员对齐的最大值，`sizeof` 必须是对齐的整数倍。一个 `alignas(64)` 的 `int` 成员会让整个类至少 64 字节。
-
-!!! pitfall "malloc 不尊重 alignas"
-    `std::malloc` 只保证基本对齐。超对齐类型应使用 `new`（C++17 起）或 `std::aligned_alloc`。
+!!! history
+    - C++11：`alignas`、`alignof`、`std::aligned_storage`（[[N2341]]）；明确 `alignas(0)` 没有效果。
+    - C++17：`new` 支持超对齐类型（[[P0035R4]]）；加入 `std::hardware_destructive_interference_size`。
+    - C++23：弃用 `std::aligned_storage` 和 `std::aligned_union`，推荐直接写 `alignas(T) std::byte buf[sizeof(T)];`。
+    - 当前草案的 ¶2 不再提 `alignas(0)`，¶4 仍保留非零的字样，见上文。
 
 ## 思考题
 
 !!! question "思考题"
-    下面的声明各自良构吗？最终对齐是多少？
-
+    假设 `alignof(short) == 2`，下面的声明各自良构吗？
     ```cpp
     alignas(2) alignas(char) short s1;
     alignas(char) short s2;
@@ -195,18 +190,7 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-假设 `alignof(short) == 2`：
-
-- `s1`：最严格的是 `alignas(2)`，对齐 2，不弱于 `short` 的自然对齐，良构。
-- `s2`：合并效果是 1，弱于去掉后的 2，违反 ¶5，非良构。
-- `s3`：最严格的是 2，满足 ¶5，良构。¶7 中 `alignas(T) alignas(A)` 惯用法依据的正是这一点：¶5 检查的是合并后的效果，而不是逐个检查每个说明符。
+- `s1`：良构。最严格的是 2，不弱于 `short` 本来的对齐。
+- `s2`：非良构。合并效果是 1，弱于去掉之后的 2，违反 ¶5。本机 Clang 报错 `requested alignment is less than minimum alignment of 2`。
+- `s3`：良构。虽然 `alignas(1)` 单独看更弱，但 ¶5 只看合并效果，合并结果是 2。¶7 的 `alignas(T) alignas(A)` 写法依靠的正是这一点。
 </details>
-
-## 小结
-
-!!! summary "要点"
-    - 用于变量、数据成员、类；不能用于函数、形参、位域、异常声明；不是类型的一部分。
-    - `alignas(expr)` 必须是有效对齐值（2 的幂、实现支持）；`alignas(T)` = `alignas(alignof(T))`；可以包展开。
-    - 多个说明符取最严格的非零值；合并结果不能弱于自然对齐。
-    - 有一个声明写了 `alignas`，所有定义都必须写等价的；跨 TU 不一致是 IFNDR。
-    - C++17 起 `new` 尊重扩展对齐。
