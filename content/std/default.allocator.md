@@ -1,15 +1,22 @@
 ---
 title: 默认分配器 std::allocator
-summary: std::allocator<T> 的完整契约——经由 ::operator new 取得存储但"何时、几次"未指明，只开始数组对象而不开始元素的生命周期；allocate_at_least 与 deallocate 的大小匹配前置条件；constexpr 中的瞬时分配；历次被删减的成员
+summary: std::allocator<T> 的契约：存储来自 ::operator new 但调用的时机和次数未指定，allocate 只开始数组对象的生命周期而不构造元素，deallocate 的大小必须与分配时一致，常量求值中的分配必须当场释放。
 status: done
 covers: default.allocator.general, allocator.members, allocator.globals
 related: allocator.traits, basic.stc.dynamic, new.delete, expr.new, expr.const, intro.object, basic.life
 tags: 标准库, 分配器, allocator, constexpr
-papers: P0784R7, P0401R6, P2868R3
-updated: 2026-10-18
+papers: P0784R7, P0401R6, P2868R3, P0593R6
+updated: 2026-10-19
 ---
 
-`std::allocator<T>` 是所有标准容器的默认分配器，也是"最小分配器"的标准范例。它的接口在 C++11 之后被**逐步削减**到只剩下必需的部分——今天的完整定义只有十来行：
+!!! tldr
+    - `std::allocator<T>` 只有 `allocate`、`allocate_at_least`、`deallocate` 和几个类型成员，其余接口都由 `allocator_traits` 补全。它是空类，所有实例都相等。
+    - `allocate(n)` 开始一个 `T[n]` 数组对象的生命周期，但不构造任何元素；元素要用 `construct_at` 逐个构造。
+    - `deallocate(p, n)` 的 `n` 必须等于分配时请求的数量，否则是未定义行为，因为它可能被原样传给带大小的 `operator delete`。
+    - 存储来自 `::operator new`，但标准不规定调用的时机和次数，实现可以合并或省略分配。
+    - C++20 起这些函数是 `constexpr` 的；常量求值中分配的内存必须在同一次求值内释放。
+
+## 今天的完整定义
 
 ```cpp
 template<class T> class allocator {
@@ -31,149 +38,148 @@ public:
 };
 ```
 
-所有其他东西（`pointer`、`rebind`、`construct`、`max_size`……）都由 [[allocator.traits]] 补全。
+`pointer`、`rebind`、`construct`、`max_size` 这些成员都不在这里，它们由 [[allocator.traits]] 的默认规则给出。`std::allocator` 本身就是一个最小分配器。
 
-## 概述（[default.allocator.general]）
+### 概述 [default.allocator.general]
 
-- ¶1：所有特化都满足**分配器完整性要求**（[[allocator.requirements.completeness]]）：即使 `T` 不完整，`allocator<T>` 本身也是完整类型，可以用来实例化 `vector<T>` 的类定义。这是 C++17 允许 `vector`/`list`/`forward_list` 使用不完整元素类型的前提。
-- ¶2：`allocator_traits<allocator<T>>::is_always_equal::value` 对任何 `T` 为真。
+¶1 `allocator` 的所有特化都满足分配器完整性要求（[[allocator.requirements.completeness]]）：即使 `T` 是不完整类型，`allocator<T>` 也是完整类型。C++17 允许 `vector`、`list`、`forward_list` 的元素类型在实例化类定义时不完整，就依赖这一条。
 
-¶2 的写法值得注意：它说的是 **traits** 的值，而不是 `allocator` 的成员。C++17 曾给 `allocator` 加了 `is_always_equal` 成员 typedef，C++23 将其弃用（因为它会被派生类继承——派生自 `std::allocator` 的有状态分配器会**错误地**声称自己总相等），C++26 由 [[P2868R3]] 移除。现在这个值来自 traits 的默认规则：`allocator` 是空类，`is_empty<allocator<T>>` 为真。
+¶2 对任何 `T`，`allocator_traits<allocator<T>>::is_always_equal::value` 为真。
 
-`propagate_on_container_move_assignment` 是 `true_type`。对一个总相等的分配器这似乎多余，但它让容器可以无条件走"释放自己的、偷对方的"路径，而无需比较分配器。
+¶2 说的是 traits 的值，不是 `allocator` 的成员。这个值来自 traits 的默认规则：`allocator` 是空类，`is_empty<allocator<T>>` 为真。C++17 曾给 `allocator` 加了一个 `is_always_equal` 成员类型，问题在于它会被派生类继承：从 `std::allocator` 派生、带有状态的分配器会错误地声称自己总是相等。这个成员在 C++23 被弃用，C++26 由 [[P2868R3]] 移除。
+
+POCMA（`propagate_on_container_move_assignment`）是 `true_type`。对一个总是相等的分配器，这看起来多余；但有了它，容器的移动赋值可以直接释放自己的存储、接管对方的缓冲区，不必比较分配器。
 
 ### 被移除的成员
 
 | 成员 | 状态 |
 |---|---|
 | `pointer`、`const_pointer`、`reference`、`const_reference`、`rebind`、`address`、`max_size`、`construct`、`destroy`、`allocate(n, hint)` | C++17 弃用，C++20 移除 |
-| 显式特化 `allocator<void>` | C++17 弃用，C++20 移除（主模板 `allocator<void>` 仍可实例化类定义） |
+| 显式特化 `allocator<void>` | C++17 弃用，C++20 移除；主模板仍可以实例化 `allocator<void>` 的类定义 |
 | `is_always_equal` | C++23 弃用，C++26 移除 |
 
-它们全部可由 `allocator_traits` 的默认值得到，留着只会诱导用户绕过 traits 直接调用。
+这些成员都能从 `allocator_traits` 的默认值得到，留着反而会让用户绕过 traits 直接调用它们。
 
-## 成员函数（[allocator.members]）
+## `allocate` 给了你什么 [allocator.members]
 
-### ¶1：线程安全与分配顺序
-
-!!! std "[allocator.members]/1"
-    Except for the destructor, member functions of the default allocator shall not introduce data races as a result of concurrent calls to those member functions from different threads.
-
-    除析构函数外，默认分配器的成员函数不得因来自不同线程的并发调用而引入数据竞争。
-
-后半句规定：对**同一单元存储**的分配和释放调用构成一个全序，每次释放**先发生于**该序中下一次分配。直觉：内存块被释放后再被别的线程分配到，前一个线程对它的所有写入对后一个线程可见、不构成数据竞争——这是 [[new.delete.dataraces]] 对 `operator new`/`operator delete` 同样的保证在分配器层面的复述。
-
-### `allocate`（¶2–¶5）
-
-- ¶2 *Mandates*：`T` 不是不完整类型。（`allocator<T>` 的类定义可以对不完整 `T` 实例化，但 `allocate` 不行——它要 `sizeof(T)`。）
-- ¶3 *Returns*：指向 `n` 个 `T` 的数组的首元素的指针。
-- ¶4 *Throws*：若 `numeric_limits<size_t>::max() / sizeof(T) < n`，抛出 `bad_array_new_length`；存储无法取得时抛出 `bad_alloc`。
-- ¶5 *Remarks*：存储通过调用 `::operator new` 获得，但**未指明何时、调用多少次**。此函数开始**数组对象**的生命周期，但不开始任何**数组元素**的生命周期。
-
-¶5 的两句话各有深意。
-
-**"何时、几次未指明"** 赋予实现合并或省略分配的自由，与 [[expr.new]] 中允许编译器省略或合并 *new-expression* 的分配调用相对应。后果是：如果你替换了全局 `operator new` 来计数，`std::allocator` 的调用次数不一定与 `operator new` 的调用次数一一对应。（实践中 libc++ 是一次 `allocate` 对应一次 `operator new`；在常量求值之外它调用的是 `__builtin_operator_new`，这个内建函数的意义正是告诉 Clang "这次调用享有 *new-expression* 同样的省略许可"。）
-
-**"开始数组对象的生命周期，但不开始元素的生命周期"** 把 `allocate` 精确地定位在对象模型中：
-
-- 数组对象存在，所以返回的 `T*` 指向**数组元素**（尽管该元素尚未在生命周期内），可以合法地做指针算术遍历 `[p, p + n]`（[[expr.add]] 要求指针算术在一个数组对象内）。这是 C++20 [[P0593R6]] 修补的一个老问题：此前 `vector` 的实现在严格意义上一直在对"不存在的数组"做指针算术。
-- 元素不存在，所以必须用 `construct_at`/`allocator_traits::construct` 逐个构造（[[basic.life]] 中关于生命周期开始的规则）；读写未构造的元素是 {{ub}}。
-
-```cpp title="allocator-lifetime.cpp" ok
+```cpp run ok
 #include <memory>
 #include <string>
 
 constexpr bool f() {
-    std::allocator<std::string> a;
-    std::string* p = a.allocate(2);   // 数组对象 string[2] 的生命周期开始，元素没有
-    std::construct_at(p, "x");        // 只构造 p[0]
-    bool r = p[0] == "x";
-    // p[1] 从未构造；p + 2 是合法的尾后指针
-    std::destroy_at(p);
-    a.deallocate(p, 2);
-    return r;
+  std::allocator<std::string> a;
+  std::string* p = a.allocate(2);   // 数组 string[2] 开始生命周期，元素没有
+  std::construct_at(p, "x");        // 只构造 p[0]
+  bool r = p[0] == "x";
+  std::string* end = p + 2;         // OK: 尾后指针
+  (void)end;                        // p[1] 从未构造，不能读写
+  std::destroy_at(p);
+  a.deallocate(p, 2);
+  return r;
 }
 static_assert(f());
 
 int main() {}
 ```
 
-### `allocate_at_least`（¶6–¶9）{{c++23}}
+¶2 `T` 必须是完整类型，`allocate` 需要知道 `sizeof(T)`。
 
-与 `allocate` 相同，但返回 `allocation_result<T*>{ptr, count}`，`count >= n`（[[P0401R6]]）。它的意义见 [[allocator.traits]]。标准允许 `count` 大于 `n`，但不要求——libc++ 目前总是返回恰好 `n`（底层 `operator new` 无法报告实际块大小）：
+¶3 返回指向 `n` 个 `T` 的数组首元素的指针。
 
-```cpp title="allocate-at-least.cpp" ok
-#include <memory>
-#include <new>
+¶4 `numeric_limits<size_t>::max() / sizeof(T) < n` 时抛出 `bad_array_new_length`；无法取得存储时抛出 `bad_alloc`。
+
+¶5 存储通过调用 `::operator new` 取得，但调用的时机和次数是未指定的。这个函数开始数组对象的生命周期，但不开始任何数组元素的生命周期。
+
+¶5 的最后一句确定了 `allocate` 在对象模型（[[intro.object]]）里的位置：
+
+- 数组对象存在，所以返回的 `T*` 指向一个数组元素，在 `[p, p + n]` 范围内做指针算术是合法的（[[expr.add]] 只允许在同一个数组对象内做指针算术）。这一句由 C++20 的 [[P0593R6]] 加入；在那之前，严格地说 `vector` 的实现一直在对一个不存在的数组做指针算术。
+- 元素不存在，所以必须用 `construct_at` 或 `allocator_traits::construct` 逐个构造（[[basic.life]]）。读写还没构造的元素是 {{ub}}。
+
+前一句说调用 `::operator new` 的时机和次数未指定，这给了实现合并或省略分配的自由，和 [[expr.new]] 允许省略或合并 *new-expression* 的分配调用一样。所以替换了全局 `operator new` 来计数时，计到的次数不一定和 `allocate` 的调用次数一致。libc++ 在常量求值之外调用的是 `__builtin_operator_new`，这个内建函数告诉 Clang，这次调用享有和 *new-expression* 一样的省略许可。
+
+### 并发（¶1）
+
+¶1 除析构函数外，从不同线程并发调用默认分配器的成员函数不会引入数据竞争。对同一块存储的分配和释放调用构成一个全序，每次释放都先于这个序中的下一次分配发生。
+
+后一句的意思是：一块内存被一个线程释放、又被另一个线程分配到，前一个线程对它的所有写入对后一个线程可见，不构成数据竞争。这和 [[new.delete.dataraces]] 对 `operator new`、`operator delete` 的保证相同。
+
+## `allocate_at_least`（¶6–¶9）{{c++23}}
+
+¶7 `allocate_at_least(n)` 和 `allocate` 一样分配存储，但返回 `allocation_result<T*>{ptr, count}`，其中 `count >= n`（[[P0401R6]]）。用途见 [[allocator.traits]]：容器可以把多拿到的空间算进容量。¶6、¶8、¶9 的要求、异常和备注与 `allocate` 相同。
+
+```cpp run ok
 #include <cstdio>
 #include <limits>
+#include <memory>
+#include <new>
 
 int main() {
-    std::allocator<int> a;
-    auto [p, n] = a.allocate_at_least(5);     // allocation_result 是聚合，可结构化绑定
-    std::printf("asked 5, got %zu\n", n);     // libc++：5
-    a.deallocate(p, 5);                       // 第二个实参可以是 [5, n] 中任意值
-    try {
-        (void)a.allocate(std::numeric_limits<std::size_t>::max() / 2);
-    } catch (const std::bad_array_new_length&) {
-        std::puts("bad_array_new_length");    // max / sizeof(int) < n
-    }
-    static_assert(std::allocator<int>() == std::allocator<long>());
-    static_assert(std::allocator_traits<std::allocator<int>>::is_always_equal::value);
+  std::allocator<int> a;
+  auto [p, n] = a.allocate_at_least(5);   // 聚合，可以结构化绑定
+  std::printf("asked 5, got %zu\n", n);   // libc++：5
+  a.deallocate(p, 5);                     // 第二个实参可以取 [5, n] 中任意值
+
+  try {
+    (void)a.allocate(std::numeric_limits<std::size_t>::max() / 2);
+  } catch (const std::bad_array_new_length&) {
+    std::puts("bad_array_new_length");    // max / sizeof(int) < n
+  }
+  static_assert(std::allocator<int>() == std::allocator<long>());
 }
 ```
 
-### `deallocate`（¶10–¶12）
+标准允许 `count` 大于 `n`，但不要求。本机 libc++ 返回的正好是 5，因为底层的 `operator new` 无法报告实际分到的块大小。
 
-¶10 的前置条件要求**大小匹配**：
+## `deallocate` 的大小（¶10–¶12）
 
-- (10.1) 若 `p` 来自 `allocate_at_least`，返回值为 `ret`、请求为 `req`，则 `p == ret.ptr` 且 `req <= n <= ret.count`；
-- (10.2) 否则 `p` 来自 `allocate`，且 `n` 等于当初传给 `allocate` 的值。
+¶10 前置条件要求大小匹配：
 
-违反即 {{ub}}。这不是吹毛求疵：`::operator delete` 有**带大小**的版本（sized deallocation，C++14），实现可以把 `n * sizeof(T)` 直接传给它，而 tcmalloc、jemalloc 等分配器会用这个大小**直接定位尺寸档位**而不查元数据——传错大小会破坏堆。
+- ¶10.1 如果 `p` 来自 `allocate_at_least`，设那次调用请求了 `req` 个、返回了 `ret`，那么 `p == ret.ptr`，并且 `req <= n <= ret.count`；
+- ¶10.2 否则 `p` 来自 `allocate`，`n` 必须等于当初传给 `allocate` 的值。
 
-¶12：使用 `::operator delete`，但**何时**调用未指明。
+违反它是 {{ub}}。C++14 起 `::operator delete` 有带大小的版本，实现可以把 `n * sizeof(T)` 直接传给它。tcmalloc、jemalloc 等分配器用这个大小直接确定尺寸档位，不再查元数据，传错大小会破坏堆。
 
-## 运算符（[allocator.globals]）
+¶11–¶12 `deallocate` 释放 `p` 所指的存储，使用 `::operator delete`，调用的时机未指定。
 
-`operator==(const allocator<T>&, const allocator<U>&)` 总是返回 `true`（`!=` 由 C++20 的重写规则生成）。不同 `T` 的 `allocator` 也相等：一个可以释放另一个分配的内存（当然要经过 rebind）。
+## 相等比较 [allocator.globals]
+
+¶1 `operator==(const allocator<T>&, const allocator<U>&)` 总是返回 `true`，`!=` 由 C++20 的重写规则生成。`T` 不同的两个 `allocator` 也相等：经过 rebind 之后，一个可以释放另一个分配的内存。
 
 ## 常量求值中的 `std::allocator`
 
-C++20 起 `allocate`/`deallocate` 是 `constexpr` 的（[[P0784R7]]），这是 `constexpr std::vector`、`constexpr std::string` 的基础。常量求值中的分配必须是**瞬时**的（[[g:transient-allocation]]，[[expr.const]]）：在同一次求值内释放，不能"泄漏"到运行期。
+C++20 起 `allocate` 和 `deallocate` 是 `constexpr` 的（[[P0784R7]]），这是 `constexpr std::vector` 和 `std::string` 的基础。常量求值中的分配必须是**瞬时分配**（[[g:transient-allocation]]）：在同一次求值内释放，不能留到运行期（[[expr.const]]）。
 
-```cpp title="constexpr-leak.cpp" error
+```cpp run error
 #include <memory>
 constexpr int* leak() {
-    std::allocator<int> a;
-    int* p = a.allocate(1);
-    std::construct_at(p, 7);
-    return p;                      // 存储没有在常量求值内释放
+  std::allocator<int> a;
+  int* p = a.allocate(1);
+  std::construct_at(p, 7);
+  return p;   // 没有在这次常量求值内释放
 }
-constexpr int* q = leak();         // error: 不是常量表达式
+constexpr int* q = leak();   // error: 不是常量表达式
 ```
 
-Clang 的诊断："pointer to subobject of heap-allocated object is not a constant expression"，并指出"heap allocation performed here"。
+Clang 23 报告 `q` 必须由常量表达式初始化，并附注指向堆分配对象的指针不是常量表达式，同时指出分配发生的位置。
 
-注意常量求值中**只有** `std::allocator<T>::allocate` 和可替换的全局 `operator new`（经由 *new-expression*）能分配；自定义分配器若想在常量求值中使用，必须在内部委托给 `std::allocator`。
+常量求值中能分配内存的只有 *new-expression*（调用可替换的全局分配函数）和 `std::allocator<T>::allocate`。自定义分配器想在常量求值中使用，内部必须委托给 `std::allocator`。
 
 ## 思考题
 
-<details markdown="1">
-<summary>1. 从 `std::allocator<int>` 派生一个带计数器成员的分配器 `Counting<int>`，在 C++17 下 `allocator_traits<Counting<int>>::is_always_equal` 是什么？C++26 呢？</summary>
-
-C++17 中 `std::allocator` 有成员 `using is_always_equal = true_type;`，被 `Counting` 继承，traits 优先采用 `Alloc::is_always_equal`，于是为真——这是个谎言（`Counting` 非空、有状态），容器移动赋值会无条件偷缓冲区。这正是该成员被弃用和移除的原因。C++26 中继承不到这个成员，traits 退回 `is_empty<Counting<int>>`，为假。
-</details>
+!!! question "思考题 1"
+    从 `std::allocator<int>` 派生一个带计数器成员的分配器 `Counting<int>`。C++17 下 `allocator_traits<Counting<int>>::is_always_equal` 是什么？C++26 呢？
 
 <details markdown="1">
-<summary>2. `a.deallocate(p, n)` 时把 `n` 传成 0 会怎样？</summary>
+<summary>答案</summary>
 
-除非当初就是 `allocate(0)`，否则违反 ¶10 前置条件，{{ub}}。实践中若实现调用 sized `operator delete(p, 0)`，使用尺寸档位定位的分配器会把块放进错误的空闲链表。
+C++17 中 `std::allocator` 有成员 `using is_always_equal = true_type;`，`Counting` 继承了它，traits 优先采用 `Alloc::is_always_equal`，结果为真。这是错的：`Counting` 有状态，容器的移动赋值会直接接管对方的缓冲区。这正是这个成员被弃用并移除的原因。C++26 中继承不到这个成员，traits 退回到 `is_empty<Counting<int>>`，结果为假。
 </details>
 
-## 小结
+!!! question "思考题 2"
+    调用 `a.deallocate(p, n)` 时把 `n` 写成 0 会怎样？
 
-- `std::allocator<T>`：空类、总相等、POCMA 为真；其余接口由 `allocator_traits` 补全。
-- `allocate`：可能抛 `bad_array_new_length` 或 `bad_alloc`；经 `::operator new` 但次数与时机未指明；开始数组对象而非元素的生命周期。
-- `deallocate`：大小必须匹配（`allocate_at_least` 时可在 `[req, count]` 之间）。
-- `constexpr`：常量求值中的分配必须在同一次求值内释放。
+<details markdown="1">
+<summary>答案</summary>
+
+除非当初调用的就是 `allocate(0)`，否则违反 ¶10 的前置条件，是 {{ub}}。实践中，如果实现调用了带大小的 `operator delete(p, 0)`，按尺寸档位管理内存的分配器会把这块内存放进错误的空闲链表。
+</details>
