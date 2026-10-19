@@ -1,62 +1,63 @@
 ---
 title: 序言
-summary: 类定义的语法（class-head、class-key、final）、注入类名、类在闭花括号处完整、带嵌套名说明符的类定义；以及类名规则：类定义引入新类型、详述类型说明符如何声明和引用类
+summary: 类定义的写法（class、struct、union 与 final），类在闭花括号处完整，类名在类内部的身份（注入类名），在类外定义嵌套类的条件；以及类名规则：每个类定义引入一个新类型，被同名变量遮蔽的类要用 struct X 指名。
 status: draft
 covers: class.name
 related: class.mem, class.prop, dcl.type.elab, basic.lookup.elab, class.derived, class.access, class.qual
 tags: 类, 注入类名, final, 详述类型说明符
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-本节是第 11 章的入口，给出**类定义**（*class-specifier*）的语法骨架，以及围绕类名的一组基础规则。这些问题看似简单，却牵涉到名字查找和访问控制的许多细节：
+!!! tldr
+    - `class` 和 `struct` 只差默认访问权限：`class` 默认 private，`struct` 默认 public；`union` 是另一种类。
+    - 类在定义的 `}` 处就完整了。在类内部，只有函数体、默认实参这类完整类上下文能把它当作完整类型。
+    - 类名也作为一个 public 成员出现在类自己的作用域里，叫注入类名。私有继承之后，更深的派生类里写无限定的基类名可能不可访问。
+    - `final` 不是保留字。只有出现在类名之后、紧跟 `:` 或 `{` 时，它才表示类不能被继承。
+    - 两个结构相同的类是不同的类型。类名被同名的变量或函数遮蔽时，用 `struct X` 指名这个类。
 
-- 类名在哪里引入、从什么时候开始可用？
-- 类自己的名字在类内部是什么身份？（注入类名，injected-class-name）
-- 类什么时候算完整？
-- 在类外定义嵌套类、类模板的成员类时，要满足什么条件？
-- 当类名被同名的变量或函数遮蔽时，怎么指名这个类？（详述类型说明符 `struct X`，[[class.name]]）
+## 类定义的写法（¶1、¶4）
 
-本页一并覆盖 [[class.name]]（11.3 类名）。阅读前提：作用域与栖身（inhabit）的概念（[[basic.scope.scope]]）、详述类型说明符（[[dcl.type.elab]]）及其查找（[[basic.lookup.elab]]）。
+```cpp run title="class-def.cpp" ok
+struct Point { int x, y; };          // 成员默认 public
+class Account {                       // 成员默认 private
+    long balance = 0;
+public:
+    long get() const { return balance; }
+};
+union Value { int i; float f; };      // 同一时刻至多持有一个成员的值
 
-## 类是一种类型（¶1）
-
-¶1 开头就规定：**类是一个类型**。它的名字在其作用域内成为一个 *class-name*。*class-name* 在语法上是一个 *identifier* 或一个 *simple-template-id*（如 `vector<int>`）。
-
-能引入类名的只有两种语法：
-
-- *class-specifier*，即类定义 `struct X { ... };`；
-- *elaborated-type-specifier*，即 `struct X;` 或 `struct X* p;` 里的 `struct X`（[[dcl.type.elab]]）。
-
-一个类的对象由（可能为空的）成员和基类对象序列构成。
-
-### class-specifier 的语法
-
-```text
-class-specifier:   class-head { member-specification(可选) }
-
-class-head:        class-key 属性(可选) class-head-name class-property-specifier-seq(可选) base-clause(可选)
-                   class-key 属性(可选) base-clause(可选)          ← 无名类
-
-class-head-name:   nested-name-specifier(可选) class-name
-class-property-specifier:  final
-class-key:         class | struct | union
+int main() {
+    Point p{1, 2};
+    Account a;
+    Value v{.i = 3};
+    return p.x + int(a.get()) + v.i - 4;
+}
 ```
 
-几个要点：
+¶1 类是一个类型，它的名字在所在作用域里成为一个**类名**（*class-name*）。能引入类名的语法只有两种：类定义 `struct X { ... };`，以及**详述类型说明符**（elaborated-type-specifier）`struct X;`、`struct X* p;` 里的 `struct X`（[[dcl.type.elab]]）。一个类对象由成员和基类子对象组成，这个序列可以为空。
 
-1. **class-key 只有三个**：`class`、`struct`、`union`。`class` 与 `struct` 的唯一区别是默认访问权限（对成员和基类都一样：`class` 默认 `private`，`struct` 默认 `public`，见 [[class.access]]）；`union` 则是一种完全不同的类（[[class.union]]）。¶4 是对此的注。
-2. ***class-head-name* 可以带嵌套名说明符**（`struct N::X { ... };`），用于在外面定义已声明的嵌套类或命名空间成员类（¶3）。
-3. ***class-property-specifier-seq***：当前草案中只有 `final` 一种。
-4. **类名可以是 *simple-template-id***，但此时这个声明必须是显式特化或偏特化（`template<> struct A<int> {...}`、`template<class T> struct A<T*> {...}`）。不能用模板实参列表定义一个普通类。
+类定义在语法上叫 *class-specifier*，骨架如下：
+
+```text
+class-specifier:  class-head { member-specification(可选) }
+class-head:       class-key 属性(可选) class-head-name final(可选) base-clause(可选)
+                  class-key 属性(可选) base-clause(可选)            ← 无名类
+class-head-name:  nested-name-specifier(可选) class-name
+class-key:        class | struct | union
+```
+
+¶4 *class-key* 决定两件事（这一段是注）：类是不是联合体（[[class.union]]），以及成员和基类的默认访问是 public 还是 private（[[class.access]]）。`class` 和 `struct` 之间没有别的区别。
+
+*class-head-name* 有两种不寻常的形式。带嵌套名说明符的 `struct N::X { ... }` 用来在外面定义已经声明过的类，见下文 ¶3。写成模板实参列表的 `A<int>` 只能出现在显式特化或偏特化里，如 `template<> struct A<int> { ... };`，不能用来定义普通类。
 
 ### 无名类
 
-省略 *class-head-name* 的 *class-specifier* 定义一个**无名类**（unnamed class）。注 1 的推论很直接：`final` 必须跟在类名之后（*class-head* 的第二种形式里没有 *class-property-specifier-seq*），所以无名类不可能是 `final`。
+省略类名的类定义定义一个**无名类**（unnamed class）。`final` 只能跟在类名后面，所以无名类不可能是 `final` 的（注 1）。
 
 ```cpp run title="unnamed-class.cpp" ok
-struct { int x, y; } pt;          // 无名类，同时声明变量 pt
-typedef struct { int r, g, b; } Color;   // 无名类获得"用于链接的 typedef 名"
-using Size = struct { int w, h; };       // 同上（alias-declaration 也可以）
+struct { int x, y; } pt;                 // 无名类，同时声明变量 pt
+typedef struct { int r, g, b; } Color;   // Color 是用于链接的 typedef 名
+using Size = struct { int w, h; };       // alias-declaration 也可以
 
 int main() {
     pt.x = 1;
@@ -66,105 +67,44 @@ int main() {
 }
 ```
 
-无名类的限制分散在别处：它不能有构造函数、析构函数（没有名字可以写 `~X()`），不能有静态数据成员（[[class.static.data#2]]）；`typedef struct {...} Color;` 中的 `Color` 是用于链接目的的 typedef 名（[[dcl.typedef]]），使这个类可以在各翻译单元中一致地指名。
+无名类写不出 `~X()`，所以不能声明构造函数和析构函数，也不能有静态数据成员（[[class.static.data#2]]）。`typedef struct {...} Color;` 里的 `Color` 是用于链接目的的 typedef 名（[[dcl.typedef]]），各翻译单元靠它指名同一个类。
 
-### 类名不被查找，而是被引入
+### 类名由定义引入，不经过查找
 
-¶1 最后一句规定：除了上面两种特殊情形（*simple-template-id*、带 *nested-name-specifier*），*class-name* 就是一个标识符，它不经过查找，而是由 *class-specifier* 引入。这句话的意义在于：`struct X { ... };` 一定是在当前作用域引入（或重新声明）一个叫 `X` 的类，不会因为外层作用域已经有一个 `X` 就去补全那个 `X`。
+¶1 最后一句规定，除了上面两种特殊形式，类名就是一个标识符：它不经过名字查找，而是由类定义引入。所以 `struct X { ... };` 总是在当前作用域里引入或重新声明一个 `X`，不会因为外层已经有一个 `X` 就去补全那个 `X`。
 
 ```cpp run title="introduce-not-lookup.cpp" ok
 struct X { int a; };
 
 namespace N {
-    struct X { double d; };   // 在 N 中引入新的类 N::X，不是去定义 ::X
+    struct X { double d; };   // 引入新的类 N::X，不是定义 ::X
 }
 
 static_assert(sizeof(N::X) == sizeof(double));
 int main() { }
 ```
 
-## 注入类名（¶2 前半）
-
-¶2：*class-name* 的组成名字（component name）也绑定在类（模板）自身的作用域中，称为**注入类名**（injected-class-name）。也就是说，`struct X {}` 内部有一个隐式的成员 `X`，它指代 `X` 本身。在访问检查中，注入类名被当作一个 public 成员名。
-
-为什么需要注入类名？
-
-1. **在类内部，类名总能找到类自身**，即使外层作用域里有同名的其他实体，或者类名被外部的 `using`/`typedef` 遮蔽。
-2. **通过继承，基类的名字成为派生类作用域中可查找的成员**，`Derived::Base` 能找到基类。
-3. **在类模板中，模板名本身可以当作当前特化使用**：`template<class T> struct L { L* next; };` 里的 `L` 就是 `L<T>`。
-
-```cpp run title="injected-class-name.cpp" ok
-#include <type_traits>
-
-template<class T>
-struct List {
-    List* next;                 // 注入类名：List 即 List<T>
-    List<int>* other;           // 也可以当模板名用，后接实参列表
-    static_assert(std::is_same_v<List, List<T>>);
-};
-
-struct Base { int v = 1; };
-struct Derived : Base {
-    int f() { return Base::v; }  // Base 经由继承得到的注入类名找到
-};
-
-int main() {
-    List<char> l{};
-    Derived d;
-    return d.f() - 1 + (l.next == nullptr ? 0 : 1);
-}
-```
-
-### public 成员身份带来的陷阱
-
-注入类名作为成员参与查找和访问检查，因此**私有继承会让基类的注入类名在更深的派生类中不可访问**：
-
-```cpp title="injected-private.cpp" error
-struct A { };
-struct B : private A { };
-struct C : B {
-    void f() { A a; }      // error: 查找到的是经由 B 继承来的 A 的注入类名，而 B 私有继承 A
-    void g() { ::A a; }    // OK: 限定查找直接找到全局的 A
-};
-```
-
-无限定查找 `A` 时，先在 `C` 的类作用域里搜索，沿基类找到 `B` 中继承来的 `A::A`（注入类名），它比全局作用域的 `::A` 先找到；而它经由私有继承到达，因此不可访问（[[class.access.base]]）。Clang 的诊断说得很清楚：`'A' is a private member of 'A'`。修复方法就是写 `::A`。
-
-### 注入类名有时指构造函数
-
-在某些限定名语境下，`X::X` 指的不是类型 `X`，而是构造函数（[[class.qual]]）。因此：
-
-```cpp title="ctor-name.cpp" error
-struct D { };
-D::D d;   // error: 在这里 D::D 指名的是构造函数，不是类型
-```
-
-这条规则（[[class.qual#1]]）使编译器能够识别 `X::X() { }` 这样的类外构造函数定义以及 `using Base::Base;`（继承构造函数），代价是 `D::D` 在普通语境下不再是类型名。标准例子里给了两种绕开的写法：`B::A ba;`（经派生类 `B` 指名基类 `A`，查找上下文不是 `A` 本身，所以是类型）和 `struct A::A a2;`（详述类型说明符只找类型）。
-
-## 类在闭花括号处完整（¶2 中段）
-
-*class-specifier* 通常称为**类定义**（class definition）。¶2 规定：**一旦看到类定义的闭花括号 `}`，类就被视为已定义**，即使它的成员函数一般都还没有定义。
-
-这条规则把类型完整与成员函数已定义这两件事分开：编译器在 `}` 处就已经确定了类的大小、对齐、布局和所有成员的声明（包括隐式声明的特殊成员函数，[[special#1]]），之后任何需要完整类型的操作（`sizeof`、定义对象、访问成员）都可以进行。成员函数的定义可以在别的翻译单元里。
+## 类在闭花括号处完整（¶2）
 
 ```cpp title="complete-at-brace.cpp" error
 struct S;
-S s1;                 // error: S 尚不完整
+S s1;                     // error: S 尚不完整
 
 struct T {
-    T* self;          // OK: 指向不完整类型的指针
-    // T member;      // error: 类不能包含自身类型的成员（[class.mem] ¶20）
-    static_assert(sizeof(T*) > 0);
-    // static_assert(sizeof(T) > 0);   // error: T 在此处尚不完整
+    T* self;              // OK：指向不完整类型的指针
+    char buf[sizeof(T)];  // error: T 在这里还不完整
+    int f() { return sizeof(T); }   // OK：函数体是完整类上下文
 };
-static_assert(sizeof(T) == sizeof(T*));  // OK: } 之后 T 完整
+static_assert(sizeof(T*) > 0);
 ```
 
-在类定义内部，类一般是不完整的；但在完整类上下文（函数体、默认实参、默认成员初始化器等）中，类被视为完整（[[class.mem.general#10]]、[[class.mem.general#11]]）。所以成员函数体中可以写 `sizeof(*this)`。
+¶2 类定义（*class-specifier* 通常就叫类定义）的闭花括号一出现，类就被视为已定义，即使它的成员函数一般还没有定义。到这里，编译器已经确定了类的大小、对齐、布局和全部成员的声明，包括隐式声明的特殊成员函数（[[special#1]]）。成员函数的定义可以放在别的翻译单元。
 
-### 属性归属于类
+在类定义内部，类一般是不完整的。例外是**完整类上下文**：函数体、默认实参、默认成员初始化器、`noexcept` 说明符等，在那里类被视为完整（[[class.mem.general#10]]、[[class.mem.general#11]]）。所以成员函数体里可以写 `sizeof(T)`，数据成员的声明里不行。
 
-¶2 最后一句：*class-head* 中可选的 *attribute-specifier-seq* 归属于类本身；此后每次指名该类时，这些属性都被视为类的属性。最典型的是 `[[deprecated]]`、`[[nodiscard]]` 和对齐说明符：
+### 写在 class-head 上的属性属于类
+
+¶2 最后一句：*class-head* 里的属性归属于类本身，此后每次指名这个类都带着这些属性。
 
 ```cpp run title="class-attrs.cpp" ok
 struct [[nodiscard]] Error { int code; };
@@ -178,13 +118,74 @@ int main() {
 }
 ```
 
-## 带嵌套名说明符的类定义（¶3）
+## 注入类名（¶2）
 
-当 *class-head-name* 带有 *nested-name-specifier*（如 `struct N::X {...}`、`template<class T> struct A<T>::B {...}`）时：
+```cpp run title="injected-class-name.cpp" ok
+#include <type_traits>
 
-1. **这样的 *class-specifier* 不能栖身于类作用域**。也就是说，不能在一个类里面用限定名定义另一个类的嵌套类；
-2. 若 *class-name* 是标识符，*class-specifier* 必须对应（correspond，[[basic.scope.scope]]）于 *nested-name-specifier* 所指的类、类模板或命名空间中可被指名的一个或多个声明。也就是说，它只能在外面为已有声明补上定义，不能借此引入新名字；
-3. 这些声明必须有同一个目标作用域，而 *class-specifier* 的目标作用域就是那个作用域。
+template<class T>
+struct List {
+    List* next;                 // List 就是 List<T>
+    List<int>* other;           // 后面跟 <，就当模板名用
+    static_assert(std::is_same_v<List, List<T>>);
+};
+
+struct Base { int v = 1; };
+struct Derived : Base {
+    int f() { return Base::v; } // Base 经由继承得到的注入类名找到
+};
+
+int main() {
+    List<char> l{};
+    Derived d;
+    return d.f() - 1 + (l.next == nullptr ? 0 : 1);
+}
+```
+
+¶2 类名也绑定在类（或类模板）自身的作用域里，这叫**注入类名**（[[g:injected-class-name|injected-class-name]]）。可以把它想成每个类都有一个隐式的成员 `X`，指代 `X` 本身。做访问检查时，它被当作 public 成员名。
+
+这样规定有三个好处。在类内部，类名总能找到类自己，不受外层同名实体的影响。经过继承，基类名成为派生类作用域里可以查找的成员，所以 `Derived` 里可以写 `Base::v`。在类模板里，模板名本身就表示当前特化，`List` 就是 `List<T>`。
+
+### 私有继承让基类名不可访问
+
+注入类名既然是成员，就和其他成员一样受继承方式影响：
+
+<div class="compare" markdown="1">
+
+```cpp error
+struct A { };
+struct B : private A { };
+struct C : B {
+  void f() { A a; }
+  // error: 找到的是 B 继承来的
+  //   注入类名 A，而 B 私有继承 A
+};
+```
+
+```cpp run ok
+struct A { };
+struct B : private A { };
+struct C : B {
+  void f() { ::A a; (void)a; }
+  // OK：限定名直接找到全局的 A
+};
+int main() { C{}.f(); }
+```
+
+</div>
+
+在 `C` 的成员函数里无限定地查找 `A`，先在 `C` 的类作用域里沿基类搜索，找到 `B` 继承来的注入类名 `A`。它比全局的 `::A` 先被找到，而它经由私有继承到达，因此不可访问（[[class.access.base]]）。Clang 的诊断是 `'A' is a private member of 'A'`。
+
+### `X::X` 指的是构造函数
+
+```cpp title="ctor-name.cpp" error
+struct D { };
+D::D d;   // error: 这里 D::D 指名的是构造函数，不是类型
+```
+
+在查找上下文是类 `C` 的限定名里，`C::C` 指名的是构造函数而不是注入类名（[[class.qual#1]]）。正是这条规则让编译器能识别类外的构造函数定义 `X::X() { }` 和继承构造函数 `using Base::Base;`。代价是 `D::D` 在普通语境下不再是类型名。需要类型时可以写 `struct D::D`，因为详述类型说明符只找类型。
+
+## 在类外定义嵌套类（¶3）
 
 ```cpp title="qualified-class-def.cpp" error
 namespace N {
@@ -192,38 +193,34 @@ namespace N {
     struct C;
 }
 using N::A;
-template<class T> struct A<T>::B { };   // OK: 定义 N::A<T>::B（可经 using 声明指名）
-struct N::C { };                        // OK: 定义先前声明的 N::C
-struct N::D { };                        // error: N 中没有可对应的 D 声明
+template<class T> struct A<T>::B { };  // OK：定义 N::A<T>::B
+template<> struct A<void> { };         // OK：显式特化
+struct N::C { };                       // OK：定义先前声明的 N::C
+struct N::D { };                       // error: N 里没有 D 的声明
 
 struct E { struct F; };
 struct G {
-    struct E::F { };                    // error: 带限定名的类定义栖身于类作用域
+    struct E::F { };                   // error: 不能写在类作用域里
 };
 ```
 
-第一行改编自标准例 1：`A<T>::B` 中的 `A` 通过 *using-declaration* 找到 `N::A`，这是允许的，因为可被指名（nominable）只要求名字能从那里找到。
+¶3 类名带嵌套名说明符时（`struct N::C { }`），有三条限制：
 
-## class-key 的含义（¶4）
+1. 这个类定义不能位于类作用域里，不能在一个类内部用限定名定义另一个类的成员类；
+2. 它必须对应（[[basic.scope.scope]]）嵌套名说明符所指的类、类模板或命名空间里已有的声明。换句话说，限定名只能给已有声明补上定义，不能借此引入新名字；
+3. 这些声明要有同一个目标作用域，类定义的目标作用域就是它。
 
-¶4 是注：*class-key* 决定类是不是联合体，以及默认访问是 public 还是 private。联合体在任一时刻至多持有一个数据成员的值。
+前两行改编自标准例 1。嵌套名说明符本身怎样找到都可以：`A<T>::B` 里的 `A` 经 using 声明找到 `N::A`。条文要求的只是 `N::A<T>` 里有一个可被指名（nominable）的 `B` 的声明，也就是在此之前、目标作用域就是这个类的声明。
 
-!!! impl "struct 与 class 混用的 ABI 后果"
-    标准允许先写 `class X;` 再写 `struct X { };`，*class-key* 不同的重声明是良构的（[[dcl.type.elab]] 只要求 `union` 与非 `union` 不混用）。Itanium ABI 的名字修饰不区分两者，但 **MSVC 的修饰名区分 `struct` 和 `class`**，混用可能导致链接错误。所以 Clang 有 `-Wmismatched-tags` 警告，MSVC 有对应的 C4099 警告。
-
-## `final` 与上下文关键字（¶5–¶6）
-
-¶5：每个 *class-property-specifier* 在一个序列里至多出现一次。`final` 不是保留关键字，而是有特殊含义的标识符（[[lex.name]]）。当 *class-key* 后依次跟着 *class-head-name*、标识符 `final`、冒号或左花括号时，`final` 被解释为 *class-property-specifier*。
-
-这条消歧规则处理的是确实存在的歧义（改编自标准例 2）：
+## `final`（¶5、¶6）
 
 ```cpp run title="final-disambig.cpp" ok
 struct A;
-struct A final { };     // 定义 struct A（final），不是"值初始化一个名叫 final 的 A 类型变量"
+struct A final { };     // 定义 final 类 A，不是值初始化一个名叫 final 的变量
 
 struct X {
     struct C { constexpr operator int() { return 5; } };
-    struct B final : C { };   // 定义嵌套类 B（final），不是声明一个名叫 final、宽度为 C{} 的位域
+    struct B final : C { };   // 定义 final 嵌套类 B，不是位域
 };
 
 struct final { };       // final 仍可以当普通标识符用
@@ -232,51 +229,38 @@ final f;
 int main() { (void)f; }
 ```
 
-第二个例子尤其值得注意：`struct B final : C{};` 在语法上也可以读成声明一个类型为 `struct B`、名为 `final` 的位域成员，宽度是 `C{}`（经转换函数得到 5）。¶5 的规则不做区分：只要满足类名后跟 `final` 再跟 `:` 或 `{` 的模式，就当作 `final` 说明符。
+¶5 `final` 不是保留字，而是有特殊含义的标识符（[[lex.name]]）。规则是：*class-key* 后面依次跟着类名、标识符 `final`、冒号或左花括号时，`final` 就解释为类属性说明符。一个类上 `final` 最多写一次。
 
-¶6：被标为 `final` 的类如果出现在 *base-clause* 中作为基类，程序非良构。
+这条规则消除了真实存在的歧义。上例的 `struct B final : C { };` 在语法上也能读成：声明一个类型为 `struct B`、名叫 `final` 的位域，宽度是 `C{}` 经转换函数得到的 5。按 ¶5，只要符合类名、`final`、`:` 或 `{` 的模式，就一律当作 `final` 说明符。
+
+¶6 把 `final` 类写在基类列表里，程序非良构：
 
 ```cpp title="final-base.cpp" error
 struct H final { };
 struct I : H { };       // error: H 是 final 的
 ```
 
-`final` 有以下用途：
+`final` 表明这个类不是为继承设计的。它还能帮助编译器去虚化：通过 `final` 类的指针或引用调用虚函数时，不可能有更派生的覆盖者，可以直接调用。标准库里需要从用户类型派生以利用空基类优化的地方，会先用 `std::is_final` 检查，`final` 类就改用成员存储。
 
-- **表达设计意图**：表明这个类不是为继承而设计的（没有虚析构函数、没有受保护的扩展点）；
-- **帮助去虚化**：对 `final` 类的对象（或指针）调用虚函数时，编译器知道不可能有更派生的覆盖者，可以直接调用；
-- **与 `std::is_final` 配合**：标准库的某些实现利用 EBO（空基类优化）时需要从用户类型派生，若用户类型是 `final` 就必须改用成员存储，`std::is_final` 正是为此提供的。
+!!! impl "去虚化与 `-Wsuggest-final-types`"
+    GCC 和 Clang 都会利用 `final`：静态类型为 `F*`（`F` 是 `final` 类）时，`p->vf()` 直接调用最终覆盖者，不查虚表。GCC 的 `-Wsuggest-final-types`、`-Wsuggest-final-methods` 在 LTO 下会提示哪些类型或函数加上 `final` 能带来去虚化收益。
 
-!!! history "C++26 周期中的类属性说明符"
-    `final` 从 C++11 起存在。C++26 周期中曾经通过 [[P2786]] 在 *class-property-specifier* 中加入 `trivially_relocatable_if_eligible` 与 `replaceable_if_eligible`（与平凡可重定位相关），但后来在 2025 年的会议上被撤回。当前草案中 *class-property-specifier* 只剩 `final` 一种。
-
-## 非零大小与类对象的基本操作（¶7–¶8）
-
-¶7 注 3：类类型的完整对象大小非零。基类子对象和带 `[[no_unique_address]]` 的成员不受此约束（它们是潜在重叠子对象，[[intro.object]]）。空基类优化（EBO）与 `[[no_unique_address]]` 能节省空间，依据就在这里：
+## 完整对象的大小非零（¶7）
 
 ```cpp run title="nonzero-size.cpp" ok
 struct Empty { };
-struct D : Empty { int x; };                         // 基类子对象可以零大小
-struct M { [[no_unique_address]] Empty e; int x; };  // 同上（若实现支持）
+struct D : Empty { int x; };                         // 基类子对象可以不占空间
+struct M { [[no_unique_address]] Empty e; int x; };  // 同上
 
-static_assert(sizeof(Empty) >= 1);                    // 完整对象非零大小
-static_assert(sizeof(D) == sizeof(int));              // 主流实现上 EBO 生效
-int main() { return sizeof(M) == sizeof(int) ? 0 : 0; }
+static_assert(sizeof(Empty) >= 1);                   // 完整对象大小非零
+int main() { return sizeof(D) == sizeof(int) ? 0 : 1; }
 ```
 
-（`sizeof(D) == sizeof(int)` 是主流 ABI 的实际行为，标准本身并不保证 EBO 一定发生；`[[no_unique_address]]` 在 MSVC 上默认被忽略，需写 `[[msvc::no_unique_address]]`。）
+¶7 这一段是注：类类型的完整对象大小不为零。基类子对象和带 `[[no_unique_address]]` 的成员不受这条限制，它们是潜在重叠子对象（[[intro.object]]）。空基类优化（EBO）就以此为依据。
 
-为什么完整对象不能是零大小？因为不同的对象必须有不同的地址（[[intro.object]]），数组 `Empty a[10]` 的各元素需要能够区分；指针算术 `p + 1` 也要求元素大小非零。
+完整对象不能是零大小，是因为不同的对象必须有不同的地址，`Empty a[10]` 的十个元素要能区分，指针算术 `p + 1` 也要求元素大小非零。标准不保证 EBO 一定发生，`sizeof(D) == sizeof(int)` 是主流 ABI 的实际行为。MSVC 默认忽略 `[[no_unique_address]]`，要写 `[[msvc::no_unique_address]]`。
 
-¶8 注 4：类对象可以被赋值、作为实参传递、被函数返回（除非复制/移动被限制，[[dcl.fct.def.delete]]、[[class.access]]）；其他运算（如相等比较）可以由用户定义（[[over.oper]]），C++20 起也可以 `= default`（[[class.compare]]）。
-
----
-
-# 类名（[class.name]）
-
-## 类定义引入新类型（[class.name] ¶1）
-
-[[class.name#1]]：**每个类定义引入一个新的类型**。这体现了 C++ 的名义类型系统（nominal typing）：两个结构完全相同的类也是不同的类型。
+## 每个类定义引入一个新类型 [class.name]
 
 ```cpp title="distinct-types.cpp" error
 struct X { int a; };
@@ -288,45 +272,41 @@ int f(Y);          // 重载，不是重复声明
 void g() {
     X a1;
     Y a2;
-    int a3 = 0;
     a1 = a2;       // error: 不能把 Y 赋给 X
-    a1 = a3;       // error: 不能把 int 赋给 X
 }
 
 struct S { int a; };
 struct S { int a; };   // error: S 被定义两次
 ```
 
-最后两行在同一个翻译单元里是重定义错误；在不同翻译单元里出现相同的定义则是允许的（ODR 允许类定义出现在多个 TU 中，[[basic.def.odr]]），条件是各定义满足 ODR 的一致性要求，否则 IFNDR。
+[[class.name#1]] 每个类定义引入一个新的类型。C++ 的类型系统是名义的：两个结构完全相同的类也是不同的类型，可以分别作为重载的形参类型。
 
-## 用详述类型说明符指名被遮蔽的类（[class.name] ¶2）
+同一个翻译单元里把 `S` 定义两次是重定义错误。不同翻译单元里各有一份相同的定义则是允许的，头文件里的类定义就是这样被包含进多个源文件的；各份定义不一致时违反 ODR（[[basic.def.odr]]）。
 
-[[class.name#2]] 是一个注，说明从 C 继承下来的类名与变量/函数同名的情形。在 C 里，`struct stat` 和函数 `stat` 处在不同的名字空间（tag namespace）；C++ 把类名放进普通作用域，但为了兼容，允许同一作用域里同一个名字既是类又是变量/函数/枚举项。此时普通名字**遮蔽**类名，要指名类必须用**详述类型说明符**（*elaborated-type-specifier*），它执行只考虑类型的查找（[[basic.lookup.elab]]）。
+### 用 `struct X` 指名被遮蔽的类
 
 ```cpp run title="stat.cpp" ok
 struct stat { int size; };
 
 stat gstat;                        // 此时 stat 只是类名，可以直接用
 
-int stat(struct stat* p) { return p->size; }   // 现在 stat 也是函数名
+int stat(struct stat* p) { return p->size; }   // stat 现在也是函数名
 
 int main() {
-    struct stat s{42};             // 必须写 struct：无修饰的 stat 找到的是函数
+    struct stat s{42};             // 必须写 struct：只写 stat 找到的是函数
     return stat(&s) - 42;          // 调用函数 stat
 }
 ```
 
-POSIX 的 `<sys/stat.h>` 就是这种情形：`struct stat` 和 `stat()` 函数同名。
+[[class.name#2]] C 把结构体标签放在单独的名字空间里，`struct stat` 和函数 `stat` 互不干扰。C++ 把类名放进普通作用域，但为了兼容 C，允许同一作用域里同一个名字既是类又是变量、函数或枚举项。这时普通名字遮蔽类名，要指名类就得写详述类型说明符 `struct stat`，它执行只考虑类型的查找（[[basic.lookup.elab]]）。POSIX 的 `<sys/stat.h>` 正是这种情形。
 
-### 用详述类型说明符声明类名
-
-详述类型说明符也可以声明一个新的类名，例如块作用域里的 `struct s;` 会在该块中引入一个局部类 `s`，遮蔽外层的同名类：
+详述类型说明符还可以声明新的类名。块作用域里的 `struct s;` 引入一个局部类，遮蔽外层的同名类：
 
 ```cpp run title="local-redecl.cpp" ok
 struct s { int a; };
 
 void g() {
-    struct s;                 // 在块作用域声明新的类 s，遮蔽全局 s
+    struct s;                 // 声明局部类 s，遮蔽全局 s
     s* p = nullptr;           // 指向局部 s
     struct s { char* q; };    // 定义局部 s
     struct s;                 // 重声明，无效果
@@ -336,20 +316,15 @@ void g() {
 int main() { g(); }
 ```
 
-这种前置声明使相互引用的类成为可能：`class Vector;` 之后 `Matrix` 就可以在友元声明中使用 `Vector`。
+前置声明 `class Vector;` 之后，`Matrix` 就能在友元声明里使用 `Vector`，两个类可以互相引用。
 
-!!! lawyer "形参列表中的 `struct Q*` 声明在哪里？"
-    对于 `void h(struct Q* q);` 中的 `struct Q`，如果无限定查找找不到 `Q`，就把 `Q` 声明为类名，其目标作用域是最近的外围命名空间或块作用域（[[dcl.type.elab#3]]），而不是函数形参作用域，所以之后在同一命名空间里写 `Q* qq;` 是合法的。C 的处理不同：C 中这样声明的结构体标签只具有函数原型作用域，在原型之外不可见，编译器常为此给出警告。
-
-## 详述类型说明符引用已有类（[class.name] ¶3）
-
-[[class.name#3]] 注 2：详述类型说明符也可以作为普通的 *type-specifier* 出现在声明中。它与类声明的区别在于，它可以引用一个已有的同名类，而不是总是引入新的类。标准例 5：
+[[class.name#3]] 用在普通声明里时，`struct s` 也可以指一个已有的类，而不是引入新类：
 
 ```cpp run title="elab-refer.cpp" ok
 struct s { int a; };
 
 void g(int s) {
-    struct s* p = new struct s;   // 全局的 struct s（形参 s 遮蔽了无修饰的名字）
+    struct s* p = new struct s;   // 全局的 struct s（形参 s 遮蔽了普通名字）
     p->a = s;                     // 形参 s
     delete p;
 }
@@ -357,12 +332,13 @@ void g(int s) {
 int main() { g(1); }
 ```
 
-## 声明在标识符之后立即生效（[class.name] ¶4）
+!!! lawyer "形参列表里的 `struct Q*` 声明在哪里"
+    对 `void h(struct Q* q);`，如果无限定查找找不到 `Q`，就把 `Q` 声明为类名，目标作用域是最近的外围命名空间或块作用域（[[dcl.type.elab#3]]），而不是形参作用域。所以之后在同一命名空间里写 `Q* qq;` 是合法的。C 的规则不同：这样声明的结构体标签只在函数原型内有效，编译器常为此警告。
 
-[[class.name#4]] 注 3：在类定义或详述类型说明符中，类名的声明在标识符一出现时就生效（[[basic.scope.pdecl]]）。标准举了一个不太自然的例子：
+### 声明在标识符之后立即生效
 
 ```cpp run title="class-A-star-A.cpp" ok
-class A * A;     // 先把 A 声明为类，再把 A 重新声明为"指向该类对象的指针"变量
+class A * A;     // 先把 A 声明为类，再把 A 声明为指向该类对象的指针变量
 
 int main() {
     class A* p = A;   // 之后要指名这个类，只能写 class A
@@ -370,43 +346,39 @@ int main() {
 }
 ```
 
-标准自己也说这种写法容易让人困惑，最好避免。它的实际意义在于说明声明点的精确位置：`class A` 一读完，`A` 就是类名了，所以同一声明中的 `* A` 能看到它。
+[[class.name#4]] 类名的声明在标识符出现之后立即生效（[[basic.scope.pdecl]]）。所以读完 `class A`，`A` 就已经是类名，同一声明里的 `* A` 再把 `A` 声明为变量。标准也说这种写法容易让人困惑，最好避免。
 
-## simple-template-id 作为类名（[class.name] ¶5）
+[[class.name#5]] 只有模板名指名类模板时，`T<...>` 才是类名。别名模板 `template<class T> using V = std::vector<T>;` 的 `V<int>` 是类型名，但不是类名，不能出现在要求类名的位置，比如类定义的 *class-head-name*。
 
-[[class.name#5]]：*simple-template-id* 只有在其模板名指名一个类模板时才是 *class-name*。别名模板的 *simple-template-id*（`template<class T> using V = vector<T>; V<int>`）是 *type-name*，但不是 *class-name*，在需要 *class-name* 的语法位置（如 *class-head-name*、析构函数名 `~X`）上，这一点会造成区别。
+<details class="fine" markdown="1"><summary>其余条文</summary>
 
-## 实现视角
+¶8 是注：类对象可以被赋值、作为实参传递、作为返回值，除非复制或移动被删除或不可访问（[[dcl.fct.def.delete]]、[[class.access]]）。相等比较等其他运算可以由用户定义（[[over.oper]]），C++20 起也可以 `= default`（[[class.compare]]）。
 
-!!! impl "注入类名与模板"
-    在类模板内部，注入类名有双重身份：后面跟 `<` 时它是模板名（`List<int>`），否则是当前特化的类型（`List` 即 `List<T>`）。作为模板模板形参的实参时它被当作模板本身（[[temp.local]]）：若 `Foo` 接受一个模板模板形参，在 `List` 内部写 `Foo<List>` 传入的是模板 `List`，而不是类型 `List<T>`。GCC、Clang 都按这个规则实现；早期编译器在这里有大量不一致。
+</details>
 
-!!! impl "final 与去虚化"
-    GCC 和 Clang 都会利用 `final`：若 `p` 的静态类型是 `final` 类 `F*`，`p->vf()` 直接调用 `F::vf`（或 `F` 继承来的最终覆盖者），无需查虚表；`final` 修饰的虚函数同理。GCC 还提供 `-Wsuggest-final-types` / `-Wsuggest-final-methods`，在 LTO 下提示哪些类型/方法加上 `final` 能带来去虚化收益。
+!!! impl "struct 与 class 混用的 ABI 后果"
+    先写 `class X;` 再写 `struct X { };` 是良构的，[[dcl.type.elab]] 只禁止 `union` 与非 `union` 混用。Itanium ABI 的名字修饰不区分两者，MSVC 的修饰名却区分 `struct` 和 `class`，混用可能导致链接错误。Clang 为此有 `-Wmismatched-tags` 警告，MSVC 有 C4099。
 
 ## 历史与演进
 
-!!! history "历史与演进"
-    - **C++98**：类定义语法、注入类名、详述类型说明符兼容 C 标签名的规则都已存在；`struct`/`class` 的唯一区别是默认访问。
-    - **C++11**：引入 `final`（以及 `override`）作为上下文关键字；*class-head* 允许属性（`alignas`、`[[deprecated]]`，后者是 C++14 加入的）。
-    - **C++20**：模块使完整性的判定从定义可见变为定义可达（[[module.reach]]），见 [[class.mem.general#11]]。
-    - **C++23 / C++26**：¶3 改用 "correspond"/"nominable"/"target scope" 等新的作用域术语重述（源于 C++23 对名字查找条款的重写）；C++26 周期中短暂加入又撤回了 `trivially_relocatable_if_eligible`/`replaceable_if_eligible`。
+!!! history
+    - C++98 已有类定义语法、注入类名，以及兼容 C 标签名的详述类型说明符规则；`struct` 与 `class` 只差默认访问。
+    - C++11 引入上下文关键字 `final`，*class-head* 上可以写属性。
+    - C++20 的模块把类是否完整从定义是否在前面改成定义是否可达（[[module.reach]]，见 [[class.mem.general#11]]）。
+    - C++26 的工作中曾在 `final` 旁边加入与平凡可重定位相关的两个类属性说明符（[[P2786]]），后来撤回。当前草案中类属性说明符只有 `final`。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "私有继承后基类名变得不可访问"
-    见上面的 `injected-private.cpp`：在私有继承链下方的类里写无限定的基类名，找到的是不可访问的注入类名。应当用 `::A` 或完整的限定名。
+!!! pitfall "类在自己的定义里是完整的"
+    `struct T { char buf[sizeof(T)]; };` 是非良构的。只有函数体、默认实参等完整类上下文才把类当作完整类型。
 
-!!! pitfall "`struct X;` 与 `class X {}` 混用"
-    在标准层面合法，但在 MSVC 上可能导致链接错误。整个代码库应对同一个类使用同一个 *class-key*。
-
-!!! pitfall "以为类在定义内部就是完整的"
-    `struct T { char buf[sizeof(T)]; };` 是非良构的；只有完整类上下文（函数体等）才能把类当作完整类型。
+!!! pitfall "`struct X;` 和 `class X { }` 可以随便混用"
+    在标准层面合法，在 MSVC 上可能导致链接错误。同一个类在整个代码库里应当用同一个 *class-key*。
 
 ## 思考题
 
 !!! question "思考题 1"
-    下面每一行是什么？
+    下面每一行在做什么？整个程序良构吗？
 
     ```cpp
     struct A { };
@@ -419,43 +391,30 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-- `struct B final : A { };`：定义 `final` 类 `B`，派生自 `A`。
-- `struct E final : D { };`：按 ¶5，`类名 final :` 的模式一律解释为 `final` 说明符，所以这是定义嵌套类 `E`（`final`），不是名为 `final`、宽度为 `D{}` 的位域。
-- `struct final { };`：定义一个名叫 `final` 的普通类，因为 `final` 不是保留字。
-- `struct F : final { };`：`F` 派生自类 `final`。这里 `final` 前面是 `:` 而不是类名，不触发 ¶5 的消歧，它就是基类名。整个程序良构。
+- `struct B final : A { };` 定义 `final` 类 `B`，派生自 `A`。
+- `struct E final : D { };` 符合类名、`final`、`:` 的模式，按 ¶5 是定义 `final` 嵌套类 `E`，不是宽度为 `D{}` 的位域。
+- `struct final { };` 定义一个名叫 `final` 的普通类，`final` 不是保留字。
+- `struct F : final { };` 里 `final` 前面是 `:` 而不是类名，不触发 ¶5，它就是基类名。
+
+整个程序良构。
 </details>
 
 !!! question "思考题 2"
-    为什么标准规定注入类名在访问检查中被视为 public 成员，而不是干脆让它没有访问属性？
+    为什么注入类名在访问检查中被当作 public 成员，而不是干脆没有访问属性？
 
 <details markdown="1">
 <summary>答案</summary>
 
-因为注入类名是通过成员名字查找（[[class.member.lookup]]）找到的，查找到的东西需要一个确定的访问属性才能进行访问检查（[[class.access]]）。把它定为 public，意味着在类自身及公有派生类中它总是可访问的；只有经过非公有继承降低了访问级别之后（[[class.access.base]]），它才可能变得不可访问。如果它没有访问属性，私有继承就无法隐藏基类的身份，而私有继承的语义正是把派生关系当作实现细节。
+注入类名是通过成员名字查找（[[class.member.lookup]]）找到的，找到的东西需要一个确定的访问属性才能做访问检查（[[class.access]]）。定为 public，意味着在类本身和公有派生类里它总是可访问的；经过非公有继承降低访问级别之后（[[class.access.base]]），它才可能不可访问。私有继承要把派生关系当作实现细节隐藏起来，这正需要基类名也随之变得不可访问。
 </details>
 
 !!! question "思考题 3"
-    `template<class T> struct X; template<> struct X<int> { };` 合法，那么 `struct Y<int> { };`（`Y` 不是模板）呢？`template<class T> struct Z { }; struct Z<int> { };` 呢？
+    `template<class T> struct Z { }; struct Z<int> { };` 合法吗？`struct Y<int> { };`（`Y` 不是模板）呢？
 
 <details markdown="1">
 <summary>答案</summary>
 
-`struct Y<int> { };`：`Y` 不是模板名，`Y<int>` 根本不构成 *simple-template-id*，语法错误。
+`struct Z<int> { };` 的类名是 *simple-template-id*，按 ¶1 这样的声明必须是显式特化或偏特化。它缺少 `template<>`，所以非良构，应写成 `template<> struct Z<int> { };`。
 
-`struct Z<int> { };`：类名是 *simple-template-id*，按 ¶1 这样的声明必须是显式特化或偏特化，而它缺少 `template<>` 前缀，所以非良构。正确写法是 `template<> struct Z<int> { };`。
+`struct Y<int> { };` 里 `Y` 不是模板名，`Y<int>` 根本构不成 *simple-template-id*，是语法错误。
 </details>
-
-## 小结
-
-| 规则 | 出处 | 要点 |
-|---|---|---|
-| 类是类型 | ¶1 | *class-specifier* 或 *elaborated-type-specifier* 引入类名；标识符形式的类名不被查找 |
-| class-key | ¶1、¶4 | `class`/`struct` 只差默认访问；`union` 是另一种类 |
-| 无名类 | ¶1 | 不能 `final`，无构造/析构函数，无静态数据成员 |
-| 注入类名 | ¶2 | 类名也绑定在类作用域内，按 public 成员做访问检查 |
-| 完整性 | ¶2 | 闭花括号之后即完整；类内仅完整类上下文视为完整 |
-| 限定类名定义 | ¶3 | 不能栖身于类作用域；必须对应已有声明 |
-| `final` | ¶5–¶6 | 上下文关键字；`类名 final :`/`{` 一律视为说明符；`final` 类不能做基类 |
-| 新类型 | [class.name] ¶1 | 名义类型：结构相同也是不同类型 |
-| 详述类型说明符 | [class.name] ¶2–¶3 | 指名被变量/函数遮蔽的类；可声明新类名或引用已有类 |
-| 声明点 | [class.name] ¶4 | 标识符一出现即生效：`class A * A;` |
