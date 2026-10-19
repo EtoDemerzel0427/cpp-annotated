@@ -1,58 +1,65 @@
 ---
 title: 系统错误支持
-summary: <system_error> 的完整设计：error_category（错误"来源"的身份与解释者）、error_code（精确的、平台相关的错误值）、error_condition（可移植的抽象错误状况）、system_error 异常；code 与 condition 的比较如何经由 category 的虚函数双向映射，generic_category 与 system_category 的分工，如何为自己的库定义错误类别，以及格式化、哈希与常见陷阱。
+summary: <system_error> 把整数错误码和它的来源（错误类别）放在一起：error_code 保存精确的平台错误，error_condition 表示可移植的错误状况，两者经由类别的虚函数比较；以及如何定义自己的错误类别和 system_error 异常。
 status: done
 covers: *
 since: c++11
 related: diagnostics, errno, std.exceptions, class.compare, over.match.oper, basic.lookup.argdep, unord.hash, format.string
 tags: 标准库, error_code, error_condition, error_category, system_error, 错误处理
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-操作系统和底层库报告错误的方式五花八门：POSIX 用 `errno`，Windows 用 `GetLastError()` 和 `HRESULT`，`getaddrinfo` 有自己的 `EAI_*`，数据库驱动、压缩库、HTTP 客户端各有各的整数错误码。一个光秃秃的 `int` 是**有歧义的**：`2` 在 POSIX 上是 `ENOENT`，在 Windows 上是 `ERROR_FILE_NOT_FOUND`（恰好意思相近），在某个 HTTP 库里可能是"连接被重置"。
+!!! tldr
+    - 一个错误由一个整数值和一个错误类别组成。类别是不可复制的单例对象，两个类别相同当且仅当它们是同一个对象。
+    - `error_code` 保存某次操作实际得到的错误，精确但与平台相关；`error_condition` 表示调用者关心的一类错误，是可移植的抽象。
+    - 两个 `error_code` 只在类别和值都相同时相等；`error_code` 与 `error_condition` 比较时，由双方类别的 `equivalent` 虚函数判断，任一方认可即相等。
+    - 用 `error_code` 存储和传递错误，用 `errc` 这样的 condition 判断是哪种错误。
+    - 自定义错误码：特化 `is_error_code_enum`，在枚举所在命名空间提供 `make_error_code`，再从 `error_category` 派生一个类别。
 
-[syserr] 的解决方案可以用一句话概括：**错误 = （整数值，类别）**。类别是一个多态的单例对象，它的**身份**（地址）区分不同的错误来源，它的**虚函数**负责解释这个整数（消息文本）以及把它映射到可移植的错误状况。整个设计由四个类组成：
+操作系统和底层库都用整数报告错误：POSIX 用 `errno`，Windows 用 `GetLastError()`，`getaddrinfo` 有自己的 `EAI_*`，各种第三方库又各有一套。单独一个 `int` 是有歧义的：`2` 在 POSIX 上是 `ENOENT`，在 Windows 上是 `ERROR_FILE_NOT_FOUND`，在某个 HTTP 库里可能是别的意思。
 
-| 类 | 角色 | 比喻 |
-|---|---|---|
-| `error_category`（[[g:error-category]]） | 错误的来源/命名空间：身份 + 解释 + 映射 | "这是哪本字典" |
-| `error_code`（[[g:error-code]]） | 某次操作实际得到的错误：**精确**、**平台相关** | "字典里的第 2 条" |
-| `error_condition`（[[g:error-condition]]） | 调用者关心的错误**状况**：**抽象**、**可移植** | "所有表示'文件不存在'的条目" |
-| `system_error` | 携带 `error_code` 的异常 | "装着上面那张纸条的信封" |
+`<system_error>` 的做法是给整数配上它的来源，也就是错误类别。¶1 说这些组件供标准库和 C++ 程序报告来自操作系统或其他底层接口的错误（[syserr.general]）。
 
-[syserr.general] ¶1：这些组件供标准库和 C++ 程序报告**源自操作系统或其他底层应用程序接口**的错误状况。
+## 先看一个例子
 
-## 不碰别人的错误状态（[syserr.general] ¶2）
+```cpp run title="code-vs-condition.cpp" ok
+#include <cerrno>
+#include <cstdio>
+#include <iostream>
+#include <system_error>
 
-¶2：[syserr] 中描述的组件**不改变 `errno` 的值**（[[errno]]）。*Recommended practice*：实现应当保持其他库提供的错误状态不变。
+int main() {
+    std::error_code ec(ENOENT, std::system_category());   // 操作系统报告的错误
+    std::error_code gc = std::make_error_code(std::errc::no_such_file_or_directory);
 
-这条看似琐碎，实则必要：典型用法是"系统调用失败 → 读 `errno` → 构造 `error_code`/`system_error`"，如果构造过程（例如 `message()` 里调用 `strerror`）改写了 `errno`，或者 Windows 上改写了 `GetLastError()`，就会破坏调用者可能还要做的检查。
+    std::printf("%d\n", ec == std::errc::no_such_file_or_directory);   // 1：code 与 condition
+    std::printf("%d\n", std::errc::no_such_file_or_directory == ec);   // 1：C++20 反向重写
+    std::printf("%d\n", ec == gc);                                     // 0：code 与 code
+    std::cout << ec << " | " << ec.message() << " | " << gc << '\n';
+    // system:2 | No such file or directory | generic:2
 
-## 头文件概要（[system.error.syn]）
+    auto cond = ec.default_error_condition();
+    std::printf("%s:%d\n", cond.category().name(), cond.value());      // generic:2
+    std::error_code big(100000, std::system_category());               // 不对应任何 errno 值
+    auto c2 = big.default_error_condition();
+    std::printf("%s:%d\n", c2.category().name(), c2.value());          // system:100000
+}
+```
 
-概要的主要内容：
+`ec` 和 `gc` 的值都是 2，却不相等，因为它们属于不同的类别。`ec` 与 `errc::no_such_file_or_directory` 相等，是因为 `system_category` 认为自己的 2 对应 POSIX 的 `ENOENT`。本页其余部分解释这些结果从何而来。
 
-- 四个类的声明，以及 `generic_category()`、`system_category()`；
-- 两个特征模板 `is_error_code_enum<T>`、`is_error_condition_enum<T>`（默认为 `false_type`）及其 `_v` 变量模板；
-- `enum class errc`（**freestanding**）：为每个 POSIX 错误号起一个可读的名字，例如 `errc::no_such_file_or_directory // ENOENT`；并有 `is_error_condition_enum<errc> : true_type`；
-- `make_error_code(errc)`、`make_error_condition(errc)`；
-- `error_code` 的 `operator<<`；
-- 比较运算符：`error_code == error_code`、`error_code == error_condition`、`error_condition == error_condition`，以及两个 `<=>`；
-- `hash<error_code>`、`hash<error_condition>`；
-- `formatter<error_code, charT>`。
+整个设计由四个类组成：
 
-¶1：`errc` 每个枚举项的值与概要中所示 `<cerrno>` 宏的值相同。`<system_error>` 是否暴露 `<cerrno>` 的宏是未指明的——要用 `ENOENT` 就自己包含 `<cerrno>`。
+| 类 | 角色 |
+|---|---|
+| `error_category`（[[g:error-category]]） | 错误的来源：用对象身份区分来源，用虚函数解释值、映射到可移植的状况 |
+| `error_code`（[[g:error-code]]） | 某次操作实际得到的错误，精确、与平台相关 |
+| `error_condition`（[[g:error-condition]]） | 调用者关心的错误状况，抽象、可移植 |
+| `system_error` | 携带一个 `error_code` 的异常 |
 
-¶2：`is_error_code_enum` 与 `is_error_condition_enum` 可以为**程序定义的类型**特化，表示这些类型可以隐式转换为 `error_code` / `error_condition`。
+## 错误类别 [syserr.errcat]
 
-!!! pitfall "`errc` 是 condition 枚举，不是 code 枚举"
-    标准只特化了 `is_error_condition_enum<errc>`。所以 `std::error_condition c = std::errc::invalid_argument;` 可以，而 `std::error_code ec = std::errc::invalid_argument;` **非良构**（Clang："no viable conversion from 'std::errc' to 'std::error_code'"）——必须写 `std::make_error_code(std::errc::invalid_argument)`。这是设计意图的直接体现：`errc` 表示的是**可移植的状况**，是用来**比较**的（`ec == std::errc::invalid_argument`），而不是用来充当具体错误值的。
-
-## `error_category`（[syserr.errcat]）
-
-### 概述（[syserr.errcat.overview]）
-
-¶1：`error_category` 是一个**基类**，用于标识某一类错误码的**来源和编码**。可以派生它来支持标准之外的错误类别，派生类必须按 [syserr.errcat] 的规定行为。
+### 类别是单例，身份就是地址
 
 ```cpp
 class error_category {
@@ -72,204 +79,131 @@ public:
 };
 ```
 
-设计要点：
+¶1（[syserr.errcat.overview]）`error_category` 是一个基类，用来标识某类错误码的来源和编码。程序可以派生自己的类别，派生类必须按本条款的规定行为。
 
-- **不可复制**：类别是单例，按引用传递，`error_code` 里存的是指向它的指针。
-- **身份即地址**：注 1 指出，类别对象按引用传递，两个类别对象相等**当且仅当地址相同**；如果某个自定义类别类型有多个对象，即使它们"值相同"，比较也可能为假。
-- **`constexpr` 默认构造函数**：使派生类的类别对象可以被常量初始化，从而避免静态初始化顺序问题。
-- 两个纯虚函数：`name()`（类别名）和 `message(int)`（把值翻译成文本）；其余三个虚函数有默认实现，负责与 `error_condition` 的映射。
+类别不可复制，总是按引用传递，`error_code` 里存的是指向它的指针。注 1 指出，两个类别对象相等当且仅当地址相同；如果某个自定义类别类型有多个对象，它们之间的比较可能为假。
 
-### 虚成员的默认行为（[syserr.errcat.virtuals]）
+默认构造函数是 `constexpr` 的，派生类的类别对象因此可以常量初始化，不受静态初始化顺序的影响。
 
-| 函数 | 默认返回 | 段落 |
-|---|---|---|
-| `name()` | 纯虚；应返回普通字面量编码的类别名字符串 | ¶1 |
-| `default_error_condition(ev)` | `error_condition(ev, *this)`——同值、同类别 | ¶2 |
-| `equivalent(int code, const error_condition& cond)` | `default_error_condition(code) == cond` | ¶3 |
-| `equivalent(const error_code& code, int cond)` | `*this == code.category() && code.value() == cond` | ¶4 |
-| `message(ev)` | 纯虚；返回描述 `ev` 的多字节字符串 | ¶5 |
+### 虚函数的默认行为 [syserr.errcat.virtuals]
 
-两个 `equivalent` 的方向要看清：
+`name()` 和 `message(int)` 是纯虚函数，派生类必须提供：前者返回类别名，后者把值翻译成说明文字。另外三个虚函数有默认实现：
 
-- `equivalent(int code, const error_condition&)` 由 **code 所属的类别**调用：问"我这个类别里的 `code`，是否属于那个状况？"
-- `equivalent(const error_code&, int condition)` 由 **condition 所属的类别**调用：问"那个 error_code，是否属于我这个类别里的状况 `condition`？"
+| 函数 | 默认返回 |
+|---|---|
+| ¶2 `default_error_condition(ev)` | `error_condition(ev, *this)`，同值、同类别 |
+| ¶3 `equivalent(int code, const error_condition& cond)` | `default_error_condition(code) == cond` |
+| ¶4 `equivalent(const error_code& code, int cond)` | `*this == code.category() && code.value() == cond` |
 
-这就是整个设计的关键：**code 与 condition 的等价关系可以由任意一方的类别来认定**——下面的比较运算符会两边都问一遍。
+两个 `equivalent` 的方向不同：
 
-### 非虚成员（[syserr.errcat.nonvirtuals]）
+- `equivalent(int code, const error_condition&)` 在 code 所属的类别上调用，问的是：我这个类别里的 `code` 属于那个状况吗？
+- `equivalent(const error_code&, int condition)` 在 condition 所属的类别上调用，问的是：那个 `error_code` 属于我这个类别里的状况 `condition` 吗？
 
-¶1：`operator==` 返回 `this == &rhs`。¶2：`operator<=>` 返回 `compare_three_way()(this, &rhs)`；注 1：`compare_three_way` 对指针提供**全序**（即便指针指向无关对象，[[comparisons.three.way]]），所以类别可以排序——但顺序取决于对象的地址，**每次运行可能不同**。
+code 与 condition 是否等价，可以由任意一方的类别来认定。后面的比较运算符两边都会问。
 
-### 程序定义的派生类（[syserr.errcat.derived]）
+[syserr.errcat.derived] 的 ¶1–¶4 对派生类重写这些函数的要求比默认实现宽松：`default_error_condition(ev)` 返回与 `ev` 对应的状况，两个 `equivalent` 在本类别认为两者等价时返回 `true`。对应和等价的具体含义由派生类自己决定。
 
-当你派生自己的类别时，¶1–¶4 规定了重写版本的契约（比基类的默认实现宽松，允许自定义映射）：
+### 类别之间的比较 [syserr.errcat.nonvirtuals]
 
-- ¶1 `name()`：返回命名该类别的字符串；
-- ¶2 `default_error_condition(ev)`：返回与 `ev` **对应**的 `error_condition`；
-- ¶3 `equivalent(int code, const error_condition& cond)`：若在本类别中 `code` 被认为与 `cond` 等价则返回 `true`；
-- ¶4 `equivalent(const error_code& code, int cond)`：若在本类别中 `code` 被认为与 `cond` 等价则返回 `true`。
+¶1 `operator==` 返回 `this == &rhs`。¶2 `operator<=>` 返回 `compare_three_way()(this, &rhs)`，`compare_three_way` 对任意指针都给出全序（[[comparisons.three.way]]），所以类别可以排序，但顺序取决于对象的地址，每次运行可能不同。
 
-### 两个标准类别（[syserr.errcat.objects]）
+### 两个标准类别 [syserr.errcat.objects]
 
-**`generic_category()`**（¶1–¶2）：返回一个派生自 `error_category` 的对象的引用，所有调用返回**同一个对象**；它的 `default_error_condition` 与 `equivalent` 按基类的规定行为，`name()` 返回 `"generic"`。它对应的是 **POSIX `errno` 值**——`errc` 的值就在这个类别里解释。
+¶1–¶2 `generic_category()` 每次调用都返回同一个对象，`name()` 返回 `"generic"`，其余虚函数按基类的默认行为。它解释的是 POSIX `errno` 值，`errc` 的值就在这个类别里解释。
 
-**`system_category()`**（¶3–¶4）：同样是单例，`name()` 返回 `"system"`，`equivalent` 按基类行为。它代表**操作系统原生**的错误码。它的 `default_error_condition` 有特殊规定：
+¶3–¶4 `system_category()` 也是单例，`name()` 返回 `"system"`，代表操作系统原生的错误码。它的 `default_error_condition(ev)` 有专门的规定：
 
-- `ev == 0`：返回 `error_condition(0, generic_category())`；
-- 若 `ev` 对应某个 POSIX `errno` 值 `pxv`：返回 `error_condition(pxv, generic_category())`；
-- 否则：返回 `error_condition(ev, system_category())`。
+- `ev` 为 0 时，返回 `error_condition(0, generic_category())`；
+- `ev` 对应某个 POSIX `errno` 值 `pxv` 时，返回 `error_condition(pxv, generic_category())`；
+- 否则返回 `error_condition(ev, system_category())`。
 
-"对应"在给定操作系统上意味着什么是**未指明的**。注 1：可能的系统错误码数量庞大且无界，有些可能不对应任何 POSIX `errno` 值，因此实现在决定对应关系时有很大余地。
+在给定操作系统上什么算对应是未指定的。注 1 解释说，系统错误码数量庞大，有些不对应任何 POSIX 值，所以留给实现决定。
 
-这就是 `system_category` 存在的意义：在 POSIX 系统上，系统错误码**就是** `errno` 值，映射是恒等的；在 Windows 上，`system_category` 的值是 `GetLastError()` 返回的 Win32 错误码，`default_error_condition` 把 `ERROR_FILE_NOT_FOUND` 等映射到 `errc::no_such_file_or_directory`，从而让 `ec == std::errc::no_such_file_or_directory` 在两个平台上都成立。
+这就是 `system_category` 的用处。POSIX 系统上，系统错误码就是 `errno` 值，映射是恒等的；Windows 上，它的值是 `GetLastError()` 返回的 Win32 错误码，`default_error_condition` 把 `ERROR_FILE_NOT_FOUND` 之类映射到 `errc::no_such_file_or_directory`。于是 `ec == std::errc::no_such_file_or_directory` 在两个平台上都成立。上面例子里的 100000 对应不上任何 POSIX 值，所以留在 `system_category` 中。
 
-## `error_code`（[syserr.errcode]）
+## `error_code` [syserr.errcode]
 
-### 概述（[syserr.errcode.overview]）
+¶1（[syserr.errcode.overview]）`error_code` 保存错误码的值，比如来自操作系统的错误码。注 1 说它是对异常报告错误的补充，给不想或不能抛异常的接口一个报告渠道。
 
-¶1：`error_code` 描述一个用来保存错误码值的对象，例如源自操作系统或其他底层 API 的错误码。注 1：`error_code` 是**对异常错误报告的补充**——它不是要取代异常，而是给"不想/不能抛异常"的接口一个报告渠道。
+它的数据只有两个说明专用的成员 `int val_;` 和 `const error_category* cat_;`，一个整数加一个指针，可以廉价地按值传递和存储。
 
-它的数据就是两个说明专用成员：`int val_;` 和 `const error_category* cat_;`——一个整数加一个指针，可以廉价地按值传递、复制、存储。
+### 构造与修改
 
-### 构造与修改（[syserr.errcode.constructors]、[syserr.errcode.modifiers]）
+| 操作 | 效果 |
+|---|---|
+| `error_code()` | 值 0，类别 `system_category()`（构造 ¶1） |
+| `error_code(int val, const error_category& cat)` | 直接保存（构造 ¶2） |
+| `template<class E> error_code(E e)` | 约束：`is_error_code_enum_v<E>`；效果：`error_code ec = make_error_code(e); assign(ec.value(), ec.category());`（构造 ¶3–¶4） |
+| `assign(val, cat)`、`operator=(E e)` | 同上（修改 ¶1–¶4） |
+| `clear()` | 值 0，类别 `system_category()`（修改 ¶5） |
 
-| 操作 | 效果 | 段落 |
-|---|---|---|
-| `error_code()` | `val_ = 0`，`cat_ = &system_category()` | 构造 ¶1 |
-| `error_code(int val, const error_category& cat)` | 直接保存 | 构造 ¶2 |
-| `template<class E> error_code(E e)` | *Constraints*：`is_error_code_enum_v<E>`；效果：`error_code ec = make_error_code(e); assign(ec.value(), ec.category());` | 构造 ¶3–¶4 |
-| `assign(val, cat)` | 后置条件 `val_ == val && cat_ == &cat` | 修改 ¶1 |
-| `operator=(E e)` | 同上的枚举转换，*Constraints* 相同 | 修改 ¶2–¶4 |
-| `clear()` | 后置条件 `value() == 0 && category() == system_category()` | 修改 ¶5 |
+枚举构造函数里的 `make_error_code(e)` 是不带限定的调用，会经实参依赖查找（[[basic.lookup.argdep]]）在枚举 `E` 所在的命名空间里找到用户提供的 `make_error_code`。这就是扩展点：为自己的枚举特化 `is_error_code_enum`，在同一命名空间提供 `make_error_code`，`error_code ec = my_errc::timeout;` 就能编译。
 
-枚举构造函数里的 `make_error_code(e)` 是**无限定**调用，通过**实参依赖查找**（[[basic.lookup.argdep]]）在枚举 `E` 的命名空间里找到用户提供的 `make_error_code`。这就是扩展点：为自己的枚举特化 `is_error_code_enum`，并在枚举所在命名空间提供 `make_error_code`，`error_code ec = my_errc::timeout;` 就能工作。
+*Constraints* 不满足时，这个构造函数不参与重载决议（[[structure.specifications]]），所以 `error_code ec = 42;` 不会匹配到模板构造函数。
 
-*Constraints* 意味着不满足时该构造函数**不参与重载决议**（[[structure.specifications]]），所以 `error_code ec = 42;` 不会意外地匹配模板构造函数。
+!!! pitfall "`errc` 是 condition 枚举，不是 code 枚举"
+    标准只特化了 `is_error_condition_enum<errc>`（[[system.error.syn#2]] 允许程序为自己的类型特化这两个模板）。所以 `std::error_condition c = std::errc::invalid_argument;` 可以编译，`std::error_code ec = std::errc::invalid_argument;` 不行，Clang 报 no viable conversion from 'std::errc' to 'std::error_code'。要得到 `error_code`，写 `std::make_error_code(std::errc::invalid_argument)`。`errc` 表示可移植的状况，用来做比较（`ec == std::errc::invalid_argument`），不是用来充当具体错误值的。
 
-### 观察者（[syserr.errcode.observers]）
+### 观察者与非成员函数
 
-- ¶1 `value()`、¶2 `category()`：返回两个成员；
-- ¶3 `default_error_condition()`：`category().default_error_condition(value())`；
-- ¶4 `message()`：`category().message(value())`——注意它**不是** `noexcept`，可能分配内存并抛 `bad_alloc`；
-- ¶5 `explicit operator bool()`：`value() != 0`。
+- 观察者 ¶1–¶2 `value()`、`category()` 返回两个成员；¶3 `default_error_condition()` 等于 `category().default_error_condition(value())`。
+- ¶4 `message()` 等于 `category().message(value())`。它不是 `noexcept` 的，可能分配内存并抛出 `bad_alloc`。
+- ¶5 `explicit operator bool()` 返回 `value() != 0`。
+- 非成员 ¶1 `make_error_code(errc e)` 返回 `error_code(static_cast<int>(e), generic_category())`。
+- 非成员 ¶2 `operator<<` 输出 `类别名:值`，例如 `system:2`，不是说明文字。
 
-!!! pitfall "“0 表示成功”是硬编码的"
-    `if (ec)` 判断的是 `value() != 0`，**与类别无关**。如果你为某个"0 表示错误"的底层库定义类别（例如 HTTP 状态码里没有 0，但某些库用 0 表示"未知错误"），就必须在映射时避开 0。整个 `<system_error>` 的约定是：值 0 在任何类别中都表示"没有错误"。
+`if (ec)` 只看值是否为 0，与类别无关。整个 `<system_error>` 约定：值 0 在任何类别里都表示没有错误。为一个用 0 表示某种错误的底层库定义类别时，映射必须避开 0。
 
-### 非成员函数（[syserr.errcode.nonmembers]）
-
-- ¶1 `make_error_code(errc e)`：返回 `error_code(static_cast<int>(e), generic_category())`；
-- ¶2 `operator<<`：等价于 `os << ec.category().name() << ':' << ec.value()`——输出 `system:2` 这样的形式，**不是**消息文本。
-
-### 格式化（[syserr.fmt]）
-
-```cpp
-template<class charT>
-struct formatter<error_code, charT> {
-  constexpr void set_debug_format();
-  constexpr typename basic_format_parse_context<charT>::iterator
-    parse(basic_format_parse_context<charT>& ctx);
-  template<class Out>
-    typename basic_format_context<Out, charT>::iterator
-      format(const error_code& ec, basic_format_context<Out, charT>& ctx) const;
-};
-```
-
-格式说明的文法是 *error-code-format-spec*：*fill-and-align*ₒₚₜ *width*ₒₚₜ `?`ₒₚₜ `s`ₒₚₜ（¶3）。`format`（¶5）的语义：
-
-- **用了 `s` 选项**：输出 `ec.message()`。¶5.1：若 `charT` 是 `char` 且普通字面量编码为 UTF-8，消息被转码为 UTF-8，非法子序列用 U+FFFD 替换；¶5.2：否则转码为**由实现定义**的编码。
-- **未用 `s`**：输出 `format("{}:{}", ec.category().name(), ec.value())`，与 `operator<<` 一致。
-- **用了 `?`**：把结果按**转义字符串**格式化（[[format.string.escaped]]）。¶2：`set_debug_format()` 使 formatter 如同解析到了 `?`——这是让 `error_code` 作为容器元素时（`format("{}", vector<error_code>{...})`）能以调试形式输出的钩子。
-
-所以 `std::format("{}", ec)` 得到 `"system:2"`，`std::format("{:s}", ec)` 得到 `"No such file or directory"`。
-
-!!! warning "实现状况"
-    这个 formatter 是 C++23 之后加入草案的。截至本文编写时，Clang 23 + libc++ 尚未提供它：`std::format("{}", std::error_code())` 报错，指出 `formatter<std::error_code, char>` 的默认构造函数被隐式删除（即没有可用的特化）。
-
-## `error_condition`（[syserr.errcondition]）
-
-¶1：`error_condition` 描述一个用来保存**标识错误状况**的值的对象。注 1：
+## `error_condition` [syserr.errcondition]
 
 !!! std
     error_condition values are portable abstractions, while error_code values are implementation specific.
 
-    `error_condition` 的值是**可移植的抽象**，而 `error_code` 的值是**实现特定的**。
+¶1 的注 1 说，`error_condition` 的值是可移植的抽象，`error_code` 的值则与实现相关。
 
-它的接口与 `error_code` 几乎平行（同样是 `val_` + `cat_`），区别只在：
+它的接口与 `error_code` 几乎一样，同样是一个值加一个类别指针。区别在于：
 
-- 默认构造（[syserr.errcondition.constructors] ¶1）与 `clear()`（modifiers ¶5）使用 **`generic_category()`**，而不是 `system_category()`；
-- 枚举构造函数的约束是 `is_error_condition_enum_v`，经 ADL 调用 `make_error_condition`（constructors ¶3–¶4，modifiers ¶2–¶4）；
-- **没有** `default_error_condition()`——它本身就是 condition；
-- observers ¶1–¶4：`value()`、`category()`、`message()`、`explicit operator bool`（`value() != 0`）；
-- nonmembers ¶1：`make_error_condition(errc e)` 返回 `error_condition(static_cast<int>(e), generic_category())`；
-- **没有** `operator<<` 和 formatter。
+- 默认构造和 `clear()` 使用 `generic_category()`（构造 ¶1、修改 ¶5），不是 `system_category()`；
+- 枚举构造函数的约束是 `is_error_condition_enum_v`，经实参依赖查找调用 `make_error_condition`（构造 ¶3–¶4）；
+- 没有 `default_error_condition()`，它本身就是 condition；
+- 非成员 ¶1 `make_error_condition(errc e)` 返回 `error_condition(static_cast<int>(e), generic_category())`；
+- 没有 `operator<<`，也没有 formatter。
 
-## 比较（[syserr.compare]）
+## 比较 [syserr.compare]
 
-这是整个设计的心脏：
+| 比较 | 返回 |
+|---|---|
+| ¶1 `error_code == error_code` | `lhs.category() == rhs.category() && lhs.value() == rhs.value()` |
+| ¶2 `error_code == error_condition` | `lhs.category().equivalent(lhs.value(), rhs) \|\| rhs.category().equivalent(lhs, rhs.value())` |
+| ¶3 `error_condition == error_condition` | 类别和值都相同 |
+| ¶4、¶5 两个 `<=>` | 先比类别（按地址），再比值 |
 
-| 比较 | 返回 | 段落 |
-|---|---|---|
-| `error_code == error_code` | `lhs.category() == rhs.category() && lhs.value() == rhs.value()` | ¶1 |
-| `error_code == error_condition` | `lhs.category().equivalent(lhs.value(), rhs) \|\| rhs.category().equivalent(lhs, rhs.value())` | ¶2 |
-| `error_condition == error_condition` | 类别与值都相同 | ¶3 |
-| `error_code <=> error_code` | 先比类别（地址序），再比值 | ¶4 |
-| `error_condition <=> error_condition` | 同上 | ¶5 |
+同类比较是精确的。`error_code(ENOENT, system_category())` 与 `error_code(ENOENT, generic_category())` 不相等，尽管在 POSIX 上它们说的是同一件事。
 
-**同类比较是精确的**：两个 `error_code` 只有在类别和值都相同时才相等。`error_code(ENOENT, system_category())` 与 `error_code(ENOENT, generic_category())` **不相等**——尽管在 POSIX 上它们表示同一件事。
+`error_code` 与 `error_condition` 的比较是语义上的：先问 code 的类别是否认为这个值属于那个状况，再问 condition 的类别是否认领这个 code，任一方回答是即相等。默认实现下第一问就是 `default_error_condition(code) == condition`，而 `system_category` 把能对应上的值映射到 `generic_category`，这就是开头例子中第一行输出 1 的原因。
 
-**跨类比较是语义的**：`error_code == error_condition` 依次询问 code 的类别"你认为这个 code 属于那个 condition 吗"，再询问 condition 的类别"你认为那个 code 属于你的这个 condition 吗"，任一方认可即相等。
+!!! note "C++20 起概要里只剩三个 `==`"
+    C++17 及以前，概要里还有 `error_condition == error_code` 和全部 `!=`、`<`。C++20 起，`!=` 和反向的 `==` 由重写候选自动提供（[[over.match.oper]]），`<` 等由 `<=>` 提供。`error_code` 与 `error_condition` 之间没有 `<=>`：两者之间是属于关系，不在同一个值域里排序。
 
-默认实现下，第一问是 `code类别.default_error_condition(code) == condition`。对于 `system_category`，`default_error_condition` 把能对应上的值映射到 `generic_category`，于是：
+由此得到 `<system_error>` 的用法：
 
-```cpp run title="code-vs-condition.cpp" ok
-#include <cerrno>
-#include <cstdio>
-#include <iostream>
-#include <system_error>
-
-int main() {
-    std::error_code ec(ENOENT, std::system_category());                       // 操作系统报告的
-    std::error_code gc = std::make_error_code(std::errc::no_such_file_or_directory);
-
-    std::printf("%d\n", ec == std::errc::no_such_file_or_directory);   // 1：code vs condition，语义比较
-    std::printf("%d\n", std::errc::no_such_file_or_directory == ec);   // 1：C++20 重写候选
-    std::printf("%d\n", ec == gc);                                     // 0：code vs code，精确比较
-    std::cout << ec << " | " << ec.message() << " | " << gc << '\n';   // system:2 | No such file or directory | generic:2
-
-    auto cond = ec.default_error_condition();
-    std::printf("%s:%d\n", cond.category().name(), cond.value());      // generic:2
-    std::error_code big(100000, std::system_category());               // 对应不上任何 errno
-    auto c2 = big.default_error_condition();
-    std::printf("%s:%d\n", c2.category().name(), c2.value());          // system:100000
-}
-```
-
-（`ec == std::errc::...` 中，`errc` 经 `error_condition` 的枚举构造函数隐式转换，选中 `error_code == error_condition`。）
-
-!!! note "C++20 之后只剩三个 `==`"
-    C++17 及以前，概要中还有 `error_condition == error_code` 以及全部 `!=`、`<`。C++20 起，`!=` 与反向的 `==` 都由重写候选（[[over.match.oper]]）自动提供，`<` 等由 `<=>` 提供，所以概要只保留了三个 `==` 和两个 `<=>`。注意 `error_code` 与 `error_condition` 之间**没有** `<=>`——跨类的"等价"不是同一个值域里的比较，没有序可言。libc++ 在 `-std=c++17` 及以下仍保留旧的运算符。
-
-### 最佳实践：用 code 存储，用 condition 比较
-
-把以上规则合起来就是 `<system_error>` 的使用纪律：
-
-- **传递和存储**用 `error_code`：它保留了最精确的信息（原始值和来源），日志里能打印出 `system:10054` 这样可供排查的东西；
-- **判断"是不是某种错误"**时，与 `error_condition`（通常是 `errc` 枚举项）比较：`if (ec == std::errc::timed_out)`。这在 POSIX 和 Windows 上都能工作；
-- **不要**与 `make_error_code(errc::...)` 比较——那是 code 与 code 的精确比较，只有当对方恰好也在 `generic_category` 中时才相等。
+- 传递和存储用 `error_code`。它保留了原始值和来源，日志里能打印出 `system:10054` 这样可供排查的信息。
+- 判断是哪种错误时，与 `error_condition` 比较，通常就是 `errc` 的枚举项：`if (ec == std::errc::timed_out)`。这在 POSIX 和 Windows 上都能工作。
+- 不要与 `make_error_code(errc::...)` 比较。那是两个 `error_code` 的精确比较，只有对方恰好也在 `generic_category` 里时才相等。
 
 ## 定义自己的错误类别
 
-一个完整的例子：某 HTTP 客户端库有自己的错误码（code），应用层关心"能否重试"（condition）。
+某个 HTTP 客户端库有自己的错误码，应用层关心的是能不能重试：
 
 ```cpp run title="custom-category.cpp" ok
 #include <cstdio>
 #include <string>
 #include <system_error>
 
-// 1) 库自己的错误码：具体、实现相关
+// 库自己的错误码：具体、与实现相关
 enum class http_errc { ok = 0, not_found = 404, timeout = 408, server_down = 503 };
-// 2) 应用关心的错误状况：抽象、可移植
+// 应用关心的错误状况：抽象、可移植
 enum class app_cond { ok = 0, retryable = 1, permanent = 2 };
 
 template<> struct std::is_error_code_enum<http_errc> : std::true_type {};
@@ -287,7 +221,7 @@ std::error_condition make_error_condition(app_cond c) { return {static_cast<int>
 struct http_category_t final : std::error_category {
   const char* name() const noexcept override { return "http"; }
   std::string message(int c) const override { return "HTTP " + std::to_string(c); }
-  // code → condition 的映射写在 code 一侧
+  // code 到 condition 的映射写在 code 一侧
   bool equivalent(int code, const std::error_condition& cond) const noexcept override {
     if (cond == app_cond::retryable)  return code == 408 || code == 503;
     if (cond == app_cond::permanent)  return code == 404;
@@ -299,7 +233,7 @@ const std::error_category& http_category() { static const http_category_t c; ret
 std::error_code make_error_code(http_errc e) { return {static_cast<int>(e), http_category()}; }
 
 int main() {
-  std::error_code ec = http_errc::timeout;          // 经 ADL 找到 make_error_code
+  std::error_code ec = http_errc::timeout;          // 经实参依赖查找找到 make_error_code
   std::printf("%s\n", ec.message().c_str());                      // HTTP 408
   std::printf("retryable? %d\n", ec == app_cond::retryable);      // 1
   std::printf("permanent? %d\n", ec == app_cond::permanent);      // 0
@@ -308,22 +242,15 @@ int main() {
 }
 ```
 
-要点：
+几点说明：
 
-- 类别对象用函数局部静态变量实现单例（C++11 起线程安全初始化）；也可以用 `constexpr` 构造的全局对象（`error_category` 的默认构造函数是 `constexpr`）。
-- `make_error_code`/`make_error_condition` 放在**枚举所在的命名空间**，供 ADL 找到。
-- 映射逻辑可以放在 code 的类别（重写 `equivalent(int, const error_condition&)` 或 `default_error_condition`），也可以放在 condition 的类别（重写 `equivalent(const error_code&, int)`）。前者适合"库知道自己的错误属于哪些通用状况"；后者适合"应用定义的状况想要认领来自若干个库的错误码"——无需修改那些库。
+- 类别对象用函数内的静态变量实现单例，C++11 起它的初始化是线程安全的。也可以用常量初始化的全局对象。
+- `make_error_code` 和 `make_error_condition` 要放在枚举所在的命名空间，实参依赖查找才能找到。
+- 映射可以写在 code 的类别里（重写 `equivalent(int, const error_condition&)` 或 `default_error_condition`），也可以写在 condition 的类别里（重写 `equivalent(const error_code&, int)`）。前者适合库知道自己的错误属于哪些通用状况；后者适合应用定义一个状况去认领几个库的错误码，不必修改那些库。
 
-## 哈希（[syserr.hash]）
+## `system_error` [syserr.syserr]
 
-¶1：`hash<error_code>` 与 `hash<error_condition>` 是**启用的**（[[unord.hash]]），可以作为无序容器的键。
-
-!!! impl "libc++ 的哈希只看值"
-    libc++ 中两个特化的 `operator()` 都只是 `static_cast<size_t>(value())`，**不混入类别**。于是 `error_code(2, system_category())` 与 `error_code(2, generic_category())` 哈希值相同而不相等——这是允许的（哈希只需相等则同值），但大量来自不同类别、值相同的错误码会落进同一个桶。
-
-## `system_error`（[syserr.syserr]）
-
-¶1：`system_error` 描述一个**携带关联错误码**的异常对象，用来报告这样的错误状况——它们通常源自操作系统或其他底层 API。¶2 注 1：如果错误表示内存不足，鼓励实现抛 `bad_alloc` 而不是 `system_error`。
+¶1 `system_error` 是携带一个错误码的异常，通常用来报告来自操作系统的错误。¶2 的注 1 建议，表示内存不足的错误应当抛 `bad_alloc` 而不是 `system_error`。
 
 ```cpp
 class system_error : public runtime_error {
@@ -339,13 +266,9 @@ public:
 };
 ```
 
-[syserr.syserr.members]：
+[syserr.syserr.members] ¶1–¶6 规定六个构造函数的后置条件：`code()` 等于给定的错误码；带 `what_arg` 的版本还要求 `what()` 包含 `what_arg`，但不必等于它。¶8 说 `what()` 返回一个融合了构造实参的字符串，注 1 举例说它可以是 `what_arg + ": " + code.message()`。
 
-- ¶1–¶6：六个构造函数的后置条件：`code() == ec`（或 `error_code(ev, ecat)`）；带 `what_arg` 的版本还要求 `string_view(what()).find(what_arg) != npos`——**`what()` 包含 `what_arg`，但不必等于它**；
-- ¶7：`code()` 返回构造时给出的错误码；
-- ¶8：`what()` 返回一个融合了构造实参的 NTBS。注 1：返回的字符串**可能**是 `what_arg + ": " + code.message()`。
-
-注意与 [[std.exceptions]] 中九个类的区别：那些类要求 `what()` 与 `what_arg` **相等**，`system_error` 只要求**包含**，以便实现把错误码的消息追加进去。
+[[std.exceptions]] 里的 `runtime_error` 等类要求 `what()` 与 `what_arg` 相等，`system_error` 只要求包含，以便实现把错误码的说明文字附加上去。
 
 ```cpp run title="system-error.cpp" ok
 #include <cerrno>
@@ -356,7 +279,7 @@ public:
 int main() {
     try {
         throw std::system_error(ENOENT, std::system_category(), "open config");
-    } catch (const std::runtime_error& e) {      // system_error 属于 runtime_error 分支
+    } catch (const std::runtime_error& e) {      // system_error 派生自 runtime_error
         std::printf("what(): %s\n", e.what());   // libc++：open config: No such file or directory
         if (auto* se = dynamic_cast<const std::system_error*>(&e))
             std::printf("is ENOENT: %d\n", se->code() == std::errc::no_such_file_or_directory);
@@ -364,49 +287,73 @@ int main() {
 }
 ```
 
-`system_error` 的派生类包括 `ios_base::failure` 和 `filesystem::filesystem_error`；`std::thread`、`std::mutex` 等在系统资源不可用时也抛 `system_error`。
+`ios_base::failure` 和 `filesystem::filesystem_error` 都派生自 `system_error`；`std::thread`、`std::mutex` 等在系统资源不可用时也抛 `system_error`。
 
-## 实现细节（libc++）
+## 格式化与哈希
 
-!!! impl
-    - `<__system_error/error_category.h>`：`error_category` 的默认构造函数是 `= default` 且 `constexpr`（C++14 起）；`operator==` 就是 `this == &rhs`；`operator<=>` 用 `compare_three_way()(this, std::addressof(rhs))`。
-    - `generic_category()`/`system_category()` 在共享库 `libc++.dylib` 中定义，返回库内的单例，因此在同一进程内的所有模块中地址唯一。
-    - 本机 macOS 上，`system_category().default_error_condition(ev)` 对 POSIX 范围内的值映射到 `generic_category`，超出范围（如 100000）则保留在 `system_category`——与标准 ¶4 的三分支一致。
-    - `system_error::what()` 的格式是 `what_arg + ": " + message()`，与注 1 给出的示例一致。
+### formatter [syserr.fmt]
 
-## 陷阱
+C++23 之后的草案为 `error_code` 加了 `formatter<error_code, charT>`。格式说明是 *fill-and-align*ₒₚₜ *width*ₒₚₜ `?`ₒₚₜ `s`ₒₚₜ（¶3）。按 ¶5：
 
-!!! pitfall "多个类别对象 = 比较失效"
-    类别的身份是地址。把类别对象定义在头文件里的 `inline` 函数局部静态变量中，在 Windows DLL 或带 `-fvisibility=hidden` 的共享库之间，可能每个模块各有一份——于是来自两个模块的 `error_code` 即使"同类别同值"也比较为不等，`equivalent` 映射也会失效。类别单例应当在一个共享库中**定义且导出**。
+- 不带 `s` 时输出 `类别名:值`，与 `operator<<` 一致，所以 `std::format("{}", ec)` 得到 `system:2`；
+- 带 `s` 时输出 `ec.message()`，`std::format("{:s}", ec)` 得到 `No such file or directory`。如果 `charT` 是 `char` 且普通字面量编码是 UTF-8，消息会转码为 UTF-8，非法的字节序列替换为 U+FFFD；否则转码为由实现定义的编码；
+- 带 `?` 时按转义字符串输出（[[format.string.escaped]]）。¶2 的 `set_debug_format()` 起同样的作用，`error_code` 作为容器元素格式化时会用到它。
 
-!!! pitfall "`errno` 值应该放进哪个类别"
-    `errno` 的值属于 `generic_category`（这是 `errc`/`make_error_code` 使用的类别）；操作系统 API 直接返回的原生错误码属于 `system_category`。在 POSIX 上二者数值相同，混用通常"碰巧能用"，但在 Windows 上 `errno` 值和 Win32 错误码是两套完全不同的编号。
+截至写作时，本机 Clang 23 + libc++ 还没有这个特化：`std::format("{}", std::error_code())` 报错，说 `formatter<std::error_code, char>` 的默认构造函数被隐式删除。
 
-!!! pitfall "`message()` 会抛异常"
-    `message()` 返回 `std::string`，可能抛 `bad_alloc`；某些实现中还会调用 `strerror` 一类的函数。在 `noexcept` 析构函数或错误恢复路径中调用它要小心。
+### 哈希 [syserr.hash]
+
+¶1 `hash<error_code>` 与 `hash<error_condition>` 是启用的（[[unord.hash]]），可以作为无序容器的键。
+
+!!! impl "libc++ 的哈希只看值"
+    libc++ 中这两个特化只返回 `static_cast<size_t>(value())`，不混入类别。于是 `error_code(2, system_category())` 与 `error_code(2, generic_category())` 哈希值相同而不相等。这是允许的，哈希只要求相等的对象哈希值相同，但值相同、类别不同的大量错误码会落进同一个桶。
+
+## 常见误解
+
+!!! pitfall "每个共享库各有一份类别对象"
+    类别的身份是地址。如果类别对象定义在头文件的 inline 函数里，Windows DLL 之间、或者用 `-fvisibility=hidden` 编译的共享库之间可能各有一份。来自两个模块、类别和值都相同的 `error_code` 会比较为不等，`equivalent` 映射也会失效。类别单例应当在一个共享库中定义并导出。
+
+!!! pitfall "把 errno 值放进 system_category"
+    `errno` 的值属于 `generic_category`，操作系统 API 直接返回的原生错误码属于 `system_category`。POSIX 上两者数值相同，混用通常碰巧能用；Windows 上 `errno` 值和 Win32 错误码是两套不同的编号。
+
+!!! pitfall "以为 `message()` 不会抛异常"
+    `message()` 返回 `std::string`，可能抛出 `bad_alloc`。在 `noexcept` 的析构函数或错误恢复路径里调用它要小心。
+
+<details class="fine" markdown="1"><summary>其余条文</summary>
+
+[syserr.general] ¶2：本条款的组件不改变 `errno` 的值；*Recommended practice* 建议实现也不改动其他库的错误状态（例如 Windows 的 `GetLastError()`）。典型用法是系统调用失败后读 `errno` 再构造 `error_code`，如果构造过程改写了 `errno`，就会破坏调用者随后的检查。
+
+[system.error.syn] ¶1：`errc` 每个枚举项的值与对应的 `<cerrno>` 宏相同；`<system_error>` 是否同时提供这些宏是未指定的，要用 `ENOENT` 就自己包含 `<cerrno>`。`errc` 本身是 freestanding 的。
+
+[syserr.errcat.virtuals] ¶1 要求 `name()` 返回普通字面量编码的字符串；¶5 要求 `message(ev)` 返回执行字符集中的多字节字符串。
+
+</details>
 
 ## 思考题
 
-!!! question "思考题"
-    1. 两个 `error_condition`：`std::errc::timed_out` 与 `app_cond::retryable`（上例）。一个 `error_code` 可能同时等于两者吗？这与"`==` 是等价关系"矛盾吗？
-    2. 为什么 `error_code` 的默认类别是 `system_category()`，而 `error_condition` 的默认类别是 `generic_category()`？
-    3. 若 `cat_a.equivalent(code, cond)` 返回 `true` 而 `cat_b.equivalent(ec, cond_value)` 返回 `false`，`ec == cond` 的结果是什么？
+!!! question "思考题 1"
+    `std::errc::timed_out` 和上例的 `app_cond::retryable` 是两个不同的 `error_condition`。一个 `error_code` 能同时等于两者吗？这与 `==` 应当是等价关系矛盾吗？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-1. 可能，上例中 `http_errc::timeout` 就同时等于二者。这并不矛盾：`error_code == error_condition` 是两个**不同类型**之间的"属于"关系（类似元素与集合），不是同一类型上的等价关系。`error_code` 与 `error_condition` 之间也没有公共类型，不满足 `equality_comparable_with`（[[concepts.compare]]），标准也从未声称它满足。
-2. 默认构造的对象表示"无错误"（值为 0）。`error_code` 用来存放**实际**发生的错误，最常见的来源是操作系统，故默认为 `system_category`；`error_condition` 用来表示**可移植的状况**，可移植状况的标准词汇是 `errc`，它在 `generic_category` 中解释，故默认为 `generic_category`。两者值为 0 时都"不是错误"，类别差异基本只在打印时可见。
-3. `true`。¶2 的比较是两次询问的**逻辑或**：任一方类别认可即视为等价。
+能，上例的 `http_errc::timeout` 就同时等于两者。这不矛盾：`error_code == error_condition` 是两个不同类型之间的属于关系，类似元素与集合，不是同一类型上的等价关系。`error_code` 与 `error_condition` 没有公共类型，不满足 `equality_comparable_with`（[[concepts.compare]]），标准也没有声称它满足。
 </details>
 
-## 小结
+!!! question "思考题 2"
+    为什么 `error_code` 的默认类别是 `system_category()`，而 `error_condition` 的默认类别是 `generic_category()`？
 
-!!! summary
-    - 错误 = （`int` 值，类别指针）；类别是不可复制的单例，**身份即地址**。
-    - `error_code`：精确、平台相关，用于存储与传递；默认 `(0, system_category())`；`if (ec)` 即 `value() != 0`。
-    - `error_condition`：抽象、可移植，用于判断"是哪种错误"；默认 `(0, generic_category())`；`errc` 是 condition 枚举。
-    - 比较：code==code、cond==cond 精确；code==cond 经两方类别的 `equivalent` 语义判断。**用 code 存储，用 condition 比较。**
-    - `generic_category` 解释 POSIX `errno` 值；`system_category` 解释操作系统原生码，并把能对应的映射到 generic。
-    - 自定义：特化 `is_error_code_enum`/`is_error_condition_enum`，在枚举的命名空间提供 `make_error_code`/`make_error_condition`，派生 `error_category` 并按需重写 `equivalent`/`default_error_condition`。
-    - `system_error` 派生自 `runtime_error`，`what()` **包含**（不必等于）`what_arg`。
+<details markdown="1">
+<summary>答案</summary>
+
+默认构造的对象值为 0，表示没有错误。`error_code` 存放实际发生的错误，最常见的来源是操作系统，所以默认用 `system_category`。`error_condition` 表示可移植的状况，可移植状况的标准词汇是 `errc`，它在 `generic_category` 中解释，所以默认用 `generic_category`。值为 0 时两者都不是错误，类别的差别基本只在打印时看得到。
+</details>
+
+!!! question "思考题 3"
+    如果 code 的类别认为 `ec` 属于 `cond`，而 `cond` 的类别不认为如此，`ec == cond` 的结果是什么？
+
+<details markdown="1">
+<summary>答案</summary>
+
+`true`。[[syserr.compare#2]] 的比较是两次询问的逻辑或，任一方认可即相等。
+</details>

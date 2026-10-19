@@ -1,47 +1,72 @@
 ---
 title: 栈踪迹
-summary: C++23 的 <stacktrace>：调用序列（invocation sequence）与"近似表示"的定义；stacktrace_entry（可空、regular、只读查询描述/文件/行号）、basic_stacktrace（只读的、分配器感知的序列容器，current() 带 skip/max_depth 且 noexcept）、比较、to_string 与格式化、哈希；为什么栈踪迹只能是"近似"的，以及实现支持现状（libc++ 尚未提供）。
+summary: C++23 的 <stacktrace> 在运行时捕获当前线程的调用栈：栈踪迹只是调用序列的近似；stacktrace_entry 是轻量的条目句柄，basic_stacktrace 是只读的序列容器，current() 失败时返回空对象而不抛异常。
 status: draft
 covers: *
 since: c++23
 papers: P0881R7, P2693R1
 related: diagnostics, intro.execution, cpp.predefined, container.rev.reqmts, container.alloc.reqmts, sequence.reqmts, format.string.std, unord.hash
 tags: 标准库, stacktrace, 调试, C++23
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-{{c++23}} 程序崩溃或出错时，"错误发生在哪里、是怎么走到这里的"往往比错误本身更有价值。在 C++23 之前，获取调用栈只能依赖平台 API（`backtrace()`、`CaptureStackBackTrace`）或第三方库（Boost.Stacktrace、libunwind、cpptrace）。[[P0881R7]] 把这项能力标准化为 `<stacktrace>`，[[P2693R1]] 又为它加上了 `std::format` 支持。
+!!! tldr
+    - `std::stacktrace::current()` 捕获当前线程的调用栈。它是 `noexcept` 的，失败时返回一个空对象。
+    - 标准只把栈踪迹定义为调用序列的近似表示：内联、尾调用、缺少调试信息都可能让条目缺失，这些都是符合标准的。
+    - `stacktrace_entry` 是一个轻量的句柄，复制和比较都很便宜；查询函数在拿不到信息时返回空字符串或 0，只在内存不足时抛异常。
+    - `basic_stacktrace` 是只读的、可指定分配器的序列容器；它的 `<=>` 先比长度，再逐个比较条目。
+    - 本机 libc++ 还没有实现 `<stacktrace>`；libstdc++ 和 MSVC STL 已经提供。
 
-## 调用序列与"近似"（[stacktrace.general]）
+{{c++23}} 程序出错时，怎样走到出错位置的往往和错误本身一样有用。C++23 之前，获取调用栈要依赖平台 API（`backtrace()`、`CaptureStackBackTrace`）或第三方库（Boost.Stacktrace、cpptrace）。[[P0881R7]] 把它标准化为 `<stacktrace>`，[[P2693R1]] 又加上了 `std::format` 支持。
 
-¶1：[stacktrace] 描述程序可用来**保存当前执行线程的栈踪迹**、并在运行时查询其信息的组件。
+## 一个例子
 
-¶2 给出了一个精确的语言层面定义：
+```cpp run title="stacktrace.cpp" cc=gsnapshot flags="-std=c++23 -g -lstdc++exp"
+#include <cstdlib>
+#include <print>
+#include <stacktrace>
+
+[[noreturn]] void fail(const char* msg) {
+    auto st = std::stacktrace::current(1);        // 跳过 fail 自身
+    std::println(stderr, "fatal: {}\n{}", msg, st);
+    for (const auto& e : st)
+        if (!e.source_file().empty())
+            std::println(stderr, "  at {}:{}", e.source_file(), e.source_line());
+    std::abort();
+}
+
+void parse(int x) { if (x < 0) fail("negative input"); }
+
+int main() { parse(-1); }
+```
+
+`current(1)` 捕获调用栈并跳过最内层的一个条目，也就是 `fail` 自己。整个栈踪迹可以直接交给 `println` 输出，也可以逐个遍历条目，查询源文件和行号。
+
+本机 Clang 23 + libc++ 不提供 `<stacktrace>`（`#include` 报 file not found，`<version>` 里的 `__cpp_lib_stacktrace` 被注释掉），这个例子没有在本机验证。godbolt 按钮用 GCC 打开它；libstdc++ 的实现需要额外链接实验性支持库，当前版本是 `-lstdc++exp`。
+
+## 调用序列与栈踪迹 [stacktrace.general]
+
+¶1 本条款的组件让程序保存当前执行线程的栈踪迹，并在运行时查询其中的信息。
+
+¶2 先在抽象机层面定义要表示的东西：
 
 !!! std
     The *invocation sequence* of the current evaluation x₀ in the current thread of execution is a sequence (x₀, …, xₙ) of evaluations such that, for i ≥ 0, xᵢ is within the function invocation xᵢ₊₁.
 
-    当前线程中当前求值 x₀ 的**调用序列**（[[g:invocation-sequence]]）是一个求值序列 (x₀, …, xₙ)，其中每个 xᵢ 都位于函数调用 xᵢ₊₁ 之内。
+当前求值 x₀ 的**调用序列**（invocation sequence，[[g:invocation-sequence]]）是一串求值 (x₀, …, xₙ)，其中每个 xᵢ 都发生在函数调用 xᵢ₊₁ 之内（[[intro.execution]]）。换句话说，从当前正在做的事出发，沿着被谁调用一路回溯，直到线程的初始函数。这个定义只涉及抽象机，与栈帧、寄存器无关。
 
-"within the function invocation"指的是 [[intro.execution]] 中的概念：一个求值发生在某次函数调用"之内"，即它是该函数体执行的一部分。所以调用序列就是从"当前正在做的事"沿着"我是被谁调用的"一路回溯到线程的初始函数——这是一个**抽象机**层面的概念，与栈帧、寄存器无关。
+¶3 **栈踪迹**（stacktrace）是调用序列的近似表示，由若干**栈踪迹条目**（stacktrace entry，[[g:stacktrace-entry]]）组成，每个条目代表其中的一个求值。
 
-¶3 随即承认现实：
+只能是近似，因为优化后的机器码与抽象机的调用序列并不一一对应：
 
-!!! std
-    A *stacktrace* is an approximate representation of an invocation sequence and consists of stacktrace entries.
+- 被内联的函数在机器码里没有自己的栈帧，可能从栈踪迹中消失，有的实现能借助调试信息恢复内联帧；
+- `return g();` 经尾调用优化变成跳转后，调用者的栈帧被 `g` 的栈帧取代；
+- 省略了帧指针或没有调试信息时，回溯可能不完整，源文件和行号也拿不到；
+- 在信号处理函数里或栈已经损坏时，回溯本身可能失败。
 
-    **栈踪迹**是调用序列的一个**近似表示**，由若干**栈踪迹条目**（[[g:stacktrace-entry]]，*stacktrace entry*）组成。一个条目代表栈踪迹中的一个求值。
+用了近似这个词，标准就不必为这些情形作保证，栈踪迹的质量交给实现。
 
-为什么只能是近似？因为编译器优化会让抽象机的调用序列与机器上真实存在的栈帧不一一对应：
-
-- **内联**：被内联的函数在机器码中没有自己的栈帧，可能从栈踪迹中消失（某些实现能借助调试信息恢复内联帧）；
-- **尾调用优化**：`return g();` 被编译成跳转后，调用者的帧被 `g` 的帧取代；
-- **省略帧指针**、**没有调试信息**：栈回溯可能不完整，源文件与行号可能拿不到；
-- 在信号处理函数、栈已损坏等场合，回溯本身可能失败。
-
-"近似"一词让标准不必对这些情形作任何保证，把质量问题交给实现。
-
-## 头文件概要（[stacktrace.syn]）
+## 头文件概要 [stacktrace.syn]
 
 ```cpp
 namespace std {
@@ -51,15 +76,13 @@ namespace std {
   namespace pmr {
     using stacktrace = basic_stacktrace<polymorphic_allocator<stacktrace_entry>>;
   }
-  // swap、to_string、operator<<、formatter、hash 的声明……
+  // 以及 swap、to_string、operator<<、formatter、hash
 }
 ```
 
-`basic_stacktrace` 是分配器感知的：捕获栈踪迹需要分配内存来存放条目，在内存受限或需要避免全局堆的场合（例如在崩溃处理路径上），可以用 `pmr::stacktrace` 配合预先准备好的单调缓冲区。
+捕获栈踪迹需要分配内存存放条目，所以 `basic_stacktrace` 可以指定分配器。在需要避开全局堆的场合，例如崩溃处理路径上，可以用 `pmr::stacktrace` 配合预先准备好的缓冲区。
 
-## `stacktrace_entry`（[stacktrace.entry]）
-
-### 概述（[stacktrace.entry.overview]）
+## `stacktrace_entry` [stacktrace.entry]
 
 ```cpp
 class stacktrace_entry {
@@ -83,48 +106,37 @@ public:
 };
 ```
 
-¶1：`stacktrace_entry` 对象要么为**空**，要么代表一个栈踪迹条目并提供查询其信息的操作。它建模 `regular`（[[concepts.object]]）和 `three_way_comparable<strong_ordering>`（[[cmp.concept]]）。
+¶1（[stacktrace.entry.overview]）`stacktrace_entry` 对象要么为空，要么代表一个栈踪迹条目。它满足 `regular`（[[concepts.object]]）和 `three_way_comparable<strong_ordering>`（[[cmp.concept]]）。
 
-设计意图：条目本身应当是**轻量的值**——典型实现就是一个指令地址（`native_handle_type` 通常是 `uintptr_t` 一类的整数）。复制、比较都廉价且 `noexcept`；昂贵的工作（符号化、查找调试信息）被推迟到查询函数中，按需进行。
+条目被设计成轻量的值，典型实现里就是一个指令地址。复制和比较都很便宜且不抛异常；把地址翻译成函数名、查找调试信息这类昂贵的工作推迟到查询函数里按需进行。
 
-### 构造与观察者（[stacktrace.entry.cons]、[stacktrace.entry.obs]）
+### 构造、观察与比较
 
-- cons ¶1：默认构造函数的后置条件是 `*this` 为空；
-- obs ¶1：`native_handle()` 的语义**由实现定义**；¶2：对未改变的条目，连续调用返回相同值；
-- obs ¶3：`operator bool` 当且仅当 `*this` 为空时返回 `false`。
+- [stacktrace.entry.cons] ¶1：默认构造得到空条目。
+- [stacktrace.entry.obs] ¶1–¶2：`native_handle()` 的语义由实现定义；对没有改动过的条目，多次调用返回相同的值。¶3：`operator bool` 在且仅在条目为空时返回 `false`。
+- [stacktrace.entry.cmp] ¶1：`x == y` 当且仅当两者代表同一个条目，或者都为空。`<=>` 只规定了返回 `strong_ordering`，顺序由实现决定。
 
-### 查询（[stacktrace.entry.query]）
+### 查询 [stacktrace.entry.query]
 
-¶1 注 1：所有查询函数都把**内存分配错误以外**的错误视为"没有可用信息"，在那种情况下不抛异常。
+| 函数 | 返回 |
+|---|---|
+| ¶2 `description()` | 对该求值的描述（通常是函数名），或空字符串 |
+| ¶4 `source_file()` | 在词法上包含该求值的源文件的假定名称或实际名称（[[cpp.predefined]]），或空字符串 |
+| ¶6 `source_line()` | 0，或一个从 1 开始、与该求值相关的行号 |
 
-| 函数 | 返回 | 段落 |
-|---|---|---|
-| `description()` | 对该求值的描述（通常是函数名，可能带偏移），或空字符串 | ¶2–¶3 |
-| `source_file()` | 词法上包含该求值的源文件的**假定名或实际名**（[[cpp.predefined]]），或空字符串 | ¶4–¶5 |
-| `source_line()` | 0，或一个从 1 开始的、与该求值词法相关的行号 | ¶6–¶7 |
+¶1 的注 1 说明，查询函数把内存分配错误以外的所有错误都当作没有可用信息，这种情况下不抛异常。¶3、¶5、¶7 规定它们只在内部数据结构或结果字符串无法分配时抛出 `bad_alloc`。
 
-三个函数都可能抛 `bad_alloc`（内部数据结构或结果字符串无法分配）。
+程序没有带调试信息编译、符号被剥离、条目落在没有符号的系统库里，都会导致没有信息。所以 `source_file()` 返回空字符串是正常结果，不是错误。
 
-¶6 的一个细节：如果 `source_file()` 返回的是**假定**名称（受 `#line` 指令影响，[[cpp.line]]），那么 `source_line()` 返回假定行号；如果返回的是实际名称，就返回实际行号——二者必须一致。
+¶6 还要求文件名和行号一致：如果 `source_file()` 返回的是受 `#line` 指令（[[cpp.line]]）影响的假定名称，`source_line()` 也返回假定行号；返回实际名称时就返回实际行号。
 
-"没有信息"的典型原因：程序没有用调试信息编译、符号被剥离、条目落在没有符号的系统库里。所以 `source_file()` 返回空字符串是完全正常的结果，不是错误。
+## `basic_stacktrace` [stacktrace.basic]
 
-### 比较（[stacktrace.entry.cmp]）
+`basic_stacktrace` 内部只有一个说明专用的成员 `vector<value_type, allocator_type> frames_;`。它的 `iterator` 就是 `const_iterator`，内容不能修改。
 
-¶1：`x == y` 当且仅当 `x` 与 `y` 代表**同一个**栈踪迹条目，或二者都为空。`<=>` 只规定了返回 `strong_ordering`，具体顺序由实现决定（通常按地址）。
+¶1（[stacktrace.basic.overview]）它满足可逆容器（[[container.rev.reqmts]]）、分配器感知容器（[[container.alloc.reqmts]]）和序列容器（[[sequence.reqmts]]）的要求，只有两处例外：¶1.1 只支持移动、赋值、交换，以及 const 序列容器上可用的操作，所以没有 `push_back`、`erase`；¶1.2 比较函数的语义与容器要求的不同，见下文。
 
-## `basic_stacktrace`（[stacktrace.basic]）
-
-### 概述（[stacktrace.basic.overview]）
-
-`basic_stacktrace` 是一个**只读的序列**：说明专用成员是 `vector<value_type, allocator_type> frames_;`，迭代器都是 const 的（`iterator` 就是 `const_iterator`）。
-
-¶1：它满足可逆容器（[[container.rev.reqmts]]）、分配器感知容器（[[container.alloc.reqmts]]）和序列容器（[[sequence.reqmts]]）的要求，除了
-
-- ¶1.1：只支持移动、赋值、交换，以及为 **const 限定的**序列容器定义的操作（不能 `push_back`、`erase`……）；
-- ¶1.2：比较函数的语义与容器要求的不同（见下文）。
-
-### 捕获：`current()`（[stacktrace.basic.cons]）
+### 捕获：`current()` [stacktrace.basic.cons]
 
 ```cpp
 static basic_stacktrace current(const allocator_type& alloc = allocator_type()) noexcept;
@@ -133,100 +145,80 @@ static basic_stacktrace current(size_type skip, size_type max_depth,
                                 const allocator_type& alloc = allocator_type()) noexcept;
 ```
 
-- ¶1：返回一个 `frames_` 存有当前线程中当前求值的栈踪迹的对象；**若 `frames_` 的初始化失败，返回空对象**。注 1：若成功，`frames_.front()` 近似代表当前求值，`frames_.back()` 近似代表当前线程的初始函数。
-- ¶2–¶3：`current(skip)`：如同先取得完整的 `t = current(alloc)`，然后从 `t.begin() + min(n, skip)` 到 `t.end()` 初始化 `frames_`——跳过最内层的 `skip` 个条目（通常用来去掉日志/错误处理包装函数自身）。
-- ¶4–¶6：`current(skip, max_depth)`：再截取至多 `max_depth` 个条目。¶5 是一个**强化的前置条件**（*Hardened preconditions*）：`skip <= skip + max_depth` 为真——即二者相加不溢出。在强化实现（[[g:hardened-implementation]]）中违反它是契约违反。
+¶1 `current()` 返回保存了当前线程当前求值的栈踪迹的对象；如果 `frames_` 初始化失败，返回空对象。注 1 说，成功时 `frames_.front()` 大致代表当前求值，`frames_.back()` 大致代表线程的初始函数。
 
-**为什么 `current()` 是 `noexcept`？** 栈踪迹最常用于错误处理路径：在抛异常前、在断言失败时、在终止处理函数里。如果获取栈踪迹本身可能抛异常，在这些场合使用它就很危险。所以标准规定失败时返回空对象而不是抛出——调用者用 `empty()` 检查即可。
+¶2–¶3 `current(skip)` 如同先取得完整的栈踪迹 `t`，再用 `t.begin() + min(n, skip)` 到 `t.end()` 初始化 `frames_`，即跳过最内层的 `skip` 个条目。常用来去掉日志或错误处理函数自身。
 
-"如同先取得完整的栈踪迹"（as-if）只描述结果；实现可以（也应当）在回溯时直接跳过前 `skip` 帧、在 `max_depth` 帧后停止，而不是先回溯整个栈。
+¶4–¶6 `current(skip, max_depth)` 再在其后至多保留 `max_depth` 个条目。¶5 是一条加固前置条件（*Hardened preconditions*）：`skip <= skip + max_depth`，即两者相加不能回绕。在加固实现（[[g:hardened-implementation]]）中违反它是契约违反，否则是未定义行为。
 
-其余构造与赋值（¶7–¶10）：默认构造与分配器构造得到空对象；复制、带分配器的移动、赋值的规格见概述，¶10 允许实现通过"分配失败时保证 `empty()` 为真"来**加强**这些函数的异常规格（[[res.on.exception.handling]]）。
+如同先取得完整栈踪迹只描述结果。实现可以在回溯时直接跳过前 `skip` 个帧，取够 `max_depth` 个就停下。
 
-### 观察者（[stacktrace.basic.obs]）
+`current()` 是 `noexcept` 的，因为栈踪迹最常用在错误处理路径上：抛异常之前、断言失败时、终止处理函数里。在这些地方，获取栈踪迹本身再抛异常会很危险，所以标准规定失败时返回空对象，调用者用 `empty()` 检查即可。
 
-- ¶1：`const_iterator` 建模 `random_access_iterator` 并满足 *Cpp17RandomAccessIterator*；
-- ¶2–¶9：`get_allocator`、`begin`/`end`/`rbegin`/`rend` 及其 `c` 版本、`empty`、`size`、`max_size` 都转发给 `frames_`；
-- ¶10–¶12：`operator[](frame_no)`：**强化的前置条件** `frame_no < size()`；返回 `frames_[frame_no]`；不抛异常；
-- ¶13–¶14：`at(frame_no)`：越界时抛 `out_of_range`。
+¶7–¶9 默认构造和只传分配器的构造得到空对象。¶10 允许实现加强复制、移动、赋值的异常规格，做法是分配失败时让结果为空（[[res.on.exception.handling]]）。
 
-### 比较（[stacktrace.basic.cmp]）
+### 访问元素 [stacktrace.basic.obs]
 
-- ¶1：`x == y` 返回 `equal(x.begin(), x.end(), y.begin(), y.end())`；
-- ¶2：`x <=> y`：若 `x.size() != y.size()`，返回 `x.size() <=> y.size()`；否则返回逐元素的字典序三路比较。
+¶1 迭代器是随机访问迭代器。¶2–¶9 的 `get_allocator`、`begin`/`end` 系列、`empty`、`size`、`max_size` 都转发给 `frames_`。
 
-这就是 ¶1.2 所说的"语义不同"：容器的 `<=>` 是纯字典序，而这里**先比长度**——更短的栈踪迹总是排在前面。这样的序对于"把栈踪迹作为 `map` 的键，按调用深度分组统计"之类的用途更自然，而且比较长度是 O(1) 的，能更早得出结果。
+¶10–¶12 `operator[](frame_no)` 有加固前置条件 `frame_no < size()`，返回 `frames_[frame_no]`，不抛异常。¶13–¶14 `at(frame_no)` 越界时抛出 `out_of_range`。
 
-注意比较模板对**不同分配器**的 `basic_stacktrace` 也有效（`basic_stacktrace<Allocator2>`），`stacktrace` 与 `pmr::stacktrace` 可以直接比较。
+### 比较 [stacktrace.basic.cmp]
 
-### 修改与非成员函数（[stacktrace.basic.mod]、[stacktrace.basic.nonmem]）
+¶1 `x == y` 返回 `equal(x.begin(), x.end(), y.begin(), y.end())`。
 
-- mod ¶1：`swap` 交换内容；`noexcept` 取决于分配器的传播特征；
-- nonmem ¶1：非成员 `swap` 等价于 `a.swap(b)`；
-- nonmem ¶2–¶3：`to_string(const stacktrace_entry&)` 返回描述该条目的字符串；*Recommended practice*：应当包含 `source_file()` 与 `source_line()` 的信息；
-- nonmem ¶4：`to_string(const basic_stacktrace&)` 返回描述整个栈踪迹的字符串。注 1：行数**不保证**等于 `size()`（实现可能为内联帧输出额外的行，或省略某些行）；
-- nonmem ¶5–¶6：两个 `operator<<` 分别等价于 `os << to_string(...)`。
+¶2 `x <=> y`：长度不同时返回 `x.size() <=> y.size()`，长度相同时逐个条目按字典序比较。
 
-## 格式化与哈希（[stacktrace.format]、[stacktrace.basic.hash]）
+这就是 ¶1.2 所说的语义不同。容器的 `<=>` 是纯字典序，这里先比长度，较短的栈踪迹总排在前面。比较长度是常数时间，多数情况下能更早得出结果。
 
-- format ¶1–¶2：`formatter<stacktrace_entry>` 的格式说明是 *stacktrace-entry-format-spec*：*fill-and-align*ₒₚₜ *width*ₒₚₜ（[[format.string.std]]）；输出如同把 `to_string(se)` 按填充和宽度要求写入；
-- format ¶3–¶4：`formatter<basic_stacktrace<Allocator>>` 的格式说明必须为**空**；输出如同 `to_string(s)`；
-- hash ¶1：`hash<stacktrace_entry>` 与 `hash<basic_stacktrace<Allocator>>` 是启用的（[[unord.hash]]）。
+两个比较运算符都是模板，可以比较分配器不同的栈踪迹，`stacktrace` 和 `pmr::stacktrace` 可以直接比较。
 
-## 例子
+### 输出 [stacktrace.basic.nonmem]
 
-```cpp run title="stacktrace.cpp" cc=gsnapshot flags="-std=c++23 -g -lstdc++exp"
-#include <print>
-#include <stacktrace>
+¶2 `to_string(const stacktrace_entry&)` 返回描述该条目的字符串；¶3 建议其中包含 `source_file()` 和 `source_line()` 的信息。¶4 `to_string(const basic_stacktrace&)` 返回描述整个栈踪迹的字符串，注 1 说行数不保证等于 `size()`，实现可能为内联帧多输出几行，也可能省略某些行。¶5–¶6 的两个 `operator<<` 都等价于输出 `to_string(...)`。
 
-[[noreturn]] void fail(const char* msg) {
-    auto st = std::stacktrace::current(1);        // 跳过 fail 自身
-    std::println(stderr, "fatal: {}\n{}", msg, st);
-    for (const auto& e : st)
-        if (!e.source_file().empty())
-            std::println(stderr, "  at {}:{}", e.source_file(), e.source_line());
-    std::abort();
-}
+[stacktrace.format] ¶1–¶2 `formatter<stacktrace_entry>` 只接受填充、对齐和宽度（[[format.string.std]]），输出 `to_string(se)`；¶3–¶4 `formatter<basic_stacktrace<Allocator>>` 的格式说明必须为空，输出 `to_string(s)`。
 
-void parse(int x) { if (x < 0) fail("negative input"); }
+[stacktrace.basic.hash] ¶1 `hash<stacktrace_entry>` 和 `hash<basic_stacktrace<Allocator>>` 都是启用的（[[unord.hash]]）。
 
-int main() { parse(-1); }
-```
+## 常见误解
 
-!!! warning "实现状况"
-    截至本文编写时，**本机 Clang 23 + libc++ 不提供 `<stacktrace>`**（`#include <stacktrace>` 报"file not found"；`<version>` 中 `__cpp_lib_stacktrace` 处于注释状态），所以上例未能在本机验证。libstdc++ 与 MSVC STL 提供了实现；libstdc++ 的实现需要额外链接其实验性支持库（当前版本为 `-lstdc++exp`，早期版本库名不同）。上面的 godbolt 按钮按此配置用 GCC 打开。
+!!! pitfall "在信号处理函数里捕获栈踪迹"
+    `current()` 要分配内存，`description()` 等要读取调试信息，这些都不是异步信号安全的。在 `SIGSEGV` 处理函数里用 `std::stacktrace` 没有标准保证。用 `pmr::stacktrace` 配合预分配的缓冲区可以减少风险，但符号化仍应推迟到安全的上下文里做。
 
-## 陷阱
+!!! pitfall "发布构建里的栈踪迹是空的"
+    开了优化又剥离了符号的构建里，栈踪迹可能残缺，`source_file()` 可能全为空。这符合标准。需要在生产环境得到有用的栈踪迹，就要保留调试信息，或者保留分离的调试符号文件。
 
-!!! pitfall "在信号处理函数中使用"
-    `current()` 需要分配内存，`description()` 等需要读取调试信息——这些都不是异步信号安全的。在 `SIGSEGV` 处理函数中捕获栈踪迹是常见需求，但用 `std::stacktrace` 做这件事并没有标准保证；可以考虑用 `pmr::stacktrace` 配合预分配缓冲区来减少风险，但符号化仍应推迟到安全的上下文中。
-
-!!! pitfall "发布构建中的空信息"
-    `-O2` 加上剥离符号的发布构建中，栈踪迹可能残缺、`source_file()` 可能全为空。这符合标准（"近似"、"没有可用信息"）。需要可用的生产环境栈踪迹，就要保留调试信息（或分离的调试符号文件）。
-
-!!! pitfall "依赖 `to_string` 的格式"
-    `to_string`/`operator<<`/`format` 的输出格式完全由实现决定，只有"推荐包含源文件和行号"。不要解析它；需要结构化信息时遍历条目，分别调用 `description()`、`source_file()`、`source_line()`。
+!!! pitfall "解析 `to_string` 的输出"
+    `to_string`、`operator<<` 和 `format` 的输出格式完全由实现决定。需要结构化的信息时，遍历条目，分别调用 `description()`、`source_file()`、`source_line()`。
 
 ## 思考题
 
-!!! question "思考题"
-    1. 为什么 `stacktrace_entry` 的复制、比较、`native_handle()` 都是 `constexpr` 的，而 `description()` 不是？
-    2. `std::stacktrace::current(0, 0)` 返回什么？`current(1, numeric_limits<std::stacktrace::size_type>::max())` 呢？
-    3. 两次在同一位置调用 `std::stacktrace::current()` 得到的对象一定相等吗？
+!!! question "思考题 1"
+    为什么 `stacktrace_entry` 的复制、比较、`native_handle()` 都是 `constexpr` 的，而 `description()` 不是？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-1. 条目本质上是一个不透明的句柄（通常是地址）。复制、比较只操作这个句柄，可以在常量求值中进行（例如对默认构造的空条目）；而 `description()` 等需要在运行时读取符号表或调试信息，并返回动态分配的 `string`，本质上是运行期操作。
-2. `current(0, 0)`：跳过 0 个、至多取 0 个，结果为空（`frames_` 从 `t.begin()` 到 `t.begin() + min(n, 0)`）。第二个调用中，`skip + max_depth` 在（无符号的）`size_type` 上回绕为 0，`skip <= skip + max_depth` 为假，违反强化的前置条件（¶5）——在强化实现中是契约违反，否则是 UB。想要"不限深度"应当调用 `current(skip)`。
-3. 不一定。首先，捕获可能失败而返回空对象（`current()` 是 `noexcept` 的，失败不抛异常），一次成功、一次失败就不相等。其次，源代码中两处不同的调用本身就是不同的求值，最内层条目不同。即使是同一调用点（例如循环体中）经同一调用路径执行两次，实践中通常相等，但标准只把栈踪迹定义为"近似表示"，并不保证这一点。
+条目本质上是一个不透明的句柄，通常是一个地址。复制和比较只操作这个句柄，可以在常量求值中进行，例如对默认构造的空条目。`description()` 等需要在运行时读取符号表或调试信息，并返回动态分配的 `string`，只能在运行期执行。
 </details>
 
-## 小结
+!!! question "思考题 2"
+    `std::stacktrace::current(0, 0)` 返回什么？`current(1, std::numeric_limits<std::stacktrace::size_type>::max())` 呢？
 
-!!! summary
-    - 调用序列是抽象机概念；栈踪迹是它的**近似**表示，内联、尾调用、缺少调试信息都会造成偏差。
-    - `stacktrace_entry`：可为空的轻量句柄，`regular`，查询函数在无信息时返回空串/0，只在分配失败时抛 `bad_alloc`。
-    - `basic_stacktrace`：只读的、分配器感知的序列；`current(skip, max_depth)` 为 `noexcept`，失败返回空对象；`operator[]` 与 `current` 的参数有强化的前置条件。
-    - 比较先比长度、再按字典序；`to_string`/`format` 的格式由实现决定。
-    - libc++ 尚未实现；libstdc++、MSVC STL 已提供。
+<details markdown="1">
+<summary>答案</summary>
+
+`current(0, 0)` 跳过 0 个、至多保留 0 个，结果为空。
+
+第二个调用中，`size_type` 是无符号类型，`skip + max_depth` 回绕为 0，`skip <= skip + max_depth` 为假，违反了 [[stacktrace.basic.cons#5]] 的加固前置条件：在加固实现中是契约违反，否则是未定义行为。想要不限深度，应当调用 `current(skip)`。
+</details>
+
+!!! question "思考题 3"
+    在同一个位置先后两次调用 `std::stacktrace::current()`，得到的对象一定相等吗？
+
+<details markdown="1">
+<summary>答案</summary>
+
+不一定。捕获可能失败而返回空对象，一次成功一次失败就不相等。源代码里两处不同的调用本身就是不同的求值，最内层条目不同。即使是同一个调用点（例如循环体里）沿同一条调用路径执行两次，实践中通常相等，但标准只把栈踪迹定义为近似表示，没有保证这一点。
+</details>

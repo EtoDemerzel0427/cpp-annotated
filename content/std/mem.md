@@ -1,98 +1,106 @@
 ---
 title: 内存管理库
-summary: 第 20 章导读——<memory>、<memory_resource>、<scoped_allocator> 里的工具如何建立在核心语言的对象模型之上；读库条款时 Mandates / Constraints / Preconditions / Hardened preconditions 各意味着什么
+summary: 第 20 章导读：<memory>、<memory_resource>、<scoped_allocator> 各管什么，它们怎样建立在核心语言的对象模型之上，以及读库条款时 Constraints、Mandates、Preconditions 等要素各意味着什么。
 status: done
 covers: mem.general
 related: intro.object, basic.life, basic.stc.dynamic, expr.new, memory, smartptr, mem.res, allocator.traits
 tags: 标准库, 内存管理, 导读
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-第 20 章 [mem] 是标准库里离核心语言**最近**的一章。核心语言在 [[intro.object]]、[[basic.life]]、[[basic.stc.dynamic]]、[[expr.new]] 里定义了"对象什么时候存在、存储从哪里来、`new`/`delete` 做了什么"；本章则把这些规则包装成可组合的库组件：
+!!! tldr
+    - 第 20 章是对象模型的库接口：分配器协议、显式开始对象生命周期的函数、智能指针、内存资源都在这里。
+    - 读库条款时先分清要素：*Constraints* 不满足则函数不参与重载决议，*Mandates* 不满足则程序非良构，*Preconditions* 不满足则是未定义行为。
+    - C++26 的加固前置条件在加固实现中会被检查并终止程序，在其他实现中违反它仍是未定义行为；本章只有少数函数用它。
+    - `malloc` 族和内存资源会隐式创建对象，`std::allocator<T>::allocate` 只开始数组对象的生命周期，元素要逐个构造。
+    - `<memory>` 里有些声明的规范正文不在本章：特化内存算法在算法章，`atomic<shared_ptr>` 在原子操作章。
 
-- 一套**描述指针与分配器的元编程接口**（`pointer_traits`、`allocator_traits`、uses-allocator 构造），让容器可以对"花式指针"和自定义分配器保持泛型；
-- 一组**直接操作对象生命周期的函数**（`start_lifetime_as`、`addressof`、`assume_aligned`），它们的语义几乎完全是用核心语言术语写的；
-- **所有权类型**：`unique_ptr`、`shared_ptr`/`weak_ptr`，以及 C++26 新增的值语义包装 `indirect`/`polymorphic`；
-- **运行期多态的内存资源**（`std::pmr`）与**作用域分配器**（`scoped_allocator_adaptor`）；
-- C++26 之后进入草案的 **指针标记**（`pointer_tag_pair`）{{c++29}}。
+第 20 章 [mem] 是标准库里离核心语言最近的一章。核心语言在 [[intro.object]]、[[basic.life]]、[[basic.stc.dynamic]]、[[expr.new]] 里规定对象何时存在、存储从哪里来、`new` 和 `delete` 做什么；本章把这些规则包装成可以组合的库组件。
 
-## 本章地图（[mem.general] ¶2）
+## 本章地图 [mem.general]
 
-¶1 只有一句："本章描述内存管理组件"。¶2 的表 50 给出子条款与头文件的对应：
+¶1 本章描述内存管理组件。¶2 的表 50 列出子条款与头文件的对应：
 
 | 子条款 | 内容 | 头文件 | 本站笔记 |
 |---|---|---|---|
-| [memory] | 指针特征、对齐、显式生命周期、分配器协议、默认分配器、`addressof`、C 的 `malloc` 族 | `<cstdlib>`、`<memory>` | [[memory]]、[[pointer.traits]]、[[ptr.align]]、[[obj.lifetime]]、[[allocator.uses]]、[[allocator.traits]]、[[default.allocator]] |
-| [ptrtag] | `pointer_tag_pair`：把小整数塞进指针的空闲位 | `<memory>` | [[ptrtag]] |
-| [smartptr] | `unique_ptr`、`shared_ptr`、`weak_ptr`、`out_ptr`/`inout_ptr` | `<memory>` | [[smartptr]]、[[unique.ptr]]、[[util.sharedptr]] 等 |
-| [mem.composite.types] | `indirect`、`polymorphic` {{c++26}} | `<memory>` | [[mem.composite.types]]、[[indirect]]、[[polymorphic]] |
-| [mem.res] | `memory_resource`、`polymorphic_allocator`、池资源、单调缓冲资源 | `<memory_resource>` | [[mem.res]] 及其子页 |
+| [memory] | 指针特征、对齐、显式生命周期管理、分配器协议、默认分配器、`addressof`、C 的 `malloc` 族 | `<cstdlib>`、`<memory>` | [[memory]]、[[pointer.traits]]、[[ptr.align]]、[[obj.lifetime]]、[[allocator.uses]]、[[allocator.traits]]、[[default.allocator]] |
+| [smartptr] | `unique_ptr`、`shared_ptr`、`weak_ptr`、`out_ptr` / `inout_ptr` | `<memory>` | [[smartptr]]、[[unique.ptr]]、[[util.sharedptr]] |
+| [ptrtag] {{c++29}} | `pointer_tag_pair`：把小整数存进指针的空闲位 | `<memory>` | [[ptrtag]] |
+| [mem.composite.types] {{c++26}} | `indirect`、`polymorphic` | `<memory>` | [[mem.composite.types]]、[[indirect]]、[[polymorphic]] |
+| [mem.res] | `memory_resource`、`polymorphic_allocator`、池资源、单调缓冲资源 | `<memory_resource>` | [[mem.res]] |
 | [allocator.adaptor] | `scoped_allocator_adaptor` | `<scoped_allocator>` | [[allocator.adaptor]] |
 
-注意两个**不在**本章的东西：
+有几样东西声明在 `<memory>`，规范正文却在别处：
 
-- `uninitialized_copy`、`construct_at`、`destroy_at` 等"特化内存算法"虽然声明在 `<memory>` 里，但规范正文在算法章的 [[specialized.algorithms]]；本站在 [[memory]] 里讨论它们与 placement new 的关系。
-- `atomic<shared_ptr<T>>` 声明在 `<memory>`，规范正文在原子操作章的 [[util.smartptr.atomic]]。
-- `operator new`/`operator delete`、`std::launder`、`bad_alloc` 在 `<new>`，属于语言支持库 [[support.dynamic]]。
+- `uninitialized_copy`、`construct_at`、`destroy_at` 等特化内存算法在算法章的 [[specialized.algorithms]]，它们与 placement new 的关系见 [[memory]]；
+- `atomic<shared_ptr<T>>` 在原子操作章的 [[util.smartptr.atomic]]；
+- `operator new` / `operator delete`、`std::launder`、`bad_alloc` 在 `<new>`，属于语言支持库 [[support.dynamic]]。
 
-## 先学会读库条款：五种"要求"的法律后果
+## 读库条款：违反各种要求的后果
 
-库条款几乎不用"shall"直接规定行为，而是给每个函数写一组带斜体标签的元素（[[structure.specifications]] ¶3）。分清它们的法律后果，是读本章的第一门功课：
+库条款很少直接用 shall 规定行为，而是给每个函数列出一组带斜体标签的要素（[[structure.specifications]]）。违反不同要素，后果完全不同：
 
-| 元素 | 不满足时的后果 | 本章典型例子 |
+| 要素 | 不满足时 | 本章的例子 |
 |---|---|---|
-| *Constraints* | 该函数**不参与重载决议**（静默不可行，[[over.match]]） | `unique_ptr(unique_ptr<U,E>&&)` 要求 `U` 不是数组 |
-| *Mandates* | 程序 {{ill-formed}}，必须诊断（通常是 `static_assert`） | `default_delete<T>::operator()` 要求 `T` 完整 |
-| *Preconditions* | {{ub}} | `unique_ptr::operator*` 要求 `get() != nullptr` |
-| *Hardened preconditions* {{c++26}} | 在**加固实现**（[[g:hardened-implementation]]）中以终止语义检查（[[basic.contract.eval]]）；非加固实现中违反仍是 UB | `shared_ptr<T[]>::operator[]` 要求 `i >= 0`，`T` 为 `U[N]` 时 `i < N` |
-| *Constant When* | 调用不是常量子表达式 | `pointer_tag_pair` 的构造函数 |
+| *Constraints* | 函数不参与重载决议，就像不存在一样 | `unique_ptr<T[]>` 的转换构造函数要求源指针也是数组版本、元素类型兼容 |
+| *Mandates* | 程序非良构，必须诊断，通常由 `static_assert` 报出 | `default_delete<T>::operator()` 要求 `T` 是完整类型 |
+| *Preconditions* | 未定义行为 | `unique_ptr::operator*` 要求 `get() != nullptr` |
+| *Hardened preconditions* {{c++26}} | 在加固实现（[[g:hardened-implementation]]）中作为契约检查，违反时终止；否则是未定义行为 | `shared_ptr<T[]>::operator[]` 要求 `i >= 0`，`T` 为 `U[N]` 时还要求 `i < N` |
+| *Constant When* | 调用不是常量子表达式 | `pointer_bits_available` 要求对齐值是 2 的幂 |
 
-一个容易忽略的细节：*Constraints* 失败与 *Mandates* 失败对 SFINAE 与概念检测的影响完全不同。
+*Constraints* 和 *Mandates* 的差别在泛型代码里最明显：
 
-```cpp title="constraints-vs-mandates.cpp" ok
+<div class="compare" markdown="1">
+
+```cpp run ok
 #include <memory>
 #include <type_traits>
-
-struct Base {};
-struct Derived : Base {};
-
-// Constraints：unique_ptr<Base[]> 不能从 unique_ptr<Derived[]> 构造——它根本不是候选
-static_assert(!std::is_constructible_v<std::unique_ptr<Base[]>, std::unique_ptr<Derived[]>>);
-// 单对象版本满足 Constraints（Derived* 可隐式转换为 Base*）
-static_assert(std::is_constructible_v<std::unique_ptr<Base>, std::unique_ptr<Derived>>);
-
+struct B {};
+struct D : B {};
+using UB = std::unique_ptr<B[]>;
+using UD = std::unique_ptr<D[]>;
+// Constraints 不满足：构造函数不是候选
+static_assert(
+  !std::is_constructible_v<UB, UD>);
 int main() {}
 ```
 
-而 *Mandates* 是"选中之后再报错"：`is_constructible` 之类的特征检测**看不到**它，真正实例化时才会触发 `static_assert`。
+```cpp run error
+#include <memory>
+#include <type_traits>
+struct Inc;   // 不完整类型
+using Del = std::default_delete<Inc>;
+// 特征检测看不到 Mandates
+static_assert(
+  std::is_invocable_v<Del, Inc*>);
+void f(Inc* p) {
+  Del{}(p);  // error: T 必须完整
+}
+int main() {}
+```
 
-!!! note "库里的 UB 与核心语言的 UB 是同一种 UB"
-    *Preconditions* 违例导致的未定义行为和核心语言的 UB 法律地位完全相同（[[intro.abstract]]）。`unique_ptr` 解引用空指针，与 `*static_cast<int*>(nullptr)` 一样，都允许优化器假设"不会发生"。C++26 的**标准库加固**（hardening）只把一部分前置条件提升为 *Hardened preconditions*；本章中这样的条款很少——例如 `shared_ptr::operator[]` 的下标——而 `unique_ptr::operator*`、`operator->` 仍然只是普通前置条件。
+</div>
+
+左边，*Constraints* 让那个构造函数从候选集中消失，`is_constructible` 能如实回答 `false`。右边，*Mandates* 不影响函数是否可调用，`is_invocable` 回答 `true`，真正调用时才在函数体里报错。
+
+库前置条件违反导致的未定义行为，与核心语言的未定义行为地位相同（[[intro.abstract]]）。对空的 `unique_ptr` 解引用和 `*static_cast<int*>(nullptr)` 一样，优化器都可以假设它不发生。C++26 的标准库加固只把一部分前置条件改成了加固前置条件：本章里 `shared_ptr<T[]>::operator[]` 是，`unique_ptr::operator*` 和 `operator->` 不是。
 
 ## 本章与核心语言的接口
 
-本章大量条款只有放在核心语言背景下才读得懂。最常见的几个接口：
+- 隐式创建对象：`malloc`、`calloc`、`realloc`、`memory_resource::allocate` 都会在返回的存储中隐式创建对象，并返回指向合适对象的指针（[[intro.object]]，[[g:implicitly-create-objects]]）。`start_lifetime_as` 不复制字节，在已有的存储上做同样的事（[[obj.lifetime]]）。
+- 生命周期：`allocator<T>::allocate` 只开始数组对象的生命周期，不开始任何元素的生命周期（[[default.allocator]]）。元素要靠 `allocator_traits::construct` 逐个构造，默认就是 `construct_at`，即 placement new。
+- delete 表达式：`default_delete` 的效果就是对指针调用 `delete`，所以 [[expr.delete]] 中关于不完整类型、非虚析构函数、`delete` 与 `delete[]` 不匹配的未定义行为原样继承。
+- 数据竞争：`shared_ptr` 的线程安全保证用 [[intro.races]] 的冲突和数据竞争来表述（[[util.smartptr.shared]]）。
 
-- **隐式对象创建**：`malloc`、`calloc`、`realloc`、`memory_resource::allocate` 都被规定为"在返回的存储中隐式创建对象并返回指向合适对象的指针"（[[intro.object]] ¶13–¶16，[[g:implicitly-create-objects]]）。`start_lifetime_as` 则是在**不拷贝**字节的前提下做同一件事（[[obj.lifetime]]）。
-- **生命周期与析构**：`allocator<T>::allocate` 只开始**数组对象**的生命周期，不开始任何元素的生命周期（[[default.allocator]]）；元素要靠 `allocator_traits::construct`（默认就是 `construct_at`，即 placement new）一个个建起来。
-- **delete 表达式**：`default_delete` 的效果就是"对 `ptr` 调用 `delete`"——于是 [[expr.delete]] 中关于不完整类型、虚析构函数、`delete` 与 `delete[]` 不匹配的全部 UB 都原样继承。
-- **数据竞争**：`shared_ptr` 的线程安全保证是用 [[intro.races]] 的"冲突"与"数据竞争"术语表述的（[[util.smartptr.shared]] ¶5）。
+## 本章的演进
 
-## 历史脉络
-
-| 版本 | 本章的关键变化 |
+| 版本 | 主要变化 |
 |---|---|
 | C++98 | `std::allocator`、`auto_ptr`、`raw_storage_iterator`、`get_temporary_buffer` |
 | C++11 | `unique_ptr`、`shared_ptr`、`weak_ptr`、`allocator_traits`、`pointer_traits`、`scoped_allocator_adaptor`、`align`、`addressof`；`auto_ptr` 弃用 |
 | C++14 | `make_unique` |
-| C++17 | `<memory_resource>`（`std::pmr`）、`shared_ptr<T[]>`；`auto_ptr` 移除 |
-| C++20 | `to_address`、`assume_aligned`、`make_shared` 支持数组、`*_for_overwrite`、`constexpr` 的 `allocator`/`construct_at`、uses-allocator 构造函数族、`atomic<shared_ptr>` |
-| C++23 | `start_lifetime_as`、`out_ptr`/`inout_ptr`、`allocate_at_least`、`constexpr unique_ptr` |
-| C++26 | `indirect`/`polymorphic`（[[P3019R14]]）、`is_sufficiently_aligned`、`owner_hash`/`owner_equal`（[[P1901R2]]）、`constexpr shared_ptr`（[[P3037R6]]）、`start_lifetime`（[[P3726R2]]）、移除 `allocator::is_always_equal` 成员（[[P2868R3]]）；可平凡重定位曾被加入又在 NB 意见处理中撤回 |
+| C++17 | `<memory_resource>`、`shared_ptr<T[]>`；移除 `auto_ptr` |
+| C++20 | `to_address`、`assume_aligned`、数组版 `make_shared`、`*_for_overwrite`、`constexpr` 的 `allocator` 和 `construct_at`、`atomic<shared_ptr>` |
+| C++23 | `start_lifetime_as`、`out_ptr` / `inout_ptr`、`allocate_at_least`、`constexpr unique_ptr` |
+| C++26 | `indirect` / `polymorphic`（[[P3019R14]]）、`is_sufficiently_aligned`、`owner_hash` / `owner_equal`（[[P1901R2]]）、`constexpr shared_ptr`（[[P3037R6]]）、移除 `allocator::is_always_equal` 成员（[[P2868R3]]） |
 | C++26 之后 | `pointer_tag_pair`（[[P3125R6]]） |
-
-## 小结
-
-- 本章是"对象模型的库界面"：凡是遇到 `allocate`、`construct`、`destroy`、`start_lifetime_as`，先想清楚它在 [[intro.object]] / [[basic.life]] 意义上做了什么。
-- 读库条款时，按 *Constraints* → *Mandates* → *Preconditions* → *Hardened preconditions* 分辨违例后果：不可行 / 必须报错 / UB / 加固实现中终止。
-- `<memory>` 是一个"大杂烩"头文件，规范正文散落在第 20 章、第 26 章（特化算法）和第 32 章（原子智能指针）。
