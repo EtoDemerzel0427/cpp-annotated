@@ -1,128 +1,154 @@
 ---
 title: concat 视图
-summary: C++26 的 views::concat(rs...) 把多个范围首尾相接——concatable 约束（公共引用/值/右值引用类型必须存在且彼此兼容）、引用类型取 common_reference_t 可能退化为 prvalue、迭代器是 variant 并用 satisfy 跳过空范围、随机访问与双向要求"除最后一个外都是 common"、size 用公共无符号类型求和；它是 CPO 而非适配器，不能用管道。
+summary: C++26 的 views::concat 把几个类型可以不同的范围首尾相接成一个视图；元素的引用类型取各范围引用类型的公共引用，可能变成不可写的副本；它是定制点对象，不能用管道写法。
 status: done
 covers: *
 since: c++26
 papers: P2542R8
 related: range.adaptors, range.join, range.zip, range.adaptor.helpers, range.req, iterator.concepts, customization.point.object
 tags: 标准库, 范围, concat, C++26
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-`views::concat(a, b, c)` 是把几个**类型可以不同**的范围拼成一个序列：`vector<int>`、`list<int>`、`array<int,3>`、`views::single(9)` 可以串在一起。与 `join` 的区别是：`join` 处理"一个范围的范围"（内层类型都相同、个数在运行时决定），`concat` 处理"编译期已知个数、类型各异"的几个范围。它来自 C++26 的 [[P2542R8]]。
-
-## 概览（[range.concat.overview]）
-
-¶1 `concat_view` 给出一个连接所有底层范围的视图。¶2 `views::concat` 是**定制点对象**（不是范围适配器对象）；给定子表达式包 `Es...`：
-
-- ¶2.1 若 `Es` 只有一个元素且其类型建模 `input_range`，表达式等价于 `views::all(Es...)`；
-- ¶2.2 否则等价于 `concat_view(Es...)`。
-
-因为它不是范围适配器对象，**没有管道形式**：`a | views::concat(b)` 不合法。零个实参时，`concat_view` 要求 `sizeof...(Views) > 0`，所以 `views::concat()` 非良构。
-
-## *concatable* 约束（[range.concat.view] ¶1–¶2）
-
-```cpp
-template<class... Rs>
-  using concat-reference-t = common_reference_t<range_reference_t<Rs>...>;
-template<class... Rs>
-  using concat-value-t = common_type_t<range_value_t<Rs>...>;
-template<class... Rs>
-  using concat-rvalue-reference-t = common_reference_t<range_rvalue_reference_t<Rs>...>;
-
-template<class... Rs>
-  concept concatable = requires {
-    typename concat-reference-t<Rs...>;
-    typename concat-value-t<Rs...>;
-    typename concat-rvalue-reference-t<Rs...>;
-  } && concat-indirectly-readable<Rs...>;
-```
-
-*concat-indirectly-readable*（¶1）要求这三个类型之间满足 `indirectly_readable` 所需的那几条 `common_reference_with` 关系，并且**每个**底层迭代器的 `*it` 能转换为 *concat-reference-t*、`ranges::iter_move(it)` 能转换为 *concat-rvalue-reference-t*。它保证合成出来的迭代器能建模 `input_iterator`。
-
-后果是**引用类型可能退化**：
-
-- 全是 `int&` → `int&`，可以写回；
-- `int&` 与 `const int&` → `const int&`；
-- `int&` 与 `long&` → `common_reference_t` 是 `long`（prvalue）——**元素不再可写**，每次解引用产生一个转换后的副本。
+!!! tldr
+    - `views::concat(a, b, c)` 把个数在编译期已知、类型可以各不相同的几个范围连成一个视图；空范围被自动跳过。
+    - 元素的引用类型是各范围引用类型的 `common_reference_t`：`int&` 与 `int&` 得 `int&`，可以写回；`int&` 与 `long&` 得 `long`，每次解引用得到一个副本。
+    - 结果的迭代器类别取各范围中最弱的一个；要双向或随机访问，除最后一个外的范围还必须是公共范围。
+    - `views::concat` 是定制点对象，不是范围适配器，没有 `a | views::concat(b)` 这种写法。
 
 ```cpp run ok
 #include <array>
+#include <cstdio>
+#include <ranges>
+#include <vector>
+
+int main() {
+  std::vector<int> v1{1, 2, 3}, v2{4, 5}, v3{};
+  std::array a{6, 7, 8};
+  auto s = std::views::single(9);
+  for (auto&& i : std::views::concat(v1, v2, v3, a, s))
+    std::printf("%d ", i);                    // 1 2 3 4 5 6 7 8 9
+  std::puts("");
+}
+```
+
+这是 [range.concat.overview] ¶2 的例 1。`vector`、`array`、`single_view` 类型各不相同，`v3` 是空的，它们被连成一个序列。
+
+`concat` 和 [[range.join]] 都能把几段连起来，区别在于输入的形状：`join` 处理一个范围的范围，内层的类型都相同，个数在运行时决定；`concat` 处理编译期已知个数、类型各异的几个范围。它来自 C++26 的 [[P2542R8]]。
+
+## `views::concat` [range.concat.overview]
+
+¶1 `concat_view` 给出一个把所有底层范围连接起来的视图。¶2 `views::concat` 是一个[[customization.point.object|定制点对象]]。给定一组子表达式 `Es...`：
+
+- ¶2.1 只有一个实参且它是输入范围时，等价于 `views::all(Es...)`，不包装；
+- ¶2.2 否则等价于 `concat_view(Es...)`。
+
+`concat_view` 要求至少有一个视图，所以 `views::concat()` 非良构。它也不是[[g:range-adaptor-object|范围适配器对象]]，没有管道形式：`a | views::concat(b)` 里的 `views::concat(b)` 按 ¶2.1 就是 `views::all(b)`，一个视图不能放在 `|` 右边，所以编译失败。
+
+## 元素类型：取公共引用 [range.concat.view]
+
+几个范围的元素类型可能不同，连起来以后，解引用要返回一个统一的类型。标准用三个说明用别名来定：
+
+| 别名 | 定义 | 用途 |
+|---|---|---|
+| *concat-reference-t* | 各范围 `range_reference_t` 的 `common_reference_t` | `*it` 的类型 |
+| *concat-value-t* | 各范围 `range_value_t` 的 `common_type_t` | `value_type` |
+| *concat-rvalue-reference-t* | 各范围 `range_rvalue_reference_t` 的 `common_reference_t` | `iter_move` 的类型 |
+
+¶2 说明用概念 *concatable* 要求这三个类型都存在，并满足 ¶1 的 *concat-indirectly-readable*：每个范围的 `*it` 能转换为 *concat-reference-t*，`iter_move(it)` 能转换为 *concat-rvalue-reference-t*，三者之间还要有 `indirectly_readable` 所需的公共引用关系。这样合成的迭代器才能是一个合格的输入迭代器。
+
+公共引用的结果决定了元素能不能写回：
+
+- 全是 `int&`，得到 `int&`，可以写回；
+- `int&` 与 `const int&`，得到 `const int&`，只读；
+- `int&` 与 `long&`，得到 `long`，这是一个纯右值（prvalue），每次解引用产生一个转换后的副本，写它不会影响原容器。
+
+```cpp run ok
+#include <cstdio>
 #include <list>
 #include <ranges>
 #include <vector>
-#include <cstdio>
+
 int main() {
   std::vector<int> a{1, 2};
   std::list<int> b{3, 4};
-  std::array<int, 1> c{5};
-  auto cat = std::views::concat(a, b, c);
-  static_assert(std::ranges::bidirectional_range<decltype(cat)>);  // list 的 bidi 拖了后腿
-  for (int& x : cat) x *= 10;                                      // 引用可写回
-  for (int x : cat) std::printf("%d ", x);
-  std::puts("");   // 10 20 30 40 50
+  auto cat = std::views::concat(a, b);
+  for (int& x : cat) x *= 10;                  // int&：写回 a 和 b
+  for (int x : cat) std::printf("%d ", x);     // 10 20 30 40
+  std::puts("");
+
   std::vector<long> d{6};
-  auto mixed = std::views::concat(a, d);                           // int& 与 long& 的公共引用是 long
+  auto mixed = std::views::concat(a, d);
   static_assert(std::same_as<std::ranges::range_reference_t<decltype(mixed)>, long>);
 }
 ```
 
-最新草案中 [[range.join]] 的 `join_with_view` 也改用了 *concatable* 约束内层元素与分隔符的兼容性。
+当前草案中 [[range.join]] 的 `join_with_view` 也用 *concatable* 检查内层元素与分隔符是否兼容。
 
-## 迭代器与遍历
+## 迭代器怎样在各段之间移动 [range.concat.iterator]
 
-迭代器存一个 `variant<iterator_t<maybe-const<Const, Views>>...>` 和指向父视图的指针。
+迭代器保存一个 `variant`，其中是当前所在那一段的底层迭代器，另外保存一个指向视图的指针。
 
-- `begin()`（¶6）在第 0 个范围的开头构造迭代器，然后调用 *satisfy*`<0>()`：若当前范围已到末尾，就切换到下一个范围的开头，递归直到找到非空范围或到最后一个——**空范围被自动跳过**（`v3{}` 在标准示例中不产生任何元素）；
-- `end()`（¶7）：若所有范围都是 forward 且**最后一个**是 common，则返回指向最后一个范围末尾的迭代器（结果 common）；否则返回 `default_sentinel`。
+[range.concat.view] ¶6 `begin()` 在第 0 段的开头构造迭代器，然后调用说明用函数 *satisfy*。[range.concat.iterator] ¶3 规定，*satisfy* 发现当前段已经走到末尾时，就切换到下一段的开头，并继续检查，直到找到非空的段或者到达最后一段。空范围就是这样被跳过的。
 
-### 迭代器强度（[range.concat.iterator] ¶1）
+[range.concat.view] ¶7 `end()` 在所有段都是前向范围、且最后一段是公共范围时，返回指向最后一段末尾的迭代器，结果是公共范围；否则返回 `default_sentinel`。
 
-```cpp
-template<bool Const, class... Rs>
-  concept concat-is-random-access =
-    all-random-access<Const, Rs...> && (common_range<maybe-const<Const, Fs>> && ...);   // Fs：除最后一个外
-template<bool Const, class... Rs>
-  concept concat-is-bidirectional =
-    all-bidirectional<Const, Rs...> && (common_range<maybe-const<Const, Fs>> && ...);
+### 双向和随机访问要求前面的段是公共范围（¶1）
+
+¶1 迭代器的类别是各段类别中最弱的一个，但双向和随机访问还多一个条件：除最后一段外，每一段都必须是[[g:common-range|公共范围]]（[range.concat.view] ¶3–¶4）。
+
+原因在 `--`（¶4）：从第 k+1 段的开头退回第 k 段时，要先拿到第 k 段末尾的迭代器，再退一步。如果第 k 段的 `end()` 只是一个哨位，就做不到。最后一段永远不会从后面退进来，所以它可以不是公共范围。跨段的 `+=` 和 `-=`（¶5–¶6）也是同样的道理。
+
+¶2 `iterator_category` 只在所有段都是前向范围时定义；如果 *concat-reference-t* 不是引用类型，它是 `input_iterator_tag`，因为老式的前向迭代器要求解引用得到引用。
+
+### 可以跨容器排序（¶41–¶42）
+
+`iter_swap` 用 `std::visit` 分派：两个迭代器当前的底层迭代器类型相同时，调用底层的 `ranges::iter_swap`；否则退化为 `ranges::swap(*x, *y)`（¶42）。所以两个 `vector` 连起来后是随机访问范围，可以直接排序，结果写回两个容器：
+
+```cpp run ok
+#include <algorithm>
+#include <cstdio>
+#include <ranges>
+#include <vector>
+
+int main() {
+  std::vector<int> a{5, 1, 4}, b{3, 2};
+  auto cat = std::views::concat(a, b);
+  static_assert(std::ranges::random_access_range<decltype(cat)>);
+  std::ranges::sort(cat);
+  for (int x : a) std::printf("%d ", x);       // 1 2 3
+  for (int x : b) std::printf("%d ", x);       // 4 5
+  std::printf("| size=%zu\n", cat.size());     // size=5
+}
 ```
 
-为什么"除最后一个外都要 common"？`--` 从第 k+1 个范围的开头退回第 k 个范围时，要拿到第 k 个范围**末尾的迭代器**再退一步——哨位做不到这一点。最后一个范围永远不会被"从后面退进来"，所以它可以不是 common。随机访问的跨段 `+= n` 同理。
+¶41 和其他许多操作一样，前置条件是 `variant` 不处于因异常而无值的状态。
 
-`iterator_category`（¶2）：*concat-reference-t* 不是引用时为 `input_iterator_tag`；否则取所有底层类别与上述强度的交集。
+## 其他性质
 
-### `iter_swap`
-
-带约束（"requires see below"）地提供：¶42 用 `std::visit` 分派——两个迭代器处于**同一段**时调用底层的 `ranges::iter_swap`，处于不同段时退化为 `ranges::swap(*x, *y)`。¶41 的前置条件是两个 `variant` 都不处于 `valueless_by_exception` 状态（其他操作也普遍有这一前置条件）。因此可以对 `concat(a, b)` 调用 `ranges::sort`——前提是它是随机访问的（例如两个 `vector`），排序结果会跨越两个容器写回。
-
-## `size()`（¶8）
-
-```cpp
-return apply([](auto... sizes) {
-  using CT = make-unsigned-like-t<common_type_t<decltype(sizes)...>>;
-  return (CT(sizes) + ...);
-}, tuple-transform(ranges::size, views_));
-```
-
-所有范围都 sized 时才提供；先把各自的 `size` 转换到公共的无符号类型再求和。
-
-## 性质
-
-- 不是借用范围（[[ranges.syn]] 中没有对应的 `enable_borrowed_range` 特化）；
-- 有 `const begin()`：当所有 `const Views` 都是范围且满足 *concatable*；
-- 不缓存 `begin()`——*satisfy* 每次都会重新跳过开头的空范围，所以 `begin()` 的代价与开头连续空范围的个数成正比（个数是编译期常量，满足摊还 O(1)）。
+- [range.concat.view] ¶8 所有段都是 sized range 时才有 `size()`：先把各段大小转换为它们的公共无符号类型，再相加。¶9 的 `reserve_hint()` 同理。
+- 所有 `const Views` 都是范围并满足 *concatable* 时，有 const 版本的 `begin()`。
+- 不缓存 `begin()`。*satisfy* 每次都重新跳过开头的空段，代价与段数成正比，而段数是编译期常量。
+- 不是借用范围。
 
 !!! impl "实现现状"
-    libc++ 已提供 `views::concat`（`__cpp_lib_ranges_concat` 为 `202403L`，对应 [[P2542R8]] 被采纳的时间），本页示例均在 libc++ 上验证。
+    本机 libc++ 已提供 `views::concat`（`__cpp_lib_ranges_concat` 为 `202403L`），本页示例都在 libc++ 上验证过。
 
 ## 小结
 
 | 方面 | `views::concat` |
 |---|---|
-| 实参 | 一个或多个可以类型各异的 `viewable_range`（单个时退化为 `views::all`） |
-| 引用类型 | 各底层引用的 `common_reference_t`，可能退化为 prvalue |
-| 强度 | 所有底层的交集；双向/随机访问另需"除最后一个外都 common" |
-| common | 全 forward 且最后一个 common |
-| sized | 全部 sized |
-| 管道 | 不支持（是 CPO 而非适配器） |
+| 实参 | 一个或多个类型可以不同的范围；只有一个时等于 `views::all` |
+| 引用类型 | 各段引用类型的 `common_reference_t`，可能是不可写的副本 |
+| 迭代器类别 | 各段中最弱的；双向和随机访问另要求除最后一段外都是公共范围 |
+| 公共范围 | 全是前向范围且最后一段是公共范围时 |
+| sized range | 全部是时 |
+| 管道写法 | 没有 |
+
+<details class="fine" markdown="1"><summary>其余条文</summary>
+
+[range.concat.view] ¶5：构造函数保存所有视图。
+
+[range.concat.iterator] ¶7–9 是构造函数（从非 const 迭代器转换时，按当前下标复制底层迭代器）；¶10–¶40 逐一规定解引用、自增自减、随机访问运算、比较和距离，每个操作都以 `variant` 有值为前置条件；`iter_move` 返回 *concat-rvalue-reference-t*。¶43 规定 `iter_swap` 的异常说明和约束。
+
+</details>
