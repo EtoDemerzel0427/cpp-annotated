@@ -1,64 +1,26 @@
 ---
 title: 断言语句（contract_assert）
-summary: C++26 的 contract_assert 语句：在函数体内引入一个契约断言；谓词是按语境转换为 bool 的条件表达式；连续的断言语句按序求值（可能重复）；与 assert 宏、assume 属性的区别。
+summary: C++26 的 contract_assert 语句：在函数体里写一个契约断言，谓词按语境转换为 bool，连续的断言作为一组按序求值；它和 assert 宏、assume 属性的区别。
 status: draft
 since: c++26
 papers: P2900R14
-related: basic.contract, dcl.contract.func, expr.prim.id.unqual, dcl.attr.assume, stmt.pre
+related: basic.contract, dcl.contract, expr.prim.id.unqual, dcl.attr.assume, stmt.pre
 tags: 语句, 契约, C++26
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-{{c++26}} `contract_assert` 是 C++26 契约（contracts）特性中的语句形式。契约断言共有三种：函数声明上的前置条件 `pre(...)`、后置条件 `post(...)`（[[dcl.contract.func]]），以及函数体中的断言语句 `contract_assert(...)`（本节）。三者共享同一套语义，包括谓词、四种求值语义和违约处理函数，这些都定义在 [[basic.contract]] 中；本节只规定它作为语句的那一小部分。
+!!! tldr
+    - `contract_assert(条件);` 是 C++26 的一条语句，它引入一个契约断言，和函数上的 `pre`、`post` 共用同一套求值规则。
+    - 括号里只能写 *conditional-expression*：赋值和逗号表达式要再套一层括号。
+    - 谓词里出现的外部变量都按 const 看待，所以谓词不能直接修改它们；谓词是否求值、求值几次都没有保证，不要依赖它的副作用。
+    - 是否检查、失败后怎样由实现选的求值语义决定（ignore、observe、enforce、quick-enforce），与 `NDEBUG` 无关。
+    - 紧挨着的几条断言语句作为一组按序求值，实现可以把整组重复求值，但第一次出现的先后顺序不变。
 
-所以，读这一页之前（或同时）应该读 [[basic.contract]]。下面先用一页篇幅概括那里的核心概念，再逐段讲解 [[stmt.contract.assert]]。
+截至写作时，本机 Clang 23 还不认识 `contract_assert`，把它当作未声明的标识符。本页的例子都按标准原文分析，没有经过编译验证，所以不带判定标记。
 
-## 背景：契约断言的语义（[[basic.contract]] 概要）
+## 一条断言语句
 
-- **谓词**（contract-assertion predicate）：一个 `bool` 类型的表达式（[[basic.contract.general#2]]），描述此处程序状态应当满足的性质。
-- 谓词中引用的、在断言之外声明的变量，其 *id-expression* 的类型带 const（[[expr.prim.id.unqual#7]]）；`this` 是指向 const 的指针。这是为了防止谓词意外修改程序状态。
-- 每次求值使用四种**求值语义**之一（[[basic.contract.eval#1]]）：
-    - ignore：不求值谓词（但谓词仍是潜在求值的，会 odr-use 实体）；
-    - observe：检查；违约时调用违约处理函数，处理函数正常返回后继续执行；
-    - enforce：检查；违约时调用处理函数，正常返回后契约终止程序；
-    - quick-enforce：检查；违约时直接契约终止，不调用处理函数。
-- 使用哪种语义由实现定义，每次求值都可以不同（[[basic.contract.eval#2]]）。标准建议默认为 enforce，并提供全部 ignore 和全部 enforce 的编译选项。
-- 在检查语义下，是否真的求值谓词是未指定的，实现可以用一个无副作用的等价计算得到它的值（[[basic.contract.eval#5]]）。所以不能依赖谓词的副作用。
-- **违约**（contract violation）：谓词为 `false`、谓词求值抛出异常，或者在明显常量求值中谓词不是核心常量表达式（[[basic.contract.eval#7]]）。
-- 如果在常量求值中违约，且语义是终止性的，程序非良构（[[basic.contract.eval#8]]）。也就是说，`constexpr` 函数里的 `contract_assert` 失败会变成编译错误。
-- 违约处理函数 `::handle_contract_violation`（[[basic.contract.handler]]）接收一个 `const std::contracts::contract_violation&`；它是否可替换由实现定义。
-
-## 语法
-
-```text
-assertion-statement:
-    contract_assert attribute-specifier-seq(opt) ( conditional-expression ) ;
-```
-
-有几个容易忽略的细节：
-
-1. `contract_assert` 是一个关键字（[[lex.key]]）。`pre` 和 `post` 则不同，它们是有特殊含义的标识符，只在函数声明符的特定位置有意义。不用 `assert` 这个名字，是因为 `assert` 早已是 `<cassert>` 中的宏名，任何包含该头文件的翻译单元都会把 `assert(...)` 展开掉。
-2. 括号里是 *conditional-expression*，不是 *expression*，所以**不能直接写赋值表达式或逗号表达式**。`contract_assert(x = 1);` 在语法上就不成立（防止把 `==` 误写为 `=`）；`contract_assert(a, b);` 也不行，要写成 `contract_assert((a, b));`。
-3. 属性写在关键字与左括号之间，它属于这个契约断言，而不是语句，见 ¶1。
-
-```cpp error
-void f(int x) {
-    contract_assert(x = 1);     // error: 赋值表达式不是 conditional-expression
-    contract_assert(x > 0, x < 10);   // error: 逗号表达式需要再加一层括号
-}
-```
-
-## 引入一个契约断言（¶1）
-
-¶1 *assertion-statement* **引入一个契约断言**（[[basic.contract]]）。可选的 *attribute-specifier-seq* 属于所引入的契约断言。
-
-因为它是一条语句，所以：
-
-- 它可以出现在任何能写语句的地方，如函数体、lambda 体、循环体、`if` 的分支，也包括 `constexpr`/`consteval` 函数；
-- 它不能出现在表达式中（例如成员初始化列表、默认实参、`?:` 的操作数）。在这些位置需要断言时，可以用一个立即调用的 lambda 包装，或者把检查放进被调用函数的前置条件；
-- 它不是宏，不受 `NDEBUG` 影响，也不经过预处理器；是否检查由实现选择的求值语义决定。
-
-```cpp ok
+```cpp
 #include <cstddef>
 int at(const int* p, std::size_t n, std::size_t i) {
     contract_assert(p != nullptr);
@@ -67,110 +29,130 @@ int at(const int* p, std::size_t n, std::size_t i) {
 }
 ```
 
-!!! impl "编译器支持"
-    截至写作时，本机的 Clang 23 尚不支持 `contract_assert`（把它当作未声明的标识符），因此本页的例子未能在本地验证，判定按标准给出。
+**契约断言**（[[g:contract-assertion|contract assertion]]）是 C++26 契约特性的基本单位：它带一个**谓词**，即一个描述程序此刻应当满足的条件的 `bool` 表达式。契约断言有三种写法：函数声明上的前置条件 `pre(...)`、后置条件 `post(...)`（[[dcl.contract]]），以及本节的断言语句。三者的求值和违约处理都在 [[basic.contract]] 中统一规定，本节只规定语句形式自己的部分。
+
+语法如下：
+
+```text
+assertion-statement:
+    contract_assert attribute-specifier-seq(opt) ( conditional-expression ) ;
+```
+
+`contract_assert` 是关键字（[[lex.key]]）。`pre` 和 `post` 则只是在函数声明符的特定位置有特殊含义的标识符。这个名字没有用 `assert`，因为 `assert` 早已是 `<cassert>` 里的宏。
+
+¶1 *assertion-statement* 引入一个契约断言。写在关键字和左括号之间的属性属于这个契约断言，而不属于语句。
+
+它是一条语句，所以能出现在任何允许写语句的地方：函数体、lambda 体、循环体、`if` 的分支，也包括 `constexpr` 和 `consteval` 函数。它不能出现在表达式里，例如成员初始化列表或默认实参中。这些位置需要检查时，可以把条件放进被调函数的 `pre`，或者用立即调用的 lambda 包一层。
+
+## 括号里只能写条件表达式
+
+```cpp
+void f(int x) {
+    contract_assert(x = 1);           // error: 赋值表达式不是 conditional-expression
+    contract_assert(x > 0, x < 10);   // error: 逗号表达式不是 conditional-expression
+    contract_assert((x > 0, x < 10)); // 语法上可以，但只检查 x < 10
+}
+```
+
+语法要求的是 *conditional-expression*，它比 *expression* 少了赋值和逗号两层。于是把 `==` 误写成 `=` 会直接成为语法错误。`contract_assert(a, b)` 也不会被悄悄读成只检查 `b` 的逗号表达式。确实需要这两种运算时，再加一层括号即可。
 
 ## 谓词（¶2）
 
-¶2 断言语句的谓词，是它的 *conditional-expression* **按语境转换为 bool**（[[conv]]）后的结果。因此 `explicit operator bool` 可以用于谓词，指针、整数也都可以直接写。
+¶2 断言语句的谓词，是它的 *conditional-expression* [[g:contextually-converted-to-bool|按语境转换为 bool]] 的结果，也就是 `if (e)` 对条件做的那种转换。所以指针、整数，以及带 `explicit operator bool` 的类类型都可以直接写。
 
-结合 [[expr.prim.id.unqual#7]] 的 const 化规则，谓词不能修改断言之外声明的变量：
-
-```cpp error
-#include <vector>
-void g(std::vector<int>& v, int i) {
-    contract_assert(++i > 0);           // error: 谓词中的 i 是 const int
-    contract_assert(v.emplace_back(1) == 1);  // error: v 在谓词中是 const，不能调用非 const 成员函数
-}
-```
-
-但 const 化只作用于名字，不会传递到指针所指的对象，也挡不住 `const_cast` 或 `mutable` 成员。刻意绕过时仍然能写出带副作用的谓词，而标准明确说这些副作用不一定发生（[[basic.contract.eval#5]]）。
-
-## 连续断言的按序求值（¶3）
-
-¶3 连续的断言语句的求值，是对它们引入的契约断言的一次**按序求值**（evaluation in sequence，[[basic.contract.eval#18]]）。
-
-按序求值允许实现把列表中的每个断言**重复求值实现定义的次数**，只要每个断言首次出现的相对顺序保持不变。注 1 的例子：
+谓词里还有一条来自 [[expr.prim.id.unqual#7]] 的规则：如果名字指代的是在断言之外声明的变量，这个表达式的类型带 const。`this` 在谓词里也是指向 const 的指针（[[expr.prim.this#3]]）。这样谓词就不能直接修改它检查的状态：
 
 ```cpp
-int f(int i) {
-    contract_assert(i == 0);   // #1
-    contract_assert(i >= 0);   // #2
-    return 0;
+#include <vector>
+void g(std::vector<int>& v, int i) {
+    contract_assert(++i > 0);                 // error: 这里的 i 是 const int
+    contract_assert(v.emplace_back(1) == 1);  // error: v 是 const，不能调用非 const 成员
 }
-int g = f(0);   // 可能的求值序列：#1 #2 #1 #2
 ```
 
-[[basic.contract.eval#18]] 的例子给出了更完整的列表：`#1 #2`、`#1 #1 #2 #2`、`#1 #2 #1 #2`、`#1 #2 #2 #1` 都合法，`#2 #1` 不合法（#2 的首次出现早于 #1）。
+const 只加在名字本身上，不会沿指针传递，也挡不住 `const_cast` 和 `mutable` 成员。刻意绕过时仍然能写出有副作用的谓词，但这些副作用不一定发生，见下一节。
 
-允许重复是为了支持工具与测试，例如检查谓词是否真的无副作用（多次求值结果应该一致），或者在不同的位置（调用方与被调方）各检查一次。标准建议实现默认不重复（[[basic.contract.eval#19]]），但提供选项。
+## 求值语义
 
-连续是指这些断言语句之间没有其他语句。如果中间隔了一条普通语句，它们就分属两个独立的序列。
+每次求值一个契约断言，都采用四种[[g:evaluation-semantic|求值语义]]之一（[[basic.contract.eval#1]]）。选哪一种由实现决定，通常由编译选项控制，同一个断言的不同次求值也可以不同（[[basic.contract.eval#2]]）。标准建议默认用 enforce。
 
-## 求值语义的后果
-
-| 语义 | 谓词为 false 时 | 典型用途 |
+| 语义 | 检查谓词吗 | 谓词为 false 时 |
 |---|---|---|
-| ignore | 什么也不发生 | 发布构建、性能敏感路径 |
-| observe | 调用违约处理函数，处理函数返回后继续执行 | 在生产环境中先观察新加的断言 |
-| enforce | 调用处理函数，返回后契约终止 | 默认；调试构建 |
-| quick-enforce | 直接契约终止 | 安全加固，最小代码体积 |
+| ignore | 不检查 | 什么也不发生 |
+| observe | 检查 | 调用违约处理函数，它正常返回后继续往下执行 |
+| enforce | 检查 | 调用违约处理函数，它正常返回后终止程序 |
+| quick-enforce | 检查 | 不调用处理函数，直接终止程序 |
 
-违约处理函数可以抛出异常。对断言语句来说，异常从这条语句的执行处继续向外查找处理器（[[basic.contract.eval#17]] 注 13）。前置/后置条件则不同，表现为函数体以该异常退出。
+后三种叫检查型语义。即使在检查型语义下，谓词也不一定真的被求值：实现可以用一个结果相同、没有副作用的计算来代替它（[[basic.contract.eval#5]]）。ignore 语义下谓词不求值，但它仍是潜在求值的，其中用到的函数和变量照样被 odr-use。
 
-在常量求值中：
+断言语句不是宏，不经过预处理器，`NDEBUG` 对它没有影响。
 
-```cpp error
+违约处理函数可以抛出异常。对断言语句来说，异常从这条语句所在的位置继续向外寻找处理器（[[basic.contract.eval#17]] 的注 13）。`pre`、`post` 的情形不同，异常表现为函数体以这个异常退出。
+
+### 常量求值中的违约
+
+```cpp
 constexpr int checked_div(int a, int b) {
     contract_assert(b != 0);
     return a / b;
 }
-constexpr int ok = checked_div(6, 3);    // OK
-constexpr int bad = checked_div(1, 0);   // 非良构：常量求值中违约（若语义是终止性的）
+constexpr int ok  = checked_div(6, 3);   // OK
+constexpr int bad = checked_div(1, 0);   // 违约
 ```
 
-（如果实现在常量求值中选择 observe 语义，会产生一条诊断，但不一定非良构；如果选择 ignore，随后的除以零会使求值不是常量表达式。无论如何，这个初始化都无法通过。）
+常量求值中发生违约时，结局取决于这次求值的语义（[[basic.contract.eval#8]]）。enforce 和 quick-enforce 下程序非良构。observe 下实现必须给出诊断，然后可以继续，但接下来的 `1 / 0` 不是常量表达式，`bad` 的初始化照样失败。ignore 下同样卡在除以零上。所以这个初始化在任何语义下都通不过，区别只在报出的是哪一个错误。
 
-## 与 assert 宏、assume 属性的对比
+## 连续的断言按序求值（¶3）
 
-| | `assert(e)` 宏 | `contract_assert(e)` | `[[assume(e)]];` |
+¶3 若干条紧挨着的断言语句，它们的求值是对所引入契约断言的一次**按序求值**（evaluation in sequence，[[basic.contract.eval#18]]）。
+
+```cpp
+void f(int i) {
+    contract_assert(i > 0);    // #1
+    contract_assert(i < 10);   // #2
+}
+// 合法的求值序列：#1 #2；#1 #1 #2 #2；#1 #2 #1 #2；#1 #2 #2 #1
+// 不合法：#2 #1
+```
+
+按序求值允许实现把每个断言重复求值实现定义的次数，唯一的约束是每个断言第一次出现的先后顺序与源码一致。所以 `#2 #1` 不行，`#1 #2 #2 #1` 可以。
+
+允许重复是为了方便工具和测试：一个无副作用的谓词，求值多少次结果都应当相同，重复求值可以把有副作用的谓词暴露出来。标准建议实现提供重复求值的选项，但默认不重复（[[basic.contract.eval#19]]）。中间隔了一条其他语句的断言不算连续，分属两组。
+
+## 与 assert 宏、`[[assume]]` 的对比
+
+| | `assert(e)` | `contract_assert(e);` | `[[assume(e)]];` |
 |---|---|---|---|
-| 是什么 | 预处理宏（[[cassert.syn]]） | 语句，引入契约断言 | 属性，作用于空语句 |
-| 关闭方式 | 定义 `NDEBUG` | 实现选择 ignore 语义（编译选项） | 不能关闭 |
-| `e` 为 false 时 | 调用 `abort` | 依语义：忽略 / 观察 / 终止 | **UB**（[[dcl.attr.assume]]） |
-| `e` 被求值吗 | 是（未定义 `NDEBUG` 时） | 未指定 | 从不 |
-| 对变量的 const 化 | 无 | 有 | 无 |
-| 能用在表达式中 | 能（是表达式） | 不能 | 不能 |
-| 跨 TU 的 ODR 风险 | 有（`NDEBUG` 不一致导致 inline 函数的定义不同） | 求值语义不是定义的一部分；仅当谓词的副作用影响常量表达式的值时才可能出问题（[[basic.contract.eval#8]] 注 6） | 无 |
+| 是什么 | 预处理宏（[[cassert.syn]]） | 语句，引入契约断言 | 用在空语句上的属性（[[dcl.attr.assume]]） |
+| 怎样关闭 | 定义 `NDEBUG` | 实现选择 ignore 语义 | 不能关闭 |
+| `e` 为 false 时 | 调用 `abort` | 取决于求值语义 | 未定义行为 |
+| `e` 会被求值吗 | 未定义 `NDEBUG` 时会 | 未指定 | 从不 |
+| 外部变量在 `e` 中是 const | 否 | 是 | 否 |
+| 能用在表达式里 | 能 | 不能 | 不能 |
 
-`[[assume]]` 与契约断言的方向正好相反。契约断言的意思是检查这个条件，不满足就报告；`[[assume]]` 的意思是程序员保证这个条件成立，编译器可以据此优化，不成立就是 UB。不要把二者混用。
+`[[assume]]` 和契约断言的方向相反。契约断言的意思是请检查这个条件，不满足就报告；`[[assume(e)]]` 的意思是我保证 `e` 成立，编译器可以据此优化，不成立就是 UB。
+
+`assert` 在不同翻译单元里 `NDEBUG` 设置不一致时，同一个 inline 函数会有不同的定义，违反 ODR。契约断言的求值语义不是定义的一部分，一般没有这个问题。只有谓词的副作用改变了某个常量表达式的值时，不同的语义选择才可能导致 ODR 违规（[[basic.contract.eval#8]] 的注 6）。
+
+## 常见误解
+
+!!! pitfall "在谓词里做有用的事"
+    谓词可能不求值（ignore，或者被等价计算代替），也可能求值多次（按序求值的重复）。日志、计数、修改状态这类程序依赖的副作用都不应该放进谓词。
+
+!!! pitfall "有了断言，后面的代码就安全了"
+    observe 语义下，违约处理函数返回后程序继续执行。对 `contract_assert(p != nullptr); use(*p);`，接下来仍然是空指针解引用。断言之后的代码要么能承受条件不成立，要么确保这段代码不会以 observe 或 ignore 语义部署。
 
 ## 历史与演进
 
 !!! history
-    - C++20 的工作草案中一度有基于属性语法的契约（`[[expects]]`、`[[ensures]]`、`[[assert]]`），在 C++20 发布前整体移除，原因是在违约后继续执行的语义、构建模式等问题上无法达成共识。
-    - 之后 SG21 重新设计了最小可行产品（MVP），最终以 [[P2900R14]] 的形式进入 C++26：语法改为关键字/上下文关键字（`contract_assert`、`pre`、`post`），去掉了构建级别，改为每次求值的实现定义语义。
-    - 在 C++23 及之前，函数体内的断言只能使用 `<cassert>` 的 `assert` 宏或各种库/编译器扩展。
-
-## 陷阱
-
-!!! pitfall "不要在谓词中做有用的事"
-    谓词可能不求值（ignore，或检查语义下用等价计算代替），也可能求值多次（按序求值的重复）。程序依赖的任何副作用，如日志、计数、修改状态，都不该放进谓词。
-
-!!! pitfall "observe 语义下违约后继续执行"
-    对 `contract_assert(p != nullptr); use(*p);`，在 observe 语义下，违约处理函数返回后会继续执行 `use(*p)`，接着就是空指针解引用的 UB。契约断言不会让后面的代码变得安全。在 observe 或 ignore 语义下，断言之后的代码必须能承受谓词为假的情形，否则就必须确保不以这些语义部署。
+    - C++20 的工作草案曾经有一套基于属性语法的契约（`[[expects]]`、`[[ensures]]`、`[[assert]]`），在 C++20 发布前被整体移除，分歧集中在违约后能否继续执行、怎样配置构建模式等问题上。
+    - 之后的设计以 [[P2900R14]] 进入 C++26：语法改为 `contract_assert` 关键字和 `pre`、`post`，用每次求值的求值语义取代了原来的构建级别。
+    - C++23 及以前，函数体内的断言只能用 `<cassert>` 的 `assert` 宏或各家的扩展。
 
 ## 思考题
 
-!!! question "1. 为什么谓词的语法是 conditional-expression 而不是 expression？"
-
-<details markdown="1">
-<summary>答案</summary>
-
-一是防止 `contract_assert(x = 0)` 这种把比较误写为赋值的错误，这种写法在 `assert` 宏和 `if` 中都合法而危险。二是逗号：如果允许 *expression*，`contract_assert(a, b)` 会解析为逗号表达式（只检查 `b`），读者却很可能以为它检查了两个条件。三是为将来的扩展留出语法空间（例如在括号内追加其他标注）。确实需要逗号或赋值时，可以再加一层括号，这样能清楚地表明是有意为之。
-</details>
-
-!!! question "2. 下面的代码中，`contract_assert` 能观察到 `n` 被修改吗？"
+!!! question "思考题 1"
+    下面的代码良构吗？调用 `g()` 之后 `n` 的值是多少？
     ```cpp
     int n = 0;
     void f(int* p) { contract_assert((*p = 1, true)); }
@@ -180,17 +162,16 @@ constexpr int bad = checked_div(1, 0);   // 非良构：常量求值中违约（
 <details markdown="1">
 <summary>答案</summary>
 
-程序是良构的。const 化只作用于谓词中出现的变量名 `p` 本身（`p` 变成 `int* const`），`*p` 的类型仍是 `int`，可以赋值。但赋值是否发生是未指定的：ignore 语义下谓词不求值；检查语义下，实现可以发现谓词恒为 `true` 而跳过求值（[[basic.contract.eval#5]]）；按序求值时还可能执行多次。所以 `g()` 之后 `n` 可能是 0，也可能是 1。
+良构。const 只加在谓词中出现的名字 `p` 上，`p` 的类型变成 `int* const`，`*p` 仍是可修改的 `int` 左值。外层的括号让逗号表达式成为一个 *primary-expression*，符合语法。
+
+但赋值是否发生是未指定的：ignore 语义下谓词不求值；检查型语义下，实现可以看出谓词恒为 `true` 而跳过求值（[[basic.contract.eval#5]]）；重复求值时还可能赋值多次。所以 `n` 可能是 0，也可能是 1。
 </details>
 
-## 小结
+!!! question "思考题 2"
+    `contract_assert(x > 0); log(); contract_assert(x < 10);` 中，实现可以先检查 `x < 10` 再检查 `x > 0` 吗？
 
-| 方面 | 规则 |
-|---|---|
-| 语法 | `contract_assert attr(opt) ( conditional-expression ) ;`，关键字 |
-| 引入 | 一个契约断言；属性属于该断言 |
-| 谓词 | 条件表达式按语境转换为 bool；外部变量在谓词中为 const |
-| 连续断言 | 一起按序求值，可重复，首次出现顺序不变 |
-| 求值语义 | ignore / observe / enforce / quick-enforce，实现定义 |
-| 常量求值 | 终止性语义下违约 → 非良构 |
-| 违约处理函数抛异常 | 从该语句处继续传播 |
+<details markdown="1">
+<summary>答案</summary>
+
+不可以。中间隔了一条语句，两条断言不是连续的，各自单独求值，按语句的执行顺序进行。只有连续的断言语句才组成一组按序求值（¶3），而即使在一组之内，第一次出现的先后顺序也必须与源码一致。
+</details>

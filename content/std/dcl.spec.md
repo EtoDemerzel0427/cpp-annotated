@@ -1,54 +1,82 @@
 ---
 title: 说明符
-summary: decl-specifier 的种类与组合限制；说明符序列中的属性属于类型；遇到类型名时它是否算作说明符的最长匹配规则，以及由此产生的 typedef 名谜题
+summary: 声明开头的说明符有哪几种、哪些不能重复；说明符序列末尾的属性属于类型；说明符序列里遇到类型名时，它是类型还是被声明的名字。
 status: done
 covers: dcl.spec.general
 related: dcl.pre, dcl.type, dcl.type.simple, dcl.stc, dcl.meaning, dcl.ambig.res
 tags: 声明, 说明符, 语法
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-声明开头的那串关键字和类型名，如 `static constexpr unsigned long`、`inline virtual`、`typedef const char*`，在标准中叫 ***decl-specifier-seq***（说明符序列）。9.2 整节都在讲它们。本页对应 9.2.1 [dcl.spec.general]，内容包括说明符的种类、哪些说明符不能重复，以及一条相当细致的语法规则：在说明符序列中遇到一个类型名时，它到底是类型说明符，还是将要声明的名字。
+!!! tldr
+    - 声明开头的 `static constexpr unsigned long`、`inline virtual` 这类关键字和类型名叫说明符序列，作用于整条声明；说明符之间的顺序是自由的。
+    - `friend`、`typedef`、`inline` 各至多出现一次；`constexpr`、`consteval`、`constinit` 三者至多出现一个。
+    - 说明符序列末尾的属性属于类型，不属于被声明的实体；标准属性都不能用在这个位置。
+    - 说明符序列里遇到一个类型名时，只有前面还没有（cv 限定符以外的）类型说明符，它才算类型；否则它是被声明的名字。所以 `void h(unsigned Pc);` 中的 `Pc` 是参数名。
+    - typedef 不是宏替换：`typedef char* Pc;` 之后，`const Pc` 是 `char* const`，不是 `const char*`。
 
-背景知识：声明的三段式结构见 [[dcl.pre#4]]；类型说明符的组合规则见 [[dcl.type.general]]。
+## typedef 名什么时候是类型
+
+```cpp run ok
+#include <type_traits>
+typedef char* Pc;
+void f(const Pc);          // Pc 是类型 → void f(char* const)
+void g(const int Pc);      // Pc 是参数名 → void g(const int)
+void h(unsigned Pc);       // Pc 是参数名 → void h(unsigned int)
+
+static_assert(std::is_same_v<decltype(f), void(char*)>);   // 参数的顶层 const 不进函数类型
+static_assert(std::is_same_v<decltype(h), void(unsigned)>);
+int main() { }
+```
+
+同一个名字 `Pc`，在 `f` 里是类型，在 `g`、`h` 里却是参数名。这由 [dcl.spec.general] 的第 3 段决定，下面先介绍说明符的种类，再回到这条规则。
 
 ## 说明符的种类（¶1）
 
-¶1 *decl-specifier* 一共九类：
+¶1 声明开头的 **decl-specifier**（说明符）共有九种，组成的序列叫 *decl-specifier-seq*（说明符序列）：
 
 | 说明符 | 作用 | 详见 |
 |---|---|---|
 | *storage-class-specifier*：`static` `thread_local` `extern` `mutable` | 存储期、链接、可变成员 | [[dcl.stc]] |
 | *defining-type-specifier*：类型说明符、类定义、枚举定义 | 给出基础类型 | [[dcl.type]] |
-| *function-specifier*：`virtual` `explicit` `explicit(bool)` | 仅用于函数 | [[dcl.fct.spec]] |
-| `friend` | 友元声明 | [[dcl.friend]]、[[class.friend]] |
+| *function-specifier*：`virtual`、`explicit`、`explicit(bool)` | 只用于函数 | [[dcl.fct.spec]] |
+| `friend` | 友元声明 | [[dcl.friend]] |
 | `typedef` | 类型别名 | [[dcl.typedef]] |
-| `constexpr` `consteval` | 常量求值资格 | [[dcl.constexpr]] |
+| `constexpr` | 可以在常量求值中使用 | [[dcl.constexpr]] |
+| `consteval` | 立即函数，只能在常量求值中调用 | [[dcl.constexpr]] |
 | `constinit` | 要求静态初始化 | [[dcl.constinit]] |
-| `inline` | ODR 豁免 | [[dcl.inline]] |
+| `inline` | 允许每个翻译单元各有一个定义 | [[dcl.inline]] |
 
-另外有几样东西**不是** *decl-specifier*，也值得记住：
+有几样东西不是说明符：
 
-- `auto` 早已不是存储类说明符（C++11 起），而是占位类型说明符（[[dcl.spec.auto]]）；`register` 在 C++17 被移除（[[dcl.stc]]）。
-- `override`、`final` 是 *virt-specifier*，写在声明符之后，不在说明符序列里（[[class.mem]]）。
+- `auto` 从 C++11 起不再是存储类说明符，而是占位类型说明符，属于类型说明符（[[dcl.spec.auto]]）；`register` 在 C++17 被移除（[[dcl.stc]]）。
+- `override`、`final` 写在声明符之后（[[class.mem]]）。
 - `noexcept` 是函数类型的一部分，写在声明符里（[[except.spec]]）。
-- `extern "C"` 是 *linkage-specification*，不是存储类说明符（[[dcl.link]]）。
+- `extern "C"` 是链接规格，不是存储类说明符（[[dcl.link]]）。
 
-¶1 的语法还说明，*decl-specifier-seq* 末尾可以跟一个 *attribute-specifier-seq*，它**属于由前面的说明符确定的类型**，并且只影响本声明中的该类型，不影响涉及同一类型的其他声明。
+说明符的顺序是自由的。`int static const x = 0;`、`const static int y = 0;`、`static int const z = 0;` 完全等价，`unsigned long` 这样的多词类型也可以和其他说明符穿插（[[dcl.type.simple#4]]）：
 
-!!! std
-    The optional *attribute-specifier-seq* in a *decl-specifier-seq* appertains to the type determined by the preceding *decl-specifiers*.
+```cpp run ok
+int static const x = 0;
+long unsigned long const static y = 0;   // static const unsigned long long
+inline static int z = 0;                  // 与 static inline 相同
+int main() { return x + int(y) + z; }
+```
 
-C++ 属性的归属由位置决定，这里是一个例子（作为对比，声明开头的属性属于被声明的实体，[[dcl.pre#4]]；*declarator-id* 后的属性也属于实体）。标准属性中没有一个可以作用于类型，所以把标准属性写在这个位置都是错误的：
+C 标准把不在开头的存储类说明符列为过时特性，C++ 标准没有这种规定。不过为了可读性和与 C 共用头文件，惯例仍然把 `static`、`extern` 写在最前面。
+
+### 说明符序列末尾的属性
+
+¶1 的语法还允许在说明符序列末尾写属性。这里的属性**属于前面的说明符确定的类型**，并且只在本声明中影响这个类型。声明开头的属性和名字后面的属性则属于被声明的实体（[[dcl.pre#4]]）。
 
 ```cpp error
-int [[deprecated]] x;      // error: deprecated 不能作用于类型（它属于 int 这个类型，而不是 x）
+int [[deprecated]] x;      // error: deprecated 不能用于类型，而这里它属于 int
 [[deprecated]] int y;      // OK: 开头的属性属于 y
 ```
 
-实现特有的属性可以作用于类型（例如某些编译器的向量类型、地址空间属性），这个语法位置正是为它们而设。
+标准属性没有一个能用于类型，所以把标准属性写在这个位置都是错误的。这个位置是给实现特有的类型属性准备的。
 
-## 不可重复的说明符（¶2）
+## 不能重复的说明符（¶2）
 
 ¶2 `friend`、`typedef`、`inline` 在一个说明符序列中各至多出现一次；`constexpr`、`consteval`、`constinit` 三者合计至多出现一个。
 
@@ -58,118 +86,85 @@ constexpr constinit int x = 1;   // error: constexpr 与 constinit 不能并存
 consteval constexpr int g();     // error: 同上
 ```
 
-其他说明符的重复规则分散在各自的条款中：
+本机 Clang 23 对 `inline inline` 和 `const const int` 只给出 `-Wduplicate-decl-specifier` 警告，这是沿用 C 的行为，C 允许重复的限定符和 `inline`。在 C++ 中它们都非良构，警告已经满足了诊断要求。`constexpr constinit` 则是错误。
 
-- 存储类说明符至多一个，例外是 `thread_local` 可以与 `static` 或 `extern` 搭配（[[dcl.stc#1]]）；
-- `virtual` 至多一个，*explicit-specifier* 至多一个（[[dcl.fct.spec#1]]）；
-- 类型说明符的组合由 [[dcl.type.general#2]] 规定：`long long` 合法（`long` 可以和 `long` 组合），`const const` 不合法。
+`constexpr` 变量本来就要求常量初始化（[[dcl.constexpr#6]]），`constinit` 只表达其中的一半，两个一起写没有意义。对函数来说，`constexpr` 和 `consteval` 是互斥的两种性质：可以在常量求值中调用，与只能在常量求值中调用。
 
-!!! impl "Clang 对重复只给警告"
-    对 `inline inline` 和 `const const int`，Clang 给出的是 `-Wduplicate-decl-specifier` 警告，这是从 C 继承来的行为，因为 C 允许重复的限定符和 `inline`。按 C++ 标准，它们都是非良构的，但警告已构成诊断。`constexpr constinit` 则是硬错误。
+其他说明符的重复规则在各自的条款里：存储类说明符至多一个，只有 `thread_local` 可以和 `static` 或 `extern` 搭配（[[dcl.stc#1]]）；类型说明符的组合见 [[dcl.type.general#2]]，`long long` 合法，`const const` 不合法。
 
-`constexpr` 和 `constinit` 不能并存，是因为 `constexpr` 变量已经要求常量初始化（[[dcl.constexpr#6]]），`constinit` 只表达其中必须常量初始化这一半，同时写没有意义。`constexpr` 和 `consteval` 对函数则是互斥的两种性质（可常量求值 vs 必须常量求值）。
+## 类型名属于说明符还是声明符（¶3–4）
 
-## 类型名何时属于说明符序列（¶3–4）
-
-这是本节的核心。先看这个声明：
-
-```cpp
-typedef int I;
-void f(unsigned I);
-```
-
-`unsigned I` 有两种读法：(a) `unsigned` + 类型名 `I` 组成说明符序列，参数无名；(b) `unsigned` 是说明符序列，`I` 是参数名（重新声明了名字 `I`）。由于 `unsigned I`（`unsigned` + typedef 名）本来就不是合法的类型组合，我们希望得到 (b)。那么 `const I` 呢？`const` + `I` 是合法的组合。
+回到开头的问题。`void h(unsigned Pc);` 中的 `unsigned Pc` 有两种读法：`unsigned` 加类型名 `Pc` 组成说明符序列，参数无名；或者 `unsigned` 是说明符序列，`Pc` 是参数名。`unsigned` 加一个 typedef 名本来就不是合法的类型，我们希望得到后一种。可是 `const Pc` 也有同样的两种读法，而 `const` 加 `Pc` 是合法的组合。
 
 ¶3 给出了确定的规则：
 
 !!! std
     If a *type-name* is encountered while parsing a *decl-specifier-seq*, it is interpreted as part of the *decl-specifier-seq* if and only if there is no previous *defining-type-specifier* other than a *cv-qualifier* in the *decl-specifier-seq*.
 
-    解析说明符序列时遇到类型名，当且仅当前面还没有（除 cv 限定符外的）定义类型说明符时，它才是说明符序列的一部分。
+    解析说明符序列时遇到类型名，当且仅当前面还没有 cv 限定符以外的类型说明符，它才属于说明符序列。
 
-换句话说，说明符序列**贪婪地吞下第一个类型名**。一旦已经有了一个实际给出类型的说明符（`int`、`unsigned`、`long`、另一个类型名、`class X {…}` 等），后面再出现的类型名就不再被吞下，而是作为声明符的开始，即被声明的名字。cv 限定符不算在内，因为 `const` 本身不能单独构成类型。
+换句话说，说明符序列只吞下第一个类型。前面一旦已经有一个真正给出类型的说明符（`int`、`unsigned`、`long`、另一个类型名、`class X {…}` 等），后面再出现的类型名就不再属于说明符序列，而是声明符的开始，也就是被声明的名字。`const` 不算，因为它不能单独构成类型。
 
-### 标准的例子逐一拆解
-
-```cpp run ok
-#include <type_traits>
-typedef char* Pc;
-void f(const Pc);          // Pc 是类型：const 之前没有类型说明符 → void f(char* const)
-void g(const int Pc);      // int 之后的 Pc 是参数名 → void g(const int)
-void h(unsigned Pc);       // unsigned 是类型说明符，Pc 是参数名 → void h(unsigned int)
-void k(unsigned int Pc);   // 同上 → void k(unsigned int)
-
-static_assert(std::is_same_v<decltype(f), void(char*)>);   // 顶层 const 从函数类型中去掉
-static_assert(std::is_same_v<decltype(h), void(unsigned)>);
-int main() { }
-```
-
-注意，`f(const Pc)` 的参数类型是 `char* const`，而不是 `const char*`。typedef 不是宏替换，`const` 作用于 `Pc` 所代表的整个指针类型（[[dcl.type.cv]]、[[dcl.typedef]]）。这是对 typedef 最常见的误解之一。
+¶4（注）`signed`、`unsigned`、`long`、`short` 单独使用时隐含 `int`，所以它们之后的类型名是被声明的名字，`void h(unsigned Pc)` 就是这种情况。这只是 ¶3 的推论。
 
 ```cpp error
 typedef char* Pc;
-static Pc;                 // error: Pc 被吞进说明符序列，没有剩下声明符 —— 名字缺失
+static Pc;                 // error: Pc 进了说明符序列，没有剩下声明符
 ```
 
-（Clang 对此只给出"declaration does not declare anything"警告，参见 [[dcl.pre#6]] 的实现说明。）要声明一个名为 `Pc` 的 static 变量，必须先写一个非 cv 的类型说明符，让 `Pc` 落到声明符位置：`static char* Pc;`。
-
-¶4（注）`signed`、`unsigned`、`long`、`short` 默认隐含 `int`，所以它们之后的类型名会被当作被声明的名字，`void h(unsigned Pc)` 就是这样。这条注只是 ¶3 的推论，不是新规则。
+这是标准例 1。要声明一个名为 `Pc` 的 static 变量，必须先写一个 cv 以外的类型说明符，让 `Pc` 落到声明符的位置：`static char* Pc;`。本机 Clang 23 对 `static Pc;` 只给出 declaration does not declare anything 的警告。
 
 ### 更多边界情况
 
 ```cpp run ok
 typedef int T;
-void a(T const T);         // 第一个 T 是类型（之前无类型说明符），第二个 T 是参数名
+void a(T const T);         // 第一个 T 是类型，第二个 T 是参数名
 void b() {
-    T T = 1;               // 同理：声明一个名为 T 的 int 局部变量，隐藏了 typedef
-    (void)T;               // 此后 T 指代变量
+    T T = 1;               // 声明一个名为 T 的 int 局部变量
+    (void)T;               // 此后在这个块里 T 指这个变量
 }
 int main() { }
 ```
 
+<div class="compare" markdown="1">
+
 ```cpp error
 typedef long L;
-void c(L long);            // error: L 被吞进说明符序列；然后 long 与 typedef 名组合 —— 非法
+void c(L long);
+// error: L 已是类型，
+// long 不能再与它组合
+```
+
+```cpp error
 typedef int T;
-unsigned T u;              // error: T 是变量名（unsigned 之后），后面多出来的 u 无法解析
+unsigned T u;
+// error: T 成了变量名，
+// 后面的 u 无法解析
 ```
 
-`void c(L long)` 一例说明这条规则是**单向的**：它只决定类型名是否被吞下，不会因为后面组合失败而回头重新解析。`L` 被吞下后，`long` 也是一个类型说明符（不是类型名，所以 ¶3 不管它），于是 `L long` 违反了 [[dcl.type.general#2]] 的组合规则。
+</div>
 
-!!! lawyer "为什么是类型名而不是标识符"
-    ¶3 只在遇到 *type-name*（类名、枚举名、typedef 名，[[dcl.type.simple]]）时生效。普通变量名本来就不能出现在说明符序列中，不存在歧义。判断一个标识符是不是类型名需要做名字查找，这是 C++ 不能脱离语义做语法分析的原因之一（可以看作 lexer hack 的 C++ 版本）。
+`void c(L long)` 说明这条规则不会回头。`L` 被吞进说明符序列后，`long` 也是类型说明符，但它不是类型名，¶3 管不到它，于是 `L long` 违反了 [[dcl.type.general#2]] 的组合规则。编译器不会因为组合失败而把 `L` 改当参数名。
 
-!!! note "与构造函数声明的关系"
-    在类内的 `S();` 中，`S` 查找到的是注入类名（一个类名）。如果按 ¶3 机械处理，`S` 会被吞进说明符序列，剩下的 `()` 是一个抽象声明符，于是成了一个无名的函数声明。构造函数的识别由 [[class.ctor.general]] 的专门规则处理：形如注入类名 `(` 参数列表 `)`、且没有其他类型说明符的函数声明符，声明的是构造函数。
+¶3 只对类型名（类名、枚举名、typedef 名，[[dcl.type.simple]]）起作用，普通变量名本来就不会出现在说明符序列里。判断一个标识符是不是类型名需要名字查找，这是 C++ 的语法分析离不开语义信息的原因之一。
 
-### 自洽要求
+!!! note "构造函数声明"
+    类里的 `S();` 中，`S` 查到的是注入类名，按 ¶3 机械处理会被吞进说明符序列，剩下的 `()` 成了无名的函数声明符。构造函数的识别由 [[class.ctor.general]] 的专门规则处理：注入类名后面直接跟参数列表、且没有其他类型说明符的函数声明符，声明的是构造函数。
 
-¶3 最后一句说"序列必须是自洽的，如下所述"，指的是 9.2 后续各节对说明符组合的约束：[[dcl.stc]]（存储类说明符的组合与适用对象）、[[dcl.fct.spec]]（函数说明符只用于函数）、[[dcl.typedef]]（`typedef` 只能和类型说明符组合）、[[dcl.type.general]]（类型说明符的组合表）等。这些规则加在一起，才确定一个说明符序列是否合法。
+¶3 最后一句要求说明符序列自洽，具体约束分布在 9.2 后续各节：[[dcl.stc]]、[[dcl.fct.spec]]、[[dcl.typedef]]、[[dcl.type.general]] 等。
 
-## 说明符的顺序
+## 常见误解
 
-标准不规定说明符的顺序，`int static const x = 0;`、`const static int y = 0;`、`static int const z = 0;` 完全等价（[[dcl.type.simple#4]] 明确说可以自由混排）。唯一与顺序有关的就是 ¶3 的类型名规则。
+!!! pitfall "`const Pc` 等于 `const char*`"
+    typedef 不是文本替换。`Pc` 代表整个指针类型 `char*`，`const` 加在这个指针类型上，得到 `char* const`（[[dcl.type.cv]]、[[dcl.typedef]]）。
 
-```cpp run ok
-int static const x = 0;
-long unsigned long const static y = 0;   // unsigned long long，const，static
-inline static int z = 0;                  // static inline 与 inline static 相同
-int main() { return x + int(y) + z; }
-```
+!!! pitfall "说明符的顺序有含义"
+    `int const static` 和 `static const int` 完全相同。唯一与位置有关的是 ¶3：类型名出现在另一个类型说明符之后，就成了被声明的名字。
 
-!!! pitfall "风格 ≠ 规则"
-    `static` 应写在最前面，这是 C 标准中关于过时特性的一条说明（C 标准把不在开头的存储类说明符列为 obsolescent），C++ 标准没有这种说法。不过为了可读性，也为了与 C 共享头文件，惯例仍是把存储类说明符写在前面。
-
-!!! summary "小结"
-    - 说明符共九类，作用于整条声明；声明符只作用于单个名字。
-    - `friend`/`typedef`/`inline` 各至多一次；`constexpr`/`consteval`/`constinit` 三选一。
-    - 说明符序列末尾的属性属于类型，不属于实体。
-    - 类型名规则：前面没有非 cv 类型说明符时，类型名才被当作说明符；否则它是被声明的名字。
-    - typedef 不是宏：`const Pc` 是 `char* const`。
+## 思考题
 
 !!! question "思考题 1"
-    以下每个声明中，被声明的名字是什么、类型是什么？
-
+    以下每个函数的类型是什么？参数各叫什么？
     ```cpp
     typedef int A;
     typedef int B;
@@ -181,9 +176,11 @@ int main() { return x + int(y) + z; }
 <details markdown="1">
 <summary>答案</summary>
 
-- `f(A B)`：`A` 被吞下（之前无类型说明符），`B` 位于已有类型说明符之后，是参数名。`f` 的类型是 `void(int)`。
-- `g(const A, B)`：两个参数各有自己的 *decl-specifier-seq*。第一个：`const` 不算，`A` 被吞下 → 无名 `const int`；第二个：`B` 被吞下 → 无名 `int`。类型是 `void(int, int)`。
-- `h(A const B)`：`A` 被吞下，`const` 是 cv，`B` 之前已有非 cv 类型说明符 `A`，所以 `B` 是参数名。类型 `void(int)`。
+- `f(A B)`：`A` 是类型；`B` 前面已有类型说明符 `A`，所以是参数名。类型是 `void(int)`。
+- `g(const A, B)`：两个参数各有自己的说明符序列。第一个参数中 `const` 不算，`A` 是类型；第二个参数中 `B` 是类型。两个参数都无名，类型是 `void(int, int)`。
+- `h(A const B)`：`A` 是类型，`const` 是 cv 限定符，`B` 前面已有 `A`，所以是参数名。类型是 `void(int)`。
+
+本机 Clang 23 用 `__is_same` 验证了这三个类型。
 </details>
 
 !!! question "思考题 2"
@@ -192,5 +189,5 @@ int main() { return x + int(y) + z; }
 <details markdown="1">
 <summary>答案</summary>
 
-`S S;` 中第一个 `S` 是类名（被吞进说明符序列），第二个 `S` 是变量名，于是声明了一个名为 `S` 的变量。它在后续查找中隐藏了类名 `S`（查找同时找到类和其他实体时，丢弃类的声明，[[basic.lookup.general#4]]）。`S s2;` 里的 `S` 查找到的是变量，不是类型名，于是出现语法错误。改法是使用详述类型说明符 `struct S s2;`，它的查找会忽略非类型的名字（[[basic.lookup.elab]]）。
+`S S;` 中第一个 `S` 是类名，第二个 `S` 是变量名，于是声明了一个名为 `S` 的变量。查找同时找到类和变量时，类的声明被隐藏（[[basic.lookup.general#4]]），所以 `S s2;` 里的 `S` 找到的是变量，不是类型名，产生语法错误。改成 `struct S s2;` 即可：详述类型说明符的查找会忽略非类型的名字（[[basic.lookup.elab]]）。
 </details>

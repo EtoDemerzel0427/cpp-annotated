@@ -1,222 +1,96 @@
 ---
-title: 序言
-summary: 声明的总语法；simple-declaration 的三段结构；必须引入名字的规则；结构化绑定声明的说明符限制；typedef/函数/对象声明的分类；static_assert（含 C++26 自定义消息）、consteval 块、空声明与属性声明
+title: 声明的总语法
+summary: 声明有哪些语法形式、哪些能写在函数体里；一条声明怎样分成属性、说明符、声明符，何时引入名字；typedef、函数、对象三类声明；结构化绑定的外形限制；static_assert 与 consteval 块。
 status: done
 papers: P2593R1, P2741R3, P1401R5, P1061
 related: dcl, dcl.spec, dcl.decl, dcl.struct.bind, basic.def, expr.const
 tags: 声明, static_assert, 语法
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-[dcl.pre] 是第 9 章的总入口。它列出所有**声明**（*declaration*）的语法形式，并给出几条适用于所有声明的规则：一个声明怎样拆分，什么时候必须引入名字，什么时候是函数声明或对象声明，以及几种不声明任何名字的特殊声明（`static_assert`、`consteval` 块、空声明、属性声明）的语义。
+!!! tldr
+    - 函数定义、模板、命名空间定义都不是块声明，所以不能写在函数体里；`using`、`static_assert`、命名空间别名可以。
+    - 声明开头的属性属于每个被声明的实体；只有声明符是一个简单名字时，声明才引入这个名字。
+    - 一条声明里的每个声明符单独分类：带 `typedef` 的是 typedef 声明，类型是函数类型的是函数声明，否则是对象声明，类型是 `void` 之类的则非良构。
+    - 没有声明符的声明只能用来声明类或枚举，而且必须引入至少一个名字。
+    - `static_assert` 的条件允许窄化转换为 `bool`；模板定义里的 `static_assert(false)` 只在实例化时检查（C++23）；消息可以是编译期算出来的字符串（C++26）。
 
-本节把 [[basic.pre]]（什么是声明）与 [[basic.def]]（哪些声明是定义）具体化：那两节讲抽象概念，这里给出语法。读完本节，应当能把任何一行声明分解为属性、说明符、声明符、初始化器四部分，并判断它属于哪一类声明。
-
-## 声明的语法总表（¶1）
-
-¶1 声明的顶层语法分为两大类：
-
-- *name-declaration*：可能引入名字的声明，包括块声明（*block-declaration*）、无说明符函数声明、函数定义、友元类型声明、模板声明、推导指引、链接规格、命名空间定义、空声明、属性声明、模块导入声明；
-- *special-declaration*：显式实例化、显式特化、`export` 声明。
-
-后三者单独分出来，是因为它们只能出现在命名空间作用域，并且各自对内层声明有额外约束（例如 [[temp.expl.spec]]、[[module.interface]]）。
-
-*block-declaration* 是既能出现在命名空间作用域、也能出现在块作用域的那一部分：
-
-| 块声明 | 例子 | 详见 |
-|---|---|---|
-| *simple-declaration* | `int x = 1, *p;`、`auto [a, b] = pr;` | 本节、[[dcl.spec]]、[[dcl.decl]] |
-| *asm-declaration* | `asm("nop");` | [[dcl.asm]] |
-| *namespace-alias-definition* | `namespace fs = std::filesystem;` | [[namespace.alias]] |
-| *using-declaration* | `using std::swap;` | [[namespace.udecl]] |
-| *using-enum-declaration* | `using enum Color;` | [[enum.udecl]] |
-| *using-directive* | `using namespace std;` | [[namespace.udir]] |
-| *static_assert-declaration* | `static_assert(N > 0);` | 本节 ¶12–14 |
-| *consteval-block-declaration* {{c++26}} | `consteval { ... }` | 本节 ¶15 |
-| *alias-declaration* | `using I = int;` | [[dcl.typedef]] |
-| *opaque-enum-declaration* | `enum class E : int;` | [[dcl.enum]] |
-
-反过来，函数定义、模板声明、命名空间定义、链接规格、显式实例化/特化、模块导入都**不是块声明**，不能出现在函数体里。所以局部函数定义、局部模板、局部命名空间都不存在。这不是三条独立的规则，而是语法的直接推论。
+## 一条声明分成三段（¶4–5）
 
 ```cpp run ok
-#include <cstddef>
-void f() {
-    using I = int;                 // OK: alias-declaration 是块声明
-    static_assert(sizeof(I) >= 2); // OK: static_assert 是块声明
-    namespace s = std;             // OK: namespace-alias-definition 也是块声明
-    int g(int);                    // OK: 只是声明（simple-declaration），不是定义
-}
-int main() { }
+[[maybe_unused]] static int a, b;        // a 和 b 都带 maybe_unused
+static int c [[maybe_unused]], d;        // 只有 c 带
+[[noreturn]] void f [[noreturn]] ();     // OK：两处都写也可以
+int main() { return d; }
 ```
 
-```cpp error
-void f() {
-    int g() { return 0; }          // error: function-definition 不是 block-declaration
-}
-```
-
-¶1 中还有几个后面要用到的语法：
-
-- *simple-declaration* 有三种形式：(a) `decl-specifier-seq init-declarator-list(opt) ;`；(b) 以属性开头时，*init-declarator-list* 不可省略；(c) 结构化绑定声明 + 初始化器。
-- *sb-identifier*：结构化绑定里的每个名字，C++26 起可以带 `...`（结构化绑定包）和属性。
-- *nodeclspec-function-declaration*：`attribute-specifier-seq(opt) declarator ;`，即没有任何说明符的函数声明（¶11）。
-
-!!! note "为什么 (b) 要求有声明符"
-    如果按 (a) 解析 `[[nodiscard]] struct S;`，属性位于开头且没有声明符，那么属性应属于谁就不清楚了。标准规定 (b) 必须带声明符，这样开头的属性总是属于被声明的实体（¶4）。要给类本身加属性，应写在 *class-key* 之后：`struct [[nodiscard]] S;`（[[dcl.type.elab#2]]）。
-
-## 嵌套作用域中的成分不算（¶2）
-
-¶2 有些声明本身包含作用域（类定义、lambda、函数参数作用域等）。本章凡是说到声明中的某个成分，都**只看不嵌套在内层作用域里的部分**。
-
-这是一条阅读上的约定。例如 ¶6 说"若 *decl-specifier-seq* 含有 *class-specifier* ……"，那么在
-
-```cpp
-struct A { struct B { } b; } a;
-```
-
-中，只有 `A` 的 *class-specifier* 是这条声明的成分；`B` 的 *class-specifier* 嵌套在 `A` 的类作用域里，属于 `A` 内部的那条成员声明。没有这条约定，许多"声明中不得含有 X"的规则会意外地把 lambda 体、类体里的内容也算进来。
-
-## 友元类型声明的消歧（¶3）
-
-¶3 如果一个 *name-declaration* 同时符合 *friend-type-declaration* 的语法，就按 *friend-type-declaration* 处理。
-
-`friend C;` 既可以读成 *simple-declaration*（说明符 `friend` + 类型说明符 `C`，没有声明符），也可以读成 *friend-type-declaration*（`friend` *friend-type-specifier-list* `;`）。这条规则让它总是按后者处理，于是 [[class.friend]] 中关于友元类型的规则（例如不是类类型时忽略、C++26 的包展开 `friend Ts...;`）都能统一适用。详见 [[dcl.friend]]。
-
-## 三段式：属性、说明符、声明符（¶4–5）
-
-¶4 *simple-declaration* 和 *nodeclspec-function-declaration* 统一看作
+¶4 *simple-declaration* 统一看作三段：
 
 ```text
 attribute-specifier-seq(opt)  decl-specifier-seq(opt)  init-declarator-list(opt) ;
 ```
 
-三部分分别由 [[dcl.attr]]、[[dcl.spec]]、[[dcl.decl]] 描述。开头的属性**属于每一个声明符所声明的实体**。
+三段分别由 [[dcl.attr]]、[[dcl.spec]]、[[dcl.decl]] 描述。开头的属性**属于每一个声明符所声明的实体**。写在名字（*declarator-id*）后面的属性只属于这一个实体（[[dcl.meaning]]）。同一个属性两处都写不冲突，所以上例中 `f` 的写法是合法的。
 
-!!! std
-    The *attribute-specifier-seq* appertains to each of the entities declared by the *declarators* of the *init-declarator-list*.
-
-    开头的属性作用于本声明里每个声明符声明的实体。
-
-属性还可以写在 *declarator-id* 之后（`void f [[noreturn]] ();`），那里的属性只属于这一个实体（[[dcl.meaning]]）。标准的例子 `[[noreturn]] void f [[noreturn]] ();` 两处都写，这是合法的，重复的 `noreturn` 并不冲突。
-
-```cpp run ok
-[[maybe_unused]] static int a, b;        // a 和 b 都是 maybe_unused
-static int c [[maybe_unused]], d;        // 只有 c 是
-[[noreturn]] void f [[noreturn]] ();     // OK
-int main() { return d; }                 // 用一下 d，免得 -Wunused-variable
-```
-
-¶5 如果 *declarator-id* 是一个名字（即普通标识符、运算符函数名、转换函数名、字面量运算符名），这个 *init-declarator* 就**引入**这个名字，整个声明也因此引入这个名字。否则（*qualified-id*、析构函数名、*template-id*）不引入名字，而是重声明或定义一个已有的实体：
+¶5 如果 *declarator-id* 是一个名字，也就是标识符、运算符函数名、转换函数名或字面量运算符名，这个声明就**引入**这个名字。否则，它是限定名、析构函数名或 *template-id*，不引入名字，而是重新声明或定义一个已有的实体：
 
 ```cpp
 struct S { void f(); ~S(); };
-void S::f() { }        // declarator-id 是 qualified-id：不引入名字，定义已声明的 S::f
-S::~S() { }            // 析构函数：不引入名字
+void S::f() { }                  // 限定名：定义已声明的 S::f，不引入名字
+S::~S() { }                      // 析构函数：不引入名字
 template<class T> void g(T);
-template<> void g<int>(int);   // template-id：不引入名字
+template<> void g<int>(int);     // template-id：不引入名字
 ```
 
-[[basic.scope]] 中声明的目标作用域、名字绑定等概念都以这条规则为起点：只有引入名字的声明才会在某个作用域中绑定名字。
+[[basic.scope]] 里名字绑定到哪个作用域的规则，都以这一条为起点：只有引入名字的声明才会在作用域中绑定名字。
 
-¶5 后半句给出了类型的来源：*decl-specifier-seq* 中的定义类型说明符（[[dcl.type]]）加上递归的声明符结构，共同描述一个类型（[[dcl.meaning]]），这个类型与 *declarator-id* 关联。注意只有类型说明符参与；`static`、`inline`、`constexpr` 等不影响类型（`constexpr` 隐含的 const 是另一条规则 [[dcl.constexpr#6]] 加上去的）。
+¶5 后半句说明了类型从哪里来：说明符序列里的类型说明符（[[dcl.type]]）加上声明符的递归结构，共同描述一个类型（[[dcl.meaning]]）。`static`、`inline` 这类说明符不参与。
 
-## 省略声明符：只能用于声明类或枚举（¶6）
-
-¶6 *simple-declaration* 只有在**声明类或枚举**时才能省略 *init-declarator-list*，即 *decl-specifier-seq* 里有 *class-specifier*、带 *class-key* 的 *elaborated-type-specifier*，或 *enum-specifier*。此时（以及任何含有 *class-specifier* / *enum-specifier* 的声明中），这些说明符里的标识符也被声明（为类名、枚举名或枚举项）。并且：
-
-!!! std
-    In such cases, the *decl-specifier-seq* shall (re)introduce one or more names into the program.
-
-    此时说明符序列必须（重新）引入至少一个名字。
-
-```cpp
-struct S;              // OK: 声明类名 S
-struct T { int m; };   // OK: 定义并声明类名 T
-enum E { e1 };         // OK: 声明 E 和 e1
-enum { e2 };           // OK: 无名枚举，但引入了枚举项 e2
-```
-
-```cpp error
-enum { };              // error: 什么名字都没引入
-typedef class { };     // error: 无名类且没有 typedef 名
-int;                   // error: 既不是类/枚举声明，又没有声明符
-```
-
-!!! impl "Clang 只给警告"
-    对 `int;`、`enum { };`、`typedef class { };`，Clang 给出的是默认开启的警告（`-Wmissing-declarations` 组），而不是错误。这仍然符合标准，因为标准只要求给出诊断（[[intro.compliance]]），警告也是诊断。加 `-pedantic-errors` 或 `-Werror` 才会变成错误。
-
-禁止什么都不声明的声明，是因为这种声明几乎总是笔误（例如漏写了变量名），而且像 `const struct U { };` 这样的写法没有合理的语义，无法确定 `const` 作用于谁。与此相关，[[dcl.stc#1]] 和 [[dcl.type.cv#1]] 分别规定，出现存储类说明符或 cv 限定符时，声明符列表不得为空。
-
-```cpp error
-static struct T1 { };  // error: static 必须修饰被声明的变量/函数，这里没有
-const struct T2 { };   // error: 同理（[dcl.type.cv]/1）
-```
-
-（这两行 Clang 同样只给警告。）
-
-## 结构化绑定声明的限制（¶7）
-
-¶7 带 *structured-binding-declaration* 的 *simple-declaration* 或 *condition* 称为**结构化绑定声明**（详见 [[dcl.struct.bind]]）。本节只规定其外形：
-
-1. 说明符白名单：每个 *decl-specifier* 只能是 `constexpr`、`constinit`、`static`、`thread_local`、`auto` 或 cv 限定符。所以 `inline auto [a, b]`、`extern auto [a, b]`、`int [a, b]`、`C auto [a, b]`（受约束占位符）都不行。
-2. 至多一个包：至多一个 *sb-identifier* 前有 `...`；如果有，该声明必须声明一个模板化实体（即只能出现在模板里）{{c++26}}。
-3. 初始化器形式：只能是 `= e`、`{ e }`、`( e )` 三种，`e` 是单个 *assignment-expression*。
-4. 初始化表达式的类型：作为 *condition* 时必须是非联合体类类型 {{c++26}}；否则是数组或非联合体类类型。
+## 哪些声明能写在函数体里（¶1）
 
 ```cpp run ok
-#include <utility>
-struct P { int a, b; };
-constexpr P cp{1, 2};
-constexpr auto [x, y] = cp;                         // C++26: constexpr 结构化绑定
-static_assert(x == 1);
-
-template<class T> int sum(T t) {
-    auto [...xs] = t;                               // C++26: 结构化绑定包，只能在模板中
-    return (0 + ... + xs);
+void f() {
+    using I = int;                 // 别名声明
+    static_assert(sizeof(I) >= 2); // static_assert
+    namespace s = std;             // 命名空间别名
+    int g(int);                    // 函数声明（不是定义）
 }
-
-int main() {
-    static auto [m, n] = P{3, 4};                   // OK: static
-    [[maybe_unused]] auto [u [[maybe_unused]], v] = std::pair{1, 2.0};
-    return sum(P{m, n}) - 7;                        // 返回 0
-}
+int main() { }
 ```
+
+¶1 列出了声明的全部语法形式。其中**块声明**（*block-declaration*）既能出现在命名空间作用域，也能出现在块里：
+
+| 块声明 | 例子 | 详见 |
+|---|---|---|
+| *simple-declaration* | `int x = 1, *p;`、`auto [a, b] = pr;` | 本页、[[dcl.spec]]、[[dcl.decl]] |
+| *asm-declaration* | `asm("nop");` | [[dcl.asm]] |
+| *namespace-alias-definition* | `namespace fs = std::filesystem;` | [[namespace.alias]] |
+| *using-declaration* | `using std::swap;` | [[namespace.udecl]] |
+| *using-enum-declaration* | `using enum Color;` | [[enum.udecl]] |
+| *using-directive* | `using namespace std;` | [[namespace.udir]] |
+| *static_assert-declaration* | `static_assert(N > 0);` | 本页 |
+| *consteval-block-declaration* {{c++26}} | `consteval { ... }` | 本页 |
+| *alias-declaration* | `using I = int;` | [[dcl.typedef]] |
+| *opaque-enum-declaration* | `enum class E : int;` | [[dcl.enum]] |
+
+函数定义、模板声明、推导指引、命名空间定义、链接规格、模块导入、显式实例化与显式特化、`export` 声明都不在这张表里，所以都不能写在函数体中。局部函数定义、局部模板、局部命名空间之所以不存在，都是这个语法的直接结果。
 
 ```cpp error
-#include <utility>
-template<class T> concept C = true;
-struct P { int a, b; };
-C auto [a, b] = std::pair{1, 2};      // error: 受约束占位符不能用于结构化绑定
-inline auto [c, d] = std::pair{1, 2}; // error: inline 不在白名单中
-auto [...xs] = P{1, 2};               // error: 包只能出现在模板化实体中
-```
-
-!!! note "为什么不允许 `C auto [a, b]`"
-    受约束占位符约束的是被推导的类型。结构化绑定中被推导的是整个隐藏变量 e 的类型（例如 `std::pair<int,int>`），不是 `a`、`b` 的类型。允许 `C auto` 会让读者误以为约束作用在各个绑定上，所以标准索性禁止，留待将来设计。
-
-!!! history "结构化绑定的 C++26 扩展"
-    C++17 引入结构化绑定时，说明符只允许 `auto` 和 cv 限定符；C++20 起允许 `static` 与 `thread_local`。C++26 先后加入了以下扩展：在 *condition* 中使用结构化绑定（`if (auto [ok, v] = f())`，以整个对象上下文转换为 `bool` 的结果作为条件）；`constexpr` 结构化绑定；为每个绑定加属性；结构化绑定包（[[P1061]]）。
-
-```cpp run ok
-struct R { bool ok; int v; explicit operator bool() const { return ok; } };
-R parse() { return {true, 42}; }
-int main() {
-    if (auto [ok, v] = parse())    // C++26：条件是 R 转换为 bool 的结果，不是 ok
-        return v - 42;
-    return 1;
+void f() {
+    int g() { return 0; }          // error: 函数定义不是块声明
 }
 ```
 
-## 声明的三种类别（¶8）
+## typedef、函数还是对象（¶8–11）
 
-¶8 一条 *simple-declaration* 按如下顺序分类：
+¶8 一条 *simple-declaration* 按以下顺序分类：
 
-1. *decl-specifier-seq* 含 `typedef` → typedef 声明，每个 *declarator-id* 都是 *typedef-name*（[[dcl.typedef]]）；
-2. 否则，与 *declarator-id* 关联的类型是函数类型 → 函数声明；
-3. 否则，类型是对象类型或引用类型 → 对象声明；
-4. 否则（例如类型是 `void`）→ 非良构。
+1. 说明符序列里有 `typedef`：**typedef 声明**，每个 *declarator-id* 都是 typedef 名（[[dcl.typedef]]）；
+2. 否则，与 *declarator-id* 关联的类型是函数类型：**函数声明**；
+3. 否则，类型是对象类型或引用类型：**对象声明**；
+4. 否则（例如类型是 `void`），程序非良构。
 
-注意，分类是**逐个声明符**进行的：
+分类按声明符逐个进行：
 
 ```cpp error
 int f(), x;           // OK: f 是函数声明，x 是对象声明
@@ -224,76 +98,136 @@ extern void g(),      // OK: 函数声明
     y;                // error: void 不是对象类型
 ```
 
-对象声明这个名字容易误导：引用不是对象，但 `int& r = x;` 也归入对象声明。
+引用不是对象，但 `int& r = x;` 也归入对象声明。
 
-Note 4 补充说，在 typedef 声明里，*declarator-id* 是一个 *identifier*。它链接到 [[class.conv.fct]]，即转换函数的名字 `operator T` 不能用 typedef 声明（`typedef int operator int;` 没有意义）。
+¶9 对象定义为对象预留大小和对齐都合适的存储，并完成相应的初始化（[[dcl.init]]）。所以 `extern int x;` 不是定义，不分配存储；`int x;` 是定义。
 
-## 对象定义做了什么（¶9）
+¶10 函数定义是在函数声明后面加上函数体。以 `{` 或 `=` 开头的记号序列，如果 *declarator-id* 的类型是函数类型，就当作函数体（`{...}`、`= default;`、`= delete;`），否则当作初始化器。判断依据是声明符的类型，与 `=` 后面写了什么无关。
 
-¶9 对象定义会**预留大小和对齐合适的存储**，并完成相应的初始化（[[dcl.init]]）。这句话把定义和分配存储联系了起来：`extern int x;` 不是定义，所以不分配存储；`int x;` 是定义，分配存储并做默认初始化（在命名空间作用域下还会先零初始化，[[basic.start.static]]）。
+注 5 由此给出两个推论。一个声明如果在模板实例化后才变成函数类型，程序非良构（[[temp.spec.general]]）。函数定义的函数类型也不能来自 typedef 名，因为函数体要用参数名访问参数，而参数名不是类型的一部分：
 
-## `{` 和 `=` 何时开始函数体（¶10）
-
-¶10 函数定义是在函数声明的基础上加了函数体。对以 `{` 或 `=` 开头的记号序列，如果 *declarator-id* 的类型是函数类型，就当作 *function-body*（`{...}`、`= default;`、`= delete;`），否则当作初始化器。
-
-所以 `void f() = delete;` 中的 `= delete` 是函数体，而 `int x = delete_me;` 中 `=` 开始的是初始化器。判断依据是**声明符的类型**，而不是 `=` 后面跟着什么。
-
-Note 5 指出两个推论：
-
-- 如果某个声明在模板实例化后才成为函数类型，程序非良构（[[temp.spec.general]]）。例如 `template<class T> struct X { T m; }; X<int()> x;` 中，成员 `m` 会成为函数类型；
-- 函数定义的函数类型不能来自 *typedef-name*，`typedef void F(); F f { }` 不是函数定义。
+<div class="compare" markdown="1">
 
 ```cpp error
 typedef void F();
-F f;                    // OK: 用 typedef 声明函数
-F g { }                 // error: 不能用 typedef 名的函数类型来定义函数
-
+F f;      // OK: 用 typedef 声明函数
+F g { }   // error: 不能这样定义函数
 ```
 
 ```cpp error
-template<class T> struct X { T m; };
-X<int()> x;             // error: X<int()>::m 被实例化为函数类型
+template<class T>
+struct X { T m; };
+X<int()> x;  // error: 成员 m 成了
+             // 函数类型 int()
 ```
 
-禁止用 typedef 定义函数，是因为函数体中需要用参数名访问参数，而 typedef 的函数类型不携带参数名（参数名不是类型的一部分）。
+</div>
 
-## 无说明符的函数声明（¶11）
-
-¶11 *nodeclspec-function-declaration*（没有任何 *decl-specifier* 的函数声明）只能声明**构造函数、析构函数或转换函数**。它们本来就没有返回类型，自然也就没有类型说明符。
-
-Note 6 进一步指出，由于成员函数不能在类外做非定义的重声明（[[class.mfct]]），这种声明实际上只会出现在模板声明、显式实例化、显式特化中：
+¶11 没有任何说明符的函数声明（*nodeclspec-function-declaration*）只能声明构造函数、析构函数或转换函数，它们本来就没有返回类型。成员函数不能在类外做非定义的重声明（[[class.mfct]]），所以这种声明实际上只出现在模板相关的场合（注 6）：
 
 ```cpp run ok
 template<class T> struct A { A() { } operator int() { return 0; } };
-template<> A<char>::A();          // 显式特化的声明（nodeclspec）
-template A<int>::A();             // 显式实例化（nodeclspec）
-template<> A<char>::A() { }       // 显式特化的定义（这是 function-definition）
+template<> A<char>::A();          // 显式特化的声明
+template A<int>::A();             // 显式实例化
+template<> A<char>::A() { }       // 显式特化的定义
 int main() { }
 ```
 
+## 没有声明符的声明（¶6）
+
+```cpp
+struct S;              // 声明类名 S
+struct T { int m; };   // 定义并声明类名 T
+enum E { e1 };         // 声明 E 和 e1
+enum { e2 };           // 无名枚举，但引入了枚举项 e2
+```
+
+¶6 只有在**声明类或枚举**时，*simple-declaration* 才能省略声明符列表，也就是说明符序列里有类定义、带 `class`/`struct`/`union` 关键字的详述类型说明符，或枚举定义。这时这些说明符里的标识符被声明为类名、枚举名或枚举项。并且这条声明必须（重新）引入至少一个名字：
+
+```cpp error
+enum { };              // error: 什么名字都没引入
+typedef class { };     // error: 无名类，也没有 typedef 名
+int;                   // error: 不是类或枚举声明，又没有声明符
+static struct T1 { };  // error: static 没有可修饰的对象（[[dcl.stc#1]]）
+const struct T2 { };   // error: const 同理（[[dcl.type.cv#1]]）
+```
+
+什么也不声明的声明几乎总是笔误，比如漏写了变量名；`const struct T2 { };` 里的 `const` 也找不到作用对象。本机 Clang 23 对这五行都只给出默认开启的警告（`-Wmissing-declarations` 组），这符合标准，警告也是诊断（[[intro.compliance]]），加 `-pedantic-errors` 会变成错误。
+
+## 结构化绑定的外形（¶7）
+
+¶7 带 *structured-binding-declaration* 的 *simple-declaration* 或条件叫做**结构化绑定声明**（[[g:structured-binding-declaration|structured binding declaration]]），它的语义在 [[dcl.struct.bind]]。本节只限制外形：
+
+1. 说明符只能是 `constexpr`、`constinit`、`static`、`thread_local`、`auto` 和 cv 限定符。所以 `inline auto [a, b]`、`extern auto [a, b]`、`int [a, b]`、受约束的 `C auto [a, b]` 都不行。
+2. 至多一个名字前面带 `...`（结构化绑定包）；带了的话，这个声明必须声明一个模板化实体，也就是只能出现在模板里 {{c++26}}。
+3. 初始化器只能是 `= e`、`{ e }`、`( e )` 三种形式。
+4. 用作条件时，`e` 必须是非联合体类类型 {{c++26}}；否则是数组或非联合体类类型。
+
+```cpp run ok
+#include <utility>
+struct P { int a, b; };
+constexpr P cp{1, 2};
+constexpr auto [x, y] = cp;                // C++26: constexpr 结构化绑定
+static_assert(x == 1);
+
+template<class T> int sum(T t) {
+    auto [...xs] = t;                      // C++26: 结构化绑定包，只能在模板里
+    return (0 + ... + xs);
+}
+
+int main() {
+    static auto [m, n] = P{3, 4};          // C++20 起可以 static
+    [[maybe_unused]] auto [u [[maybe_unused]], v] = std::pair{1, 2.0};
+    return sum(P{m, n}) - 7;               // 返回 0
+}
+```
+
+```cpp error
+#include <utility>
+template<class T> concept C = true;
+struct P { int a, b; };
+C auto [a, b] = std::pair{1, 2};      // error: 不能用受约束的占位符
+inline auto [c, d] = std::pair{1, 2}; // error: inline 不在允许的说明符里
+auto [...xs] = P{1, 2};               // error: 包只能出现在模板化实体中
+```
+
+受约束的 `C auto` 被禁止，是因为结构化绑定里被推导的是整个隐藏变量的类型（例如 `std::pair<int, int>`），而不是 `a`、`b` 的类型。允许它会让读者以为约束作用在每个绑定上。
+
+C++26 还允许在条件里使用结构化绑定，这时条件的值是整个对象按语境转换为 `bool` 的结果，不是第一个绑定：
+
+```cpp run ok
+struct R { bool ok; int v; explicit operator bool() const { return ok; } };
+R parse() { return {true, 42}; }
+int main() {
+    if (auto [ok, v] = parse())    // 条件是 R 转换为 bool 的结果
+        return v - 42;
+    return 1;
+}
+```
+
+!!! history "结构化绑定说明符的演进"
+    C++17 引入结构化绑定时只允许 `auto` 和 cv 限定符，C++20 起允许 `static` 和 `thread_local`。C++26 又加入了条件中的结构化绑定、`constexpr` 结构化绑定、给每个绑定加属性，以及结构化绑定包（[[P1061]]）。
+
 ## static_assert（¶12–14）
 
-`static_assert` 是一个不引入任何名字的块声明，作用是在编译期检查一个条件。它可以出现在命名空间作用域、类作用域（作为 *member-declaration*）和块作用域。
+`static_assert` 在编译期检查一个条件，不引入任何名字，可以写在命名空间作用域、类里和块里。
 
 ### 条件（¶13）
 
-¶13 *constant-expression* `E` **按语境转换为 `bool`**，转换后的表达式必须是常量表达式（[[expr.const]]）。然后：
+¶13 条件 `E` [[g:contextually-converted-to-bool|按语境转换为 bool]]，转换后的表达式必须是常量表达式（[[expr.const]]）。值为 `true` 时，声明没有效果；值为 `false` 时，这条 `static_assert` **失败**，程序非良构。
 
-- 如果值为 `true`，或者表达式是在模板定义的上下文中求值的，声明没有效果，消息是不求值操作数；
-- 否则 `static_assert` 失败，程序非良构；如果消息是常量表达式 `M`，还要按 ¶13.2 求出消息文本。
-
-按语境转换为 bool，意味着**允许窄化**：`static_assert(sizeof(int[2]))` 中 `8 → true` 是窄化转换，但在这里合法（C++23 起，[[P1401R5]]；此前要求转换后的常量表达式，不允许窄化）。
+按语境转换允许窄化，所以 `static_assert(sizeof(int[2]));` 里 8 转换为 `true` 是合法的。这是 C++23 的改动（[[P1401R5]]），此前要求的转换不允许窄化。
 
 ```cpp run ok
-static_assert(sizeof(int[2]));     // OK: 8 上下文转换为 true（窄化也允许）
+static_assert(sizeof(int[2]));     // OK: 8 → true，窄化也允许
 static_assert(2);                  // OK
 static_assert(sizeof(long) >= 4, "long too small");
 int main() { }
 ```
 
-### `static_assert(false)` 在模板中（¶13）
+### 模板里的 static_assert(false)
 
-"在模板定义的上下文中求值"这半句是 C++23 加入的（[[P2593R1]]，作为缺陷报告应用于更早的标准）。它解决了一个存在多年的问题：
+¶13 还规定，表达式在模板定义的上下文中求值时，声明同样没有效果。这半句是 C++23 加入的（[[P2593R1]]），并作为缺陷报告适用于更早的标准模式。它让下面这种写法成为可能：
 
 ```cpp run ok
 #include <type_traits>
@@ -306,33 +240,27 @@ template<class T> int to_int(T t) {
 int main() { return to_int(0L); }
 ```
 
-在 P2593 之前，`static_assert(false)` 不依赖模板参数。按 [[temp.res]] 中模板没有任何有效特化则 IFNDR 的规则，即使那个分支永远不会实例化，编译器也有权在模板定义时就报错，GCC 和 Clang 实际上也会这样做。人们只好写 `static_assert(sizeof(T) == 0)` 或 `static_assert(always_false<T>)` 这类人为制造依赖的表达式来绕过编译器。
+在此之前，`static_assert(false)` 不依赖模板参数，编译器在模板定义时就可以求值并报错，即使那个分支永远不会实例化，GCC 和 Clang 也确实这样做。人们只好写 `static_assert(sizeof(T) == 0)` 或 `static_assert(always_false<T>)`，人为制造依赖来推迟检查。
 
-新规则规定，模板定义中的 `static_assert` 一律不检查，只有在**实例化后**（此时表达式不再处于模板定义的上下文中）才检查。被 `if constexpr` 丢弃的分支里的语句不会实例化（[[stmt.if]]），所以其中的 `static_assert(false)` 永远不会触发。
+现在模板定义里的 `static_assert` 一律不检查，实例化之后才检查。被 `if constexpr` 丢弃的分支不会实例化（[[stmt.if]]），其中的 `static_assert(false)` 也就永远不会触发：
 
 ```cpp error
 template<class T> void f() { static_assert(false); }   // 定义本身 OK
-template void f<int>();     // error: 显式实例化导致 static_assert 失败
-void g() { static_assert(false); }   // error: 非模板，立即检查
+template void f<int>();     // error: 实例化时 static_assert 失败
+void g() { static_assert(false); }   // error: 不在模板里，立即检查
 ```
-
-!!! pitfall "这不等于模板里可以随便写 false"
-    如果 `static_assert(false)` 位于不会被丢弃的位置，任何实例化都会失败；而一个没有任何有效特化的模板，仍可能落入 [[temp.res.general]] 的 IFNDR 规则。新规则只是让 `static_assert` 本身不再成为模板无有效特化的证据。
 
 ### 消息（¶12、¶13.2）{{c++26}}
 
-¶12 *static_assert-message* 有两种：
+¶12 消息有两种写法。语法上能匹配[[g:unevaluated-string|不求值字符串]]（没有编码前缀的字符串字面量，[[lex.string.uneval]]）时，它就是字符串。否则它必须是一个表达式 `M`，`M.size()` 能隐式转换为 `std::size_t`，`M.data()` 能隐式转换为 `const char*`。
 
-- 在语法上匹配 *unevaluated-string*（无编码前缀的字符串字面量，[[lex.string.uneval]]）时，它就是字符串，文本即该字符串；
-- 否则必须是一个表达式 `M`，满足 `M.size()` 可隐式转换为 `std::size_t`、`M.data()` 可隐式转换为 `const char*`。
+¶13.2 断言失败时，`M.size()` 必须是常量表达式，记它的值为 N；`M.data()` 也必须能在常量求值中算出，消息文本就是从它开始的 N 个字符。
 
-¶13.2 **仅在断言失败时**才要求：`M.size()` 是 `size_t` 类型的转换常量表达式（值为 N），`M.data()` 是核心常量表达式（记为 D），且 `D[0]`…`D[N-1]` 都是整型常量表达式；消息文本是从 D 开始的 N 个普通字面量编码的代码单元。
-
-换句话说，任何类似字符串的对象，如 `std::string`、`std::string_view`、自定义的定长缓冲，都能作消息，只要能在常量求值中算出来。这是 C++26 的新特性（[[P2741R3]]）；C++23 及之前，消息只能是字符串字面量。
+所以 `std::string`、`std::string_view` 或者自己写的定长缓冲都能作消息，只要能在编译期算出来（[[P2741R3]]）。C++23 及以前，消息只能是字符串字面量。
 
 ```cpp run ok
 #include <cstddef>
-struct Buf {                                   // 极简的编译期"格式化"缓冲
+struct Buf {                                   // 极简的编译期格式化缓冲
     char s[32]{}; std::size_t n = 0;
     constexpr Buf& operator<<(const char* p) { while (*p) s[n++] = *p++; return *this; }
     constexpr Buf& operator<<(std::size_t v) {
@@ -347,85 +275,60 @@ struct Buf {                                   // 极简的编译期"格式化"�
 template<class T> struct Wrapper {
     static_assert(sizeof(T) <= 8, Buf{} << "sizeof(T) == " << sizeof(T) << ", too big");
 };
-Wrapper<int> w;        // OK；若换成 Wrapper<long double>，诊断信息里会出现计算出的大小
+Wrapper<int> w;        // OK
 int main() { }
 ```
 
+把 `Wrapper<int>` 换成 16 字节的类型，本机 Clang 23 的报错信息以计算出的消息 `sizeof(T) == 16, too big` 结尾。
+
 ```cpp error
 #include <string>
-static_assert(false, std::string("built at ") + "compile time");  // error，消息为 "built at compile time"
-static_assert(false, u8"text");     // error: 不是 unevaluated-string（有编码前缀），也不是有 size()/data() 的表达式
+static_assert(false, std::string("built at ") + "compile time");  // error: 消息是 built at compile time
+static_assert(false, u8"text");     // error: 不求值字符串不能有编码前缀
 ```
 
-!!! lawyer "消息只在失败时求值"
-    断言成功时，消息是不求值操作数（¶13），只需满足 ¶12 中可隐式转换的语法/类型要求，不需要是常量表达式。因此 `static_assert(true, some_runtime_string())` 只要类型合适就是良构的。¶13.2 的常量性要求只在失败路径上生效。那时程序已经非良构了，这些要求只影响能否给出消息文本。
-
-¶14（推荐实践）建议断言失败时，诊断信息应当包含消息文本。这只是推荐，标准从不强制规定诊断的内容。
+断言成功时，消息是不求值操作数，只需满足 ¶12 的类型要求，不必是常量表达式。¶14 建议实现在断言失败的诊断中包含消息文本；这只是建议，标准从不规定诊断的具体内容。
 
 !!! history "static_assert 的演进"
-    - C++11：引入，消息必填，必须是字符串字面量。
-    - C++17：消息可省略。
-    - C++23：条件允许窄化转换为 `bool`（[[P1401R5]]）；模板定义中的 `static_assert(false)` 不再提前报错（[[P2593R1]]）。
-    - C++26：消息可以是计算出来的（[[P2741R3]]）；同时引入 *unevaluated-string* 概念，消息字符串不允许编码前缀。
+    - C++11：引入，消息必填，只能是字符串字面量。
+    - C++17：消息可以省略。
+    - C++23：条件允许窄化（[[P1401R5]]）；模板定义里的 `static_assert(false)` 不再提前报错（[[P2593R1]]）。
+    - C++26：消息可以是编译期算出的字符串（[[P2741R3]]）；消息字符串不允许带编码前缀。
 
 ## consteval 块（¶15）{{c++26}}
 
-¶15 `consteval { 复合语句 }` 对应的表达式 E 是
+¶15 `consteval { 复合语句 }` 相当于求值下面这个表达式，它必须是常量表达式：
 
 ```text
 [] static consteval -> void compound-statement ()
 ```
 
-即立即调用一个无捕获、static、consteval、返回 void 的 lambda。E 必须是常量表达式。它的作用在于副作用：常量求值过程中可以产生**注入声明**（injected declaration，[[expr.const.reflect]]），比如用 `std::meta::define_aggregate` 为一个不完整类生成定义。
+也就是立即调用一个无捕获、`static`、`consteval`、返回 `void` 的 lambda。它的用处在于副作用：常量求值时可以产生**注入声明**（injected declaration，[[expr.const.reflect]]），例如用 `std::meta::define_aggregate` 给一个不完整的类生成定义。
 
-由于它等价于一个 lambda 的函数体：
-
-- 里面可以写 `return;`（返回 void）；
-- 不能声明局部模板或概念（lambda 体里本来就不行）；
-- 没有捕获，不能使用外层的局部变量（除非不 odr-use）。
-
-`consteval` 块随 C++26 静态反射进入标准。此前的 C++ 没有在声明位置执行一段编译期代码的语法，常见的替代是 `static_assert((some_consteval_fn(), true));` 这类技巧。截至写作时，本机 Clang 尚未实现静态反射，无法验证 `consteval` 块。
+因为它等价于 lambda 的函数体，里面可以写 `return;`，但不能声明局部模板或概念。
 
 ```cpp
-// 取自标准的例子思路（需要实现了 P2996 的编译器）
 struct S;
 consteval {
-    std::meta::define_aggregate(^^S, {});   // 注入 S 的定义：struct S { };
+    std::meta::define_aggregate(^^S, {});   // 注入 S 的定义 struct S { };
 }
-S s;                                         // OK：S 此时已完整
+S s;                                         // OK：S 已经完整
 ```
 
-## 空声明与属性声明（¶16–17）
+`consteval` 块随 C++26 的静态反射一起进入标准。截至写作时，本机 Clang 23 还没有实现静态反射，这个例子未经编译验证。
 
-¶16 **空声明**（*empty-declaration*，即单独的 `;`）没有任何效果。有了它，在函数定义或命名空间后多写一个分号就是合法的：
+## 常见误解
 
-```cpp run ok
-namespace N { };          // OK: 命名空间定义 + 空声明
-void f() { };             // OK: 函数定义 + 空声明（命名空间作用域）
-struct S { void g() { }; };   // OK: 类内的多余分号也合法（member-declaration 允许空声明）
-;;;
-int main() { }
-```
+!!! pitfall "模板里的 static_assert(false) 想写在哪里都行"
+    它只在实例化时检查。如果它所在的位置不会被丢弃，任何实例化都会失败；一个没有任何有效特化的模板，仍可能落入 [[temp.res.general]] 的 IFNDR 规则。
 
-（`-Wextra-semi` 之类的警告会提醒这些多余分号，但它们是良构的。C++11 之前，命名空间作用域的多余分号在 C++98 语法中并不合法，许多编译器只是作为扩展接受。）
+!!! pitfall "开头的属性只属于第一个变量"
+    `[[maybe_unused]] int a, b;` 中属性属于 `a` 和 `b` 两者。只想标记其中一个时，把属性写在那个名字后面：`int a [[maybe_unused]], b;`。
 
-¶17 **属性声明**（*attribute-declaration*，`[[...]];`）的含义除另有规定外由实现定义 {{impl}}。目前的标准属性都不用于属性声明，它主要为实现留出空间（例如将来的 OpenMP 指令属性）。
-
-!!! summary "小结"
-    | 规则 | 段落 | 要点 |
-    |---|---|---|
-    | 块声明 vs 其他 | ¶1 | 函数定义/模板/命名空间不是块声明，所以不能出现在函数体中 |
-    | 三段式 | ¶4–5 | 开头属性作用于所有声明符；只有 *declarator-id* 是名字时才引入名字 |
-    | 省略声明符 | ¶6 | 仅限声明类/枚举，且必须引入至少一个名字 |
-    | 结构化绑定 | ¶7 | 说明符白名单：`constexpr constinit static thread_local auto` + cv |
-    | 声明分类 | ¶8 | typedef → 函数 → 对象/引用 → 否则非良构，逐声明符判断 |
-    | 函数体 vs 初始化器 | ¶10 | 看声明符类型；typedef 函数类型不能用于定义 |
-    | static_assert | ¶12–14 | 允许窄化；模板定义中不检查；C++26 消息可计算 |
-    | consteval 块 | ¶15 | 等价于立即调用的 consteval lambda，用于注入声明 |
+## 思考题
 
 !!! question "思考题 1"
-    下面每行是良构、非良构，还是需要更多信息？
-
+    下面每行是良构还是非良构？
     ```cpp
     typedef struct { int x; } T, *PT;
     struct { int y; } obj;
@@ -436,21 +339,31 @@ int main() { }
 <details markdown="1">
 <summary>答案</summary>
 
-- 第 1 行良构：定义了无名类，`T` 是它的 typedef 名（也是用于链接目的的 typedef 名，[[dcl.typedef#4]]），`PT` 是指向它的指针类型。
-- 第 2 行良构：无名类 + 对象声明，引入了名字 `obj`，满足 ¶6。
-- 第 3 行良构：`A` 是 `int` 的别名，`B` 是函数类型 `int()` 的别名（typedef 声明逐声明符分类，¶8）。
-- 第 4 行非良构：`B` 是函数类型，`{` 开始函数体（¶10），但函数定义的类型不能来自 typedef 名（Note 5、[[dcl.fct]]）。
+- 第 1 行良构：定义无名类，`T` 是它的 typedef 名（同时是用于链接目的的 typedef 名，[[dcl.typedef#4]]），`PT` 是指向它的指针类型。
+- 第 2 行良构：无名类加一个对象声明，引入了名字 `obj`，满足 ¶6。
+- 第 3 行良构：`A` 是 `int` 的别名，`B` 是函数类型 `int()` 的别名，逐个声明符分类（¶8）。
+- 第 4 行非良构：`B` 是函数类型，`{` 开始的是函数体（¶10），但函数定义的类型不能来自 typedef 名（注 5）。
 </details>
 
 !!! question "思考题 2"
-    为什么下面的 `static_assert` 在 C++23 中不报错，而换成 `static_assert(sizeof(T*) == 0)` 在 C++20 中却是惯用法？
-
-    ```cpp
-    template<class T> void f(T) { if constexpr (false) static_assert(false); }
-    ```
+    为什么 `template<class T> void f(T) { if constexpr (false) static_assert(false); }` 在 C++23 中不报错，而在 C++20 中惯用写法是 `static_assert(sizeof(T*) == 0)`？
 
 <details markdown="1">
 <summary>答案</summary>
 
-C++23 起（P2593 作为 DR），无论表达式是否依赖，模板定义上下文中的 `static_assert` 都不检查；`if constexpr (false)` 的分支被丢弃，实例化时也不会实例化它，所以永远不会触发。在 C++20 中，`static_assert(false)` 是非依赖的常量表达式，编译器可以在定义时直接求值并报错（而且由于模板没有有效特化，按 [[temp.res.general]] 本就是 IFNDR）。写成 `sizeof(T*) == 0` 会让表达式依赖于 `T`，检查推迟到实例化，而丢弃的分支不会实例化。
+C++23 起，模板定义上下文中的 `static_assert` 都不检查；`if constexpr (false)` 的分支被丢弃，实例化时也不会实例化它，所以永远不会触发。按 C++20 的规则，`static_assert(false)` 是不依赖模板参数的常量表达式，编译器可以在定义时直接求值并报错。写成 `sizeof(T*) == 0` 让表达式依赖 `T`，检查推迟到实例化，而被丢弃的分支不会实例化。
+</details>
+
+<details class="fine" markdown="1"><summary>其余条文</summary>
+
+¶2 有些声明本身包含作用域，如类定义、lambda、函数参数列表。第 9 章说到声明的某个成分时，只指不嵌套在这些内层作用域里的部分。例如 `struct A { struct B { } b; } a;` 中，只有 `A` 的类定义是这条声明的成分，`B` 的类定义属于 `A` 里的成员声明。否则"声明中不得含有 X"这类规则会把 lambda 体、类体里的内容也算进来。
+
+¶3 一个声明如果符合友元类型声明（*friend-type-declaration*）的语法，就按友元类型声明处理。`friend C;` 因此不会被读成没有声明符的 *simple-declaration*，见 [[dcl.friend]]。
+
+注 4：typedef 声明的 *declarator-id* 是一个标识符，所以不能用 typedef 声明 `operator int` 这样的转换函数名（[[class.conv.fct]]）。
+
+¶16 空声明（单独一个 `;`）没有任何效果。因此在命名空间作用域多写的分号，如 `namespace N { };`、`void f() { };` 后面的分号，都是良构的。C++98 的语法没有空声明，这些多余的分号当时只是作为扩展被接受。
+
+¶17 属性声明（`[[...]];`）的含义除另有规定外由实现定义 {{impl}}。标准属性都不用于属性声明。
+
 </details>
