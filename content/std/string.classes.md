@@ -1,19 +1,26 @@
 ---
 title: 字符串类
-summary: <string> 头文件中 basic_string 类模板之外的一切——概要与五个别名、pmr 别名；operator+ 的十六个重载为什么有一半接受右值（以及 C++26 加入的 string_view 拼接）；只有 == 与 <=> 的比较；operator>>/getline 的精确语义；erase/erase_if；stoi 族的 strtol 语义与陷阱、to_string 在 C++26 改为 format("{}")；hash 与 string_view 一致；""s 字面量
+summary: <string> 中 basic_string 成员以外的部分：类型别名、operator+、比较、输入输出、erase、stoi 与 to_string、hash 和 ""s 字面量。
 status: done
 covers: string.classes.general, string.syn, string.nonmembers, string.op.plus, string.cmp, string.special, string.io, string.erasure, string.conversions, basic.string.hash, basic.string.literals
 papers: P2591R5, P2587R3, P1614R2, P1209R0, P0254R2
 related: strings, basic.string, string.view, char.traits, charconv, format, format.string.std, unord.hash, over.match.oper, lex.string, over.literal, istream.formatted.reqmts
 tags: 标准库, string, operator+, to_string, stoi, 字面量
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[string.classes] 的主体是类模板 `basic_string`，它的成员函数在 [[basic.string]] 中逐条讲解。本页覆盖剩下的部分：头文件概要、非成员函数（拼接、比较、交换、I/O、擦除）、数值转换、哈希和 `""s` 字面量。
+!!! tldr
+    - `a + b + c + d` 只在第一步创建新字符串，之后的 `+` 都接管左边那个临时对象的缓冲区继续追加。
+    - C++26 起 `string + string_view` 可以直接编译；`"abc" + "def"` 仍然非良构，`"abc" + 1` 则是指针运算。
+    - `>>` 跳过前导空白、读到空白为止；`getline` 不跳过空白，读走换行符但不存储。两者混用时 `getline` 常常读到一个空行。
+    - `stoi` 一族按 C 的 `strtol` 解释字符串：跳过前导空白，遇到非数字就停下而不报错，`stoul("-1")` 不抛异常。
+    - C++26 起 `to_string(double)` 定义为 `format("{}", val)`，`to_string(0.1)` 从 `"0.100000"` 变成 `"0.1"`。
 
-## 概述与概要（[string.classes.general]、[string.syn]）
+`basic_string` 的成员函数见 [[basic.string]]，本页讲 `<string>` 中的其余内容。
 
-[string.classes.general] ¶1：`<string>` 定义 `basic_string` 与五个 *typedef-name*：
+## 头文件 <string> [string.classes.general]
+
+[string.classes.general] ¶1 `<string>` 定义类模板 `basic_string` 和五个别名：
 
 | 别名 | 类型 |
 |---|---|
@@ -23,35 +30,17 @@ updated: 2026-10-18
 | `u32string` | `basic_string<char32_t>` |
 | `wstring` | `basic_string<wchar_t>` |
 
-[string.syn] 的概要里还有几个容易忽略的事实：
+[string.syn] 中还有几点值得知道：
 
-- `<string>` 同时声明了 `char_traits` 的主模板和五个特化（[[char.traits]]），并且它们是 *freestanding* 的；`basic_string` 本身不是。
-- `<string>` 必须包含 `<compare>` 和 `<initializer_list>`。
-- `namespace pmr` 中有 `basic_string` 别名模板与五个别名，使用 `polymorphic_allocator<charT>`。
-- 数值转换函数只为 `string` 和 `wstring` 提供，没有 `u8string`/`u16string`/`u32string` 版本。
-- 整数版本的 `to_string`/`to_wstring` 在当前草案里是 `constexpr`，浮点版本不是。
+- `namespace pmr` 中有一组同名别名，使用 `polymorphic_allocator<charT>`，例如 `std::pmr::string`。
+- `<string>` 同时声明 `char_traits` 的主模板和五个特化（[[char.traits]]），它们在独立实现中也提供；`basic_string` 本身不是。
+- `<string>` 包含 `<compare>` 和 `<initializer_list>`。
+- 数值转换函数只为 `string` 和 `wstring` 提供，`u8string`、`u16string`、`u32string` 没有。
+- 整数版本的 `to_string`、`to_wstring` 是 `constexpr` 的，浮点版本不是。
 
-## `operator+`（[string.op.plus]）
+## 拼接 [string.op.plus]
 
-概要中一共有 16 个 `operator+` 重载。按左右操作数分类：
-
-| 左 | 右 | 定义（¶） |
-|---|---|---|
-| `const S&` | `const S&` 或 `const charT*` | 复制 `lhs` 再 `append`（¶1） |
-| `S&&` | `const S&` 或 `const charT*` | `lhs.append(rhs); return std::move(lhs);`（¶2） |
-| `S&&` | `S&&` | 同上，但两者都处于有效但未指明状态（¶3） |
-| `const S&` 或 `const charT*` | `S&&` | `rhs.insert(0, lhs); return std::move(rhs);`（¶4） |
-| `const charT*` | `const S&` | 复制 `rhs` 再在开头插入（¶5） |
-| `charT` | `const S&` / `S&&` | 在开头插入一个字符（¶6–7） |
-| `const S&` / `S&&` | `charT` | `push_back`（¶8–9） |
-| `const S&` / `S&&` | `string_view` | 追加（¶10–11）{{c++26}} |
-| `string_view` | `const S&` / `S&&` | 在开头插入（¶12–13）{{c++26}} |
-
-（表中 `S` 是 `basic_string<charT, traits, Allocator>`，`string_view` 指 `type_identity_t<basic_string_view<charT, traits>>`。）
-
-### 为什么一半重载接受右值
-
-`a + b + c + d` 按左结合解析为 `((a + b) + c) + d`。第一次 `a + b` 产生一个临时 `string`（prvalue），之后的每一次 `+` 左操作数都是右值，于是选中 `S&&` 重载：直接在那个临时对象上 `append`，然后**把它移动出去**作为返回值。整个表达式只有一个缓冲区在不断增长，而不是每一步都分配一个新字符串。
+### 右值重载复用缓冲区
 
 ```cpp run ok
 #include <string>
@@ -71,20 +60,32 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 int main() {
   std::string a(30, 'a'), b(30, 'b'), c(30, 'c'), d(30, 'd');
   allocs = 0;
-  std::string r = a + b + c + d;          // (((a+b)+c)+d)
-  std::printf("%d allocations\n", allocs); // 本机 libc++：2
+  std::string r = a + b + c + d;            // ((a + b) + c) + d
+  std::printf("%d allocations\n", allocs);  // 本机 libc++：2
 }
 ```
 
-本机 libc++ 实测两次分配：`a + b` 一次（60 个字符），`+ c` 时容量不够再增长一次（几何增长后的容量足以容纳 `+ d`）。如果没有右值重载，每个 `+` 都要分配一个新的结果字符串。
+`a + b + c + d` 按左结合解析为 `((a + b) + c) + d`。`a + b` 产生一个临时字符串，之后每一次 `+` 的左操作数都是右值，于是选中接受 `basic_string&&` 的重载：直接在这个临时对象上追加，再把它移动出去作为结果。整个表达式只有一个缓冲区在增长。
 
-¶3 的 `S&& + S&&`：注 1 指出，若两个分配器相等，实现可以从**任何一个**移动——比如右边的容量更大时，往右边的开头插入可能比往左边追加更省。所以标准说两者都处于"有效但未指明状态"，不能假定右操作数没被动过。
+本机 libc++ 一共分配两次：`a + b` 一次，追加 `c` 时容量不够又增长一次，增长后的容量足以放下 `d`。如果没有右值重载，每个 `+` 都要分配一个新字符串。
 
-### 与 `string_view` 拼接 {{c++26}}
+概要中一共有 16 个 `operator+` 重载。下表中 `S` 是 `basic_string<charT, traits, Allocator>`，`SV` 是 `type_identity_t<basic_string_view<charT, traits>>`：
 
-¶10–13 由 [[P2591R5]] 加入。在此之前 `str + sv` 不能编译：既没有对应的重载，`string_view` 也不能隐式转换为 `string`（[[basic.string]]，[[P0254R2]] 的设计）。只能写 `str + std::string(sv)`，平白多一次分配。
+| 左操作数 | 右操作数 | 效果 |
+|---|---|---|
+| `const S&` | `const S&` 或 `const charT*` | ¶1 复制 `lhs`，再追加 |
+| `S&&` | `const S&` 或 `const charT*` | ¶2 `lhs.append(rhs); return std::move(lhs);` |
+| `S&&` | `S&&` | ¶3 同上，但两个操作数都处于有效但未指定的状态 |
+| `const S&` 或 `const charT*` | `S&&` | ¶4 `rhs.insert(0, lhs); return std::move(rhs);` |
+| `const charT*` | `const S&` | ¶5 复制 `rhs`，在开头插入 |
+| `charT` | `const S&` 或 `S&&` | ¶6–¶7 在开头插入一个字符 |
+| `const S&` 或 `S&&` | `charT` | ¶8–¶9 `push_back` |
+| `const S&` 或 `S&&` | `SV` | ¶10–¶11 追加 {{c++26}} |
+| `SV` | `const S&` 或 `S&&` | ¶12–¶13 在开头插入 {{c++26}} |
 
-新重载的 `string_view` 参数用 `type_identity_t` 包裹（¶14 的注），与 [[string.view]] 的比较运算符是同一个技巧：`charT`、`traits`、`Allocator` 只从 `basic_string` 那一侧推导，另一侧可以是任何能隐式转换为 `basic_string_view<charT, traits>` 的类型。
+¶3 中两个操作数都是右值时，注 1 指出，如果两者的分配器相等，实现可以从任何一个移动。例如右边的容量更大时，在右边开头插入可能比在左边追加更省。所以标准规定两者都处于有效但未指定的状态，不能假定右操作数没有被动过。
+
+### 与 string_view 拼接 {{c++26}}
 
 ```cpp run ok
 #include <string>
@@ -99,48 +100,26 @@ int main() {
 }
 ```
 
-本机 libc++ 已支持。
+¶10–¶13 由 [[P2591R5]] 加入。在此之前 `str + sv` 不能编译：没有对应的重载，`string_view` 也不能隐式转换为 `string`（[[P0254R2]] 的设计，见 [[basic.string]]）。只能写 `str + std::string(sv)`，多一次分配。本机 libc++ 已经支持新重载。
 
-### 陷阱
+¶14 视图一侧的形参包了一层 `type_identity_t`，与 [[string.view]] 的比较运算符是同一个技巧：`charT`、`traits`、`Allocator` 只从 `basic_string` 一侧推导，另一侧可以是任何能隐式转换为 `basic_string_view<charT, traits>` 的类型。
 
-- `"abc" + "def"` 非良构：两个数组退化为指针，指针相加没有定义（[[expr.add]]）。
-- `"abc" + 1` **合法**，结果是指向 `"bc"` 的指针；`std::string s = "abc" + 1;` 得到 `"bc"`（Clang 默认给出 `-Wstring-plus-int` 警告）。
-- `s + 'a' + 'b'` 没问题；`'a' + 'b' + s` 先算 `'a' + 'b'`（整数 195），再找 `int + string`——`charT` 推导失败，非良构。
-- `std::string_view` 与 `std::string_view` 之间仍然没有 `+`。
+### 容易出错的写法
 
-## 比较（[string.cmp]）
+- `"abc" + "def"` 非良构：两个数组都退化为指针，指针不能相加（[[expr.add]]）。
+- `"abc" + 1` 合法，结果是指向 `"bc"` 的指针，所以 `std::string s = "abc" + 1;` 得到 `"bc"`。Clang 默认给出 `-Wstring-plus-int` 警告。
+- `s + 'a' + 'b'` 没有问题；`'a' + 'b' + s` 先算 `'a' + 'b'`，得到整数 195，再找 `int + string`，`charT` 推导失败，非良构。
+- 两个 `std::string_view` 之间仍然没有 `+`。
 
-C++20 起只剩两个运算符模板，各有 `(const S&, const S&)` 与 `(const S&, const charT*)` 两个版本，其余（`!=`、`<`、反向的 `const charT* == S` 等）全部由重写候选生成（[[over.match.oper]]，[[P1614R2]]）。¶1：全部等价于先转换为 `basic_string_view` 再比较，所以语义完全由 [[string.view]] 与 [[char.traits]] 决定——`std::string` 的 `<` 按 `unsigned char` 比较，`<=>` 的结果类型是 `strong_ordering`。
+## 比较与 swap
 
-注意 `S == S` 是 `noexcept` 的，`S == const charT*` 不是（后者有前置条件：指针必须指向以终止符结尾的序列）。
+[string.cmp] C++20 起只有 `==` 和 `<=>` 两个运算符模板，各有 `(const S&, const S&)` 和 `(const S&, const charT*)` 两个版本（[[P1614R2]]）。`!=`、`<`、反方向的 `const charT* == S` 等都由重写候选得到（[[over.match.oper]]）。
 
-## `swap`（[string.special]）
+¶1 它们都等价于先把两边转换为 `basic_string_view` 再比较，所以语义完全由 [[string.view]] 和 [[char.traits]] 决定：`std::string` 的 `<` 按 `unsigned char` 比较字符，`<=>` 的结果类型是 `strong_ordering`。`S == S` 是 `noexcept` 的，`S == const charT*` 不是，因为指针必须指向以空字符结尾的序列，这是前置条件。
 
-¶1：等价于 `lhs.swap(rhs)`，`noexcept` 条件与成员版本一致。分配器不相等且不传播时是 {{ub}}（见 [[basic.string]]）。
+[string.special] ¶1 非成员 `swap` 等价于 `lhs.swap(rhs)`。分配器不相等又不传播时是 {{ub}}（见 [[basic.string]]）。
 
-## 输入输出（[string.io]）
-
-### `operator>>`（¶1–4）
-
-格式化输入函数（[[istream.formatted.reqmts]]）：构造 sentry（默认跳过前导空白），成功则先 `str.erase()`，然后逐个提取字符追加，直到以下之一发生：
-
-- 已存储 `n` 个字符（`n` 是 `is.width()`，若为正；否则 `str.max_size()`）；
-- 遇到文件尾；
-- 下一个字符 `c` 满足 `isspace(c, is.getloc())`——**该字符不被提取**。
-
-之后调用 `is.width(0)`。一个字符都没提取则设置 `failbit`。
-
-### `getline`（¶6–10）
-
-非格式化输入函数，但**不影响** `gcount()`。sentry 构造时**不跳过**空白。先 `str.erase()`，然后提取字符，按顺序检查（¶7："The conditions are tested in the order shown"）：
-
-1. 文件尾；
-2. 下一个字符等于 `delim`——**提取但不存储**；
-3. 已存储 `str.max_size()` 个字符——设置 `failbit`。
-
-一个字符都没提取（不是"没存储"）才设置 `failbit`。所以空行 `"\n"` 会成功返回空字符串，因为分隔符被提取了。
-
-经典组合陷阱：`>>` 不提取结尾的空白/换行，紧接着的 `getline` 读到的是这一行剩下的部分：
+## 输入输出 [string.io]
 
 ```cpp run ok
 #include <sstream>
@@ -150,19 +129,37 @@ C++20 起只剩两个运算符模板，各有 `(const S&, const S&)` 与 `(const
 int main() {
   std::istringstream in("  hello world\nsecond line\n");
   std::string w, l;
-  in >> w;               // "hello"（跳过前导空白）
-  std::getline(in, l);   // " world"：从 hello 之后接着读到行尾
+  in >> w;               // "hello"：跳过前导空白，停在空格前
+  std::getline(in, l);   // " world"：从 hello 后面接着读到行尾
   assert(w == "hello" && l == " world");
 }
 ```
 
-`getline` 有接受 `basic_istream&&` 的重载，所以 `std::getline(std::istringstream(text), line)` 能直接作用于临时流。
+### operator>>
 
-`operator<<`（¶5）：等价于 `os << basic_string_view<charT, traits>(str)`，按长度输出，内嵌的 `'\0'` 也会写出。
+¶1–¶3 `>>` 是格式化输入函数（[[istream.formatted.reqmts]]），构造 sentry 时默认跳过前导空白。sentry 成功后，它先清空 `str`，然后逐个提取字符并追加，直到下面任何一种情况发生：
 
-## 擦除（[string.erasure]）
+- 已存储 `n` 个字符。`is.width()` 为正时 `n` 就是它，否则是 `str.max_size()`；
+- 输入到达文件尾；
+- 下一个字符 `c` 满足 `isspace(c, is.getloc())`，这个字符不提取。
 
-C++20（[[P1209R0]]）加入的统一擦除接口：
+之后调用 `is.width(0)`。一个字符都没提取时设置 `failbit`。
+
+### getline
+
+¶6–¶8 `getline(is, str, delim)` 是非格式化输入函数，但不影响 `gcount()`。构造 sentry 时不跳过空白。它先清空 `str`，然后提取字符，按顺序检查（¶7 规定了这个顺序）：
+
+1. 输入到达文件尾；
+2. 下一个字符等于 `delim`，这个字符提取但不存储；
+3. 已存储 `str.max_size()` 个字符，此时设置 `failbit`。
+
+只有一个字符都没提取时才设置 `failbit`。空行 `"\n"` 中的换行符被提取了，所以 `getline` 成功，得到空字符串。上面的例子说明了 `>>` 和 `getline` 混用的常见问题：`>>` 不提取后面的空白和换行，紧接着的 `getline` 读到的是这一行剩下的部分。
+
+`getline` 也有接受 `basic_istream&&` 的重载，`std::getline(std::istringstream(text), line)` 可以直接作用于临时流。¶10 不带 `delim` 的版本以 `is.widen('\n')` 为分隔符。
+
+¶5 `operator<<` 等价于 `os << basic_string_view<charT, traits>(str)`，按长度输出，中间的空字符也会写出去。
+
+## erase 与 erase_if [string.erasure]
 
 ```cpp
 template<class charT, class traits, class Allocator, class U = charT>
@@ -171,45 +168,42 @@ template<class charT, class traits, class Allocator, class Predicate>
   constexpr size_type erase_if(basic_string<charT, traits, Allocator>& c, Predicate pred);
 ```
 
-¶1–2：就是 erase-remove 惯用法，返回删除的元素个数。`U` 的默认模板实参 `charT` 让 `std::erase(s, {})` 这样的花括号实参也能推导。注意它比较元素用的是 `operator==`（`remove` 算法的语义），**不是** `traits::eq`——对自定义 traits 的字符串，两者可能不一致。
+¶1–¶2 C++20 加入（[[P1209R0]]），效果就是 erase-remove 惯用法，返回删除的字符个数。它用 `remove` 算法比较字符，即用 `operator==`，而不是 `traits::eq`；对自定义 traits 的字符串，两者可能不一致。
 
-## 数值转换（[string.conversions]）
+`U` 的默认模板实参 `charT` 是 C++26 加入的，让 `std::erase(s, {})` 这样的花括号实参也能推导。截至写作时，本机 libc++ 还没有实现这个默认实参，`std::erase(s, {})` 编译失败。
 
-### `stoi` 族（¶1–3、¶8–10）
+## 数值转换 [string.conversions]
+
+### stoi 一族
 
 ```cpp
 int stoi(const string& str, size_t* idx = nullptr, int base = 10);
-// stol、stoul、stoll、stoull 同形
+// stol、stoul、stoll、stoull 形式相同
 ```
 
-¶1：`stoi` 与 `stol` 调用 `strtol(str.c_str(), ptr, base)`，其余分别调用 `strtoul`、`strtoll`、`strtoull`。¶3：`strto*` 报告无法转换时抛 `invalid_argument`；设置 `errno` 为 `ERANGE` **或**结果超出返回类型范围时抛 `out_of_range`。`idx` 非空时存入第一个未转换字符的下标。
+¶1 `stoi` 和 `stol` 调用 `strtol(str.c_str(), ptr, base)`，其余三个分别调用 `strtoul`、`strtoll`、`strtoull`。`idx` 非空时，存入第一个未转换字符的下标。¶3 `strto*` 报告无法转换时抛 `invalid_argument`；把 `errno` 设为 `ERANGE`，或者结果超出返回类型的范围时，抛 `out_of_range`。
 
-因为语义完全来自 C 的 `strtol` 一族，所有 C 的怪癖都被继承了：
+语义完全来自 C 的 `strtol` 一族，C 的行为也一并继承了。本机实测：
 
-| 输入 | 结果 | 原因 |
+| 调用 | 结果 | 原因 |
 |---|---|---|
-| `stoi("  42abc", &idx)` | 42，`idx == 4` | 跳过前导空白；遇到非数字停止，**不报错** |
+| `stoi("  42abc", &idx)` | 42，`idx == 4` | 跳过前导空白；遇到非数字停下，不报错 |
 | `stoi("abc")` | 抛 `invalid_argument` | 无法转换 |
-| `stoi("3000000000")` | 抛 `out_of_range` | `strtol` 能表示，但超出 `int`（这就是"或结果超出返回类型范围"那一句的用途） |
-| `stoul("-1")` | `ULONG_MAX` | `strtoul` 接受负号，结果按无符号取反 |
+| `stoi("3000000000")` | 抛 `out_of_range` | 64 位 `long` 能表示，但超出 `int`，由超出返回类型范围这一条处理 |
+| `stoul("-1")` | `ULONG_MAX` | `strtoul` 接受负号，结果按无符号取负 |
 | `stoi("0x1f", nullptr, 16)` | 31 | 基数 16 接受 `0x` 前缀 |
-| `stoi("0x1f", nullptr, 0)` | 31 | 基数 0：按前缀自动识别 |
+| `stoi("0x1f", nullptr, 0)` | 31 | 基数 0 按前缀判断进制 |
 | `stoi("1'000")` | 1 | 不认识数字分隔符 |
 
-`stoi` 族还受 C locale 影响（`strtol` 的"空白"判断依赖当前 C locale），并且在内部读写 `errno`。想要不分配、不抛异常、与 locale 无关、明确报告失败位置的转换，用 `std::from_chars`（[[charconv]]）。
+`strtol` 判断空白时依赖当前的 C locale，并且会读写 `errno`。需要不分配内存、不抛异常、不受 locale 影响、明确报告失败位置的转换，用 `std::from_chars`（[[charconv]]）。
 
-### `stof`/`stod`/`stold`（¶4–6、¶11–13）
+¶4–¶6 `stof`、`stod`、`stold` 调用 `strtof`、`strtod`、`strtold`，`errno == ERANGE` 时抛 `out_of_range`。这包括下溢：C 标准允许 `strtod` 在结果是次正规数时设置 `ERANGE`，是否设置由实现决定。本机（macOS 的 C 库）上 `std::stod("1e-310")` 抛 `out_of_range`，尽管 `1e-310` 能用 `double` 的次正规数表示。
 
-调用 `strtof`/`strtod`/`strtold`。`errno == ERANGE` 时抛 `out_of_range`——这包括**下溢**：C 标准允许 `strtod` 在结果为次正规数时设置 `ERANGE`（是否设置由实现定义）。本机（macOS libc）实测 `std::stod("1e-310")` 抛 `out_of_range`，尽管 `1e-310` 能用 `double` 的次正规数表示。
+¶8–¶13 接受 `wstring` 的版本调用 `wcstol` 等宽字符函数，规定相同。
 
-### `to_string`/`to_wstring`（¶7、¶14）：C++26 的语义变更
+### to_string 的语义变更 {{c++26}}
 
-当前草案：
-
-!!! std
-    *Returns*: `format("{}", val)`.
-
-C++26 之前，`to_string` 被定义为"如同用 `sprintf` 配合 `%d`/`%u`/`%ld`/…/`%f`/`%Lf`"。整数结果不变，但浮点完全不同：
+¶7 当前草案中 `to_string(val)` 返回 `format("{}", val)`，¶14 `to_wstring` 返回 `format(L"{}", val)`。C++26 之前，`to_string` 定义为如同用 `sprintf` 配合 `%d`、`%f` 等格式。整数的结果不变，浮点数完全不同：
 
 | 调用 | C++23（`%f`） | C++26（`format("{}")`） |
 |---|---|---|
@@ -217,23 +211,21 @@ C++26 之前，`to_string` 被定义为"如同用 `sprintf` 配合 `%d`/`%u`/`%l
 | `to_string(1e-7)` | `"0.000000"` | `"1e-07"` |
 | `to_string(1e20)` | `"100000000000000000000.000000"` | `"1e+20"` |
 
-旧语义的 `%f` 固定输出六位小数：小数会被截成 `0.000000`，大数会输出一长串数字，而且受全局 C locale 的小数点字符影响。新语义（[[P2587R3]]）使用 `format` 的默认格式，即 `to_chars` 的最短往返表示（[[format.string.std]]、[[charconv]]），并且与 locale 无关。这是一个**静默的行为变更**：旧代码不会编译失败，只是输出变了。
+旧的 `%f` 固定输出六位小数，很小的数变成 `0.000000`，很大的数输出一长串数字，小数点字符还受全局 C locale 影响。新语义（[[P2587R3]]）使用 `format` 的默认格式，即能精确往返的最短表示（[[format.string.std]]、[[charconv]]），并且与 locale 无关。旧代码不会因此编译失败，只是输出变了。
 
 !!! impl "实现状态"
-    本机 libc++（LLVM 23）的 `to_string(0.1)` 仍返回 `"0.100000"`，`to_string(1e-7)` 返回 `"0.000000"`，即尚未实现 [[P2587R3]] 的新语义；整数版 `to_string` 也尚未是 `constexpr`（在常量表达式中调用会报"non-constexpr function"）。标准规定如此，但截至本文编写时编译器与标准库仍未跟进。
+    截至写作时，本机 libc++（LLVM 23）还没有实现 [[P2587R3]]：`to_string(0.1)` 返回 `"0.100000"`，`to_string(1e-7)` 返回 `"0.000000"`，`to_string(1e20)` 返回 `"100000000000000000000.000000"`。整数版 `to_string` 也还不是 `constexpr`，在常量表达式中调用会报错。
 
-## 哈希（[basic.string.hash]）
+## 哈希 [basic.string.hash]
 
-五个部分特化 `hash<basic_string<charT, char_traits<charT>, A>>`——**对任意分配器 `A`**，所以 `std::pmr::string` 也能直接放进 `unordered_set`。¶1 是唯一的规范性要求：
+五个 `hash` 部分特化的形式是 `hash<basic_string<charT, char_traits<charT>, A>>`，对任意分配器 `A` 都有效，所以 `std::pmr::string` 也能直接放进 `unordered_set`。¶1 是唯一的规范要求：
 
 !!! std
     If `S` is one of these string types, `SV` is the corresponding string view type, and `s` is an object of type `S`, then `hash<S>()(s) == hash<SV>()(SV(s))`.
 
-这条等式让异构查找（用 `string_view` 查 `unordered_map<string, V>`）成为可能，示例见 [[string.view]]。自定义 traits 的 `basic_string` 没有标准 `hash` 特化。
+这条等式使得可以用 `string_view` 查找 `unordered_map<string, V>` 而不构造临时 `string`，例子见 [[string.view]]。自定义 traits 的 `basic_string` 没有标准的 `hash` 特化。
 
-## `""s` 字面量（[basic.string.literals]）
-
-¶1–5：`operator""s(const charT* str, size_t len)` 返回 `basic_string{str, len}`，位于 `std::literals::string_literals`。由于长度来自字面量本身，内嵌的 `'\0'` 会被保留：
+## ""s 字面量 [basic.string.literals]
 
 ```cpp run ok
 #include <string>
@@ -241,26 +233,41 @@ C++26 之前，`to_string` 被定义为"如同用 `sprintf` 配合 `%d`/`%u`/`%l
 using namespace std::literals;
 
 int main() {
-  std::string a = "a\0b";     // const char* 构造：遇 '\0' 截断
+  std::string a = "a\0b";     // const char* 构造：遇到 '\0' 截断
   auto b = "a\0b"s;            // 字面量运算符：长度 3
   assert(a.size() == 1 && b.size() == 3);
 }
 ```
 
-¶6 的注：`s` 后缀也用于 `chrono::duration` 的秒，但两者不冲突——duration 的后缀作用于数字字面量，字符串的后缀作用于字符串字面量（字面量运算符的形参列表不同，[[over.literal]]）。
+¶1–¶5 `operator""s(const charT* str, size_t len)` 返回 `basic_string{str, len}`，在 `std::literals::string_literals` 中。长度来自字面量本身，所以中间的空字符会保留。
 
-注意 `""s` 产生的是**临时** `string`：`std::string_view v = "abc"s;` 立即悬垂，而 `std::string_view v = "abc";` 或 `"abc"sv` 是安全的（[[string.view]]）。这些字面量运算符是 `constexpr` 的，但与 [[basic.string]] 所述相同，结果对象若涉及堆分配就不能成为 `constexpr` 变量。
+¶6 的注说明，`s` 后缀也用于 `chrono::duration` 表示秒，但两者不冲突：duration 的后缀作用于数字字面量，字符串的后缀作用于字符串字面量，两个字面量运算符的形参列表不同（[[over.literal]]）。
 
-## 小结
+`""s` 产生的是临时 `string`，所以 `std::string_view v = "abc"s;` 立即悬垂；`std::string_view v = "abc";` 或 `"abc"sv` 才是安全的（[[string.view]]）。
 
-| 主题 | 规则 |
-|---|---|
-| 别名 | `string`/`u8string`/`u16string`/`u32string`/`wstring`，`pmr::` 版本用 `polymorphic_allocator` |
-| `operator+` | 右值重载复用左（或右）操作数的缓冲区；C++26 起可直接与 `string_view` 拼接 |
-| 比较 | 只有 `==` 与 `<=>`，转发给 `string_view`；其余由重写生成 |
-| `>>` / `getline` | `>>` 跳过前导空白、止于空白；`getline` 不跳过、提取但不存储分隔符 |
-| `erase`/`erase_if` | erase-remove，用 `operator==` 而非 `traits::eq` |
-| `stoi` 族 | `strtol` 语义：跳空白、接受部分匹配、`stoul` 接受负数；失败抛 `invalid_argument`/`out_of_range` |
-| `to_string` | C++26 改为 `format("{}")`（最短往返，与 locale 无关）；本机 libc++ 尚未实现 |
-| `hash` | 与对应 `string_view` 相等，对任意分配器都有特化 |
-| `""s` | 保留内嵌 `'\0'`；产生临时对象，不要绑定到 `string_view` |
+## 历史
+
+!!! history
+    - C++11 加入 `stoi` 一族和 `to_string`，`to_string` 当时定义为 `sprintf` 的格式。
+    - C++20：比较运算符改为 `==` 和 `<=>`（[[P1614R2]]）；加入 `erase` 和 `erase_if`（[[P1209R0]]）；加入 `u8string`。
+    - C++26：`string` 与 `string_view` 直接拼接（[[P2591R5]]）；`to_string` 改为 `format("{}")`（[[P2587R3]]）。
+
+## 思考题
+
+!!! question "思考题 1"
+    `std::string s = "x"; s = s + "y" + s;` 中，第二个 `+` 选中哪个重载？结果是什么？
+
+<details markdown="1">
+<summary>答案</summary>
+
+`s + "y"` 选中 `(const S&, const charT*)`，产生临时字符串 `"xy"`。第二个 `+` 的左操作数是这个右值，右操作数是左值 `s`，选中 `(S&&, const S&)`（¶2），在临时对象上追加 `s`，得到 `"xyx"`，再移动赋值给 `s`。右操作数 `s` 在追加时只是被读取，没有问题。
+</details>
+
+!!! question "思考题 2"
+    文件内容是 `"42\nhello\n"`。先 `in >> n;` 读一个 `int`，再 `std::getline(in, line);`，`line` 是什么？怎样改才能读到 `"hello"`？
+
+<details markdown="1">
+<summary>答案</summary>
+
+`line` 是空字符串。`>>` 读完 `42` 后停在换行符前，`getline` 立即遇到分隔符，提取它、不存储，返回空串，并且不设置 `failbit`（[[string.io#6]]）。可以在 `getline` 前调用 `in.ignore(std::numeric_limits<std::streamsize>::max(), '\n')` 跳过这一行的剩余部分，或者用 `std::getline(in >> std::ws, line)` 跳过空白。
+</details>

@@ -1,71 +1,80 @@
 ---
 title: 字符串视图
-summary: basic_string_view 逐条精读——"指针 + 长度"的非拥有只读视图；不保证 '\0' 终止的 data()、从临时对象构造导致的悬垂、五个构造函数的约束（nullptr 被删除、迭代器对、C++23 explicit range 构造函数及其排除条件）、比加固后的 string 更严的 operator[]、type_identity_t 让比较与隐式转换共存的技巧、hash 与 string 一致带来的异构查找，以及 sv 字面量
+summary: basic_string_view 是不拥有字符的指针加长度；本页讲它怎样构造、哪些操作有前置条件、为什么 data() 不保证以空字符结尾，以及它最常见的错误：悬垂。
 status: done
 covers: *
 papers: P0254R2, P0403R1, P1391R4, P1989R2, P2499R0, P2166R1, P2251R1, P0457R2, P1679R3, P3471R4, P0919R3, P1690R1
 related: strings, char.traits, basic.string, string.classes, views.contiguous, class.temporary, range.range, over.match.oper, unord.hash, lex.string, structure.specifications
 tags: 标准库, string_view, 悬垂, 加固, 视图
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-`std::string_view` 是"`const char*` + 长度"的正式化：它不拥有字符，不分配内存，不保证终止符，拷贝它只是拷两个机器字。C++17 引入它（[[P0254R2]] 同时让 `std::string` 可以隐式转换为它），目的写在 [string.view.general] ¶2 的注里：
+!!! tldr
+    - `string_view` 只保存一个指针和一个长度，不拥有字符，复制它很便宜；它最适合做函数形参。
+    - 它不延长任何对象的生命周期。从临时 `std::string` 构造视图再保存下来，视图立即悬垂。
+    - `data()` 不保证以空字符结尾，不要交给只接受 `const char*` 的 C 函数。
+    - `sv[i]` 要求 `i < size()`，比 `std::string` 的 `i <= size()` 更严；C++26 起这是加固前置条件。
+    - 从 range 构造是 `explicit` 的，字符数组仍按 C 字符串处理，`nullptr` 不能用来构造。
 
-> 库提供从 `const charT*` 和 `std::basic_string` 到 `basic_string_view` 的隐式转换，以便用户代码只需接受 `basic_string_view<charT>` 这一个**非模板**参数类型。
+## 为什么需要 string_view [string.view.general]
 
-也就是说，它首先是一个**参数类型**。以前 `void f(const std::string&)` 遇到字面量要先构造临时 `string`（可能分配内存），`void f(const char*)` 又丢了长度；`void f(std::string_view)` 两头都接，而且零开销。所有麻烦都出在把它用作**返回类型、成员变量或局部变量**的时候——那时你要自己保证被引用的字符活得够久。
+```cpp run ok
+#include <string>
+#include <string_view>
+#include <cstdio>
 
-它和 [[views.contiguous]] 里的 `std::span<const charT>` 几乎是同一个东西，区别在于 `string_view` 带 traits、有一整套查找/比较成员，而且元素只读。
+std::size_t count_a(std::string_view s) {      // 一个非模板形参，接受各种字符串
+  std::size_t n = 0;
+  for (char c : s) n += (c == 'a');
+  return n;
+}
 
-## 概念模型（[string.view.general] ¶1）
+int main() {
+  std::string str = "banana";
+  char buf[] = "papaya";
+  std::printf("%zu %zu %zu\n",
+              count_a("alpaca"),               // 字面量：不构造临时 string
+              count_a(str),                    // string：经转换函数，不复制字符
+              count_a(buf));                   // 字符数组：按 C 字符串处理
+}
+```
+
+形参写成 `const std::string&` 时，传入字面量要先构造一个临时 `string`，可能分配内存；写成 `const char*` 又丢掉了长度。`std::string_view` 两种实参都能接受，而且不复制字符。[string.view.general] ¶2 的注说明了这个设计目的：库提供从 `const charT*` 和 `basic_string` 到 `basic_string_view` 的隐式转换，让用户代码只需接受 `basic_string_view<charT>` 这一种非模板形参类型。
+
+¶1 `basic_string_view` 的对象引用一段常量、连续的 char-like 对象序列（[[g:char-like-type]]），首元素在位置 0。
 
 !!! std
     The class template `basic_string_view` describes an object that can refer to a constant contiguous sequence of char-like objects with the first element of the sequence at position zero.
 
-    `basic_string_view` 的对象**引用**一段**常量**、**连续**的 char-like 对象序列（[[g:char-like-type]]）。
+这句话里有三个要点。refer to 说明视图不拥有字符；constant 说明字符只读，所以 `iterator` 和 `const_iterator` 是同一个类型；contiguous 说明可以用 `data()` 拿到指向首字符的指针。和 `std::span<const char>`（[[views.contiguous]]）相比，`string_view` 多了 traits 参数和一整套查找、比较成员。
 
-三个关键词：*refer to*（不拥有）、*constant*（只读，所以 `iterator` 与 `const_iterator` 是同一个类型，脚注 190）、*contiguous*（可以用 `data()` 拿到裸指针）。
+`std::string_view` 是 `basic_string_view<char>` 的别名。另外还有 `u8string_view`、`u16string_view`、`u32string_view`、`wstring_view`。
 
-说明用成员（[string.view.template.general] 的类定义末尾）只有两个：
+## 内部只有指针和长度 [string.view.template.general]
+
+类定义末尾的两个说明用成员给出了它的全部状态：
 
 ```cpp
 const charT* data_;   // exposition only
 size_type size_;      // exposition only
 ```
 
-libc++ 正是这样实现的，本机 `sizeof(std::string_view) == 16`。
+libc++ 就是这样实现的，本机 `sizeof(std::string_view) == 16`。
 
-## 概要（[string.view.synop]）
+¶1 `traits` 必须满足字符 traits 的要求（[[char.traits]]）。¶3 除非另有说明，成员函数的复杂度都是 O(1)。
 
-几个值得注意的点：
-
-- 头注释 `// mostly freestanding`：独立实现也提供 `string_view`；会抛异常的 `at`、`copy`、`substr`、`subview` 和带位置参数的 `compare` 被标为 *freestanding-deleted*，`operator<<` 被标为 *hosted*。
-- `ranges::enable_view` 与 `ranges::enable_borrowed_range` 都特化为 `true`。后者意味着对**右值** `string_view` 调用 ranges 算法会返回真正的迭代器而不是 `ranges::dangling`（[[g:borrowed-range]]，[[range.range]]）——因为视图死了，字符还在。
-- 比较运算符只有 `==` 和 `<=>` 两个，其余由重写候选（[[over.match.oper]]）生成；参数之一用 `type_identity_t` 包裹，见下文。
-- 五个类型别名 `string_view`、`u8string_view`、`u16string_view`、`u32string_view`、`wstring_view`，对应五个 `hash` 特化。
-- `sv` 字面量在 `std::literals::string_view_literals` 中（[[P0403R1]]）。
-- ¶1：包含 `<string_view>` 即可使用 `std::swap`（[utility.swap]）和 `std::begin`/`std::size`/`std::data` 等（[iterator.range]）。
-
-## 类模板的总体规定（[string.view.template.general]）
-
-¶1：`traits` 必须满足字符 traits 要求（[[char.traits]]）；注：`traits::char_type` 与 `charT` 不同则非良构。
-
-¶2 定义了**失效**的含义，这是整个视图语义的关键：
+¶2 视图里的指针、迭代器和引用何时失效，完全由被引用的存储决定：
 
 !!! std
     For a `basic_string_view` `str`, any operation that invalidates a pointer in the range `[str.data(), str.data() + str.size())` invalidates pointers, iterators, and references to elements of `str`.
 
-    任何使 `[str.data(), str.data()+str.size())` 中的指针失效的操作，都会使 `str` 的元素的指针、迭代器和引用失效。
+`string_view` 没有自己的失效规则。源 `string` 被销毁或者重新分配（[[basic.string]]），源缓冲区被释放，视图中的元素就都不能再访问了。失效的只是指向元素的指针、迭代器和引用，视图对象本身仍然是一个正常的对象：可以给它赋新值，`size()` 也照样能读。
 
-换句话说，`string_view` **没有自己的失效规则**，它完全继承被引用存储的命运：源 `string` 被销毁、被重新分配（见 [[basic.string]] 的 [string.require] ¶4）、源缓冲区被释放——视图里的一切同时失效。注意这条只说"元素的指针、迭代器和引用"失效，视图对象本身依然是一个合法对象：可以对它赋值，`size()` 也照样能读，只是不能再访问字符。
+¶4 `basic_string_view` 是平凡可复制类型（[[g:trivially-copyable-type]]）。这条保证是 C++23 由 [[P2251R1]] 补上的，各实现原本就是这样。在 x86-64 和 AArch64 的常见调用约定下，按值传递 `string_view` 用两个寄存器，比 `const std::string&` 少一次间接访问，所以惯用法是按值传递 `string_view`。
 
-¶3：成员函数复杂度默认 O(1)，除非另有说明。
+## 构造 [string.view.cons]
 
-¶4：`basic_string_view<charT, traits>` 是**平凡可复制类型**（[[g:trivially-copyable-type]]）。这是 C++23 的 [[P2251R1]] 补上的规定（各实现原本就是如此，标准此前没有保证）。后果之一：在 Itanium C++ ABI 下按值传递 `string_view` 走两个寄存器，比 `const std::string&` 少一次间接寻址——这就是"`string_view` 按值传"的惯用法的 ABI 依据。
-
-## 构造与赋值（[string.view.cons]）
-
-类定义里列出的构造函数：
+类定义中的构造函数如下：
 
 ```cpp
 constexpr basic_string_view() noexcept;
@@ -77,18 +86,15 @@ template<class It, class End> constexpr basic_string_view(It begin, End end);
 template<class R> constexpr explicit basic_string_view(R&& r);
 ```
 
-### 默认构造（¶1）
+### 默认构造与指针加长度
 
-后置条件：`size_ == 0` 且 `data_ == nullptr`。所以 `std::string_view{}.data()` 是**空指针**，`printf("%s", sv.data())` 在这里是 {{ub}}（C 要求 `%s` 的实参指向一个字符串）。与之相对，`std::string{}.data()` 永远指向一个 `'\0'`。
+¶1 默认构造的视图满足 `size_ == 0` 且 `data_ == nullptr`。所以 `std::string_view{}.data()` 是空指针，`printf("%s", sv.data())` 在这里是 {{ub}}。`std::string{}.data()` 则总是指向一个空字符。
 
-### 从 `const charT*`（¶2–4）
+¶5 `(str, len)` 形式的前置条件是 `[str, str + len)` 是有效范围。它不要求结尾有空字符，中间有空字符也不管。`len == 0` 时 `str` 可以是空指针。
 
-前置条件：`[str, str + traits::length(str))` 是有效范围——即 `str` 指向一个以 `charT()` 终止的序列。效果：`size_ = traits::length(str)`，复杂度 O(length)。
+### 从 const charT*
 
-这有两个后果：
-
-1. 内嵌的 `'\0'` 会截断：`std::string_view sv = "abc\0def";` 的 `size()` 是 3，而 `"abc\0def"sv` 的 `size()` 是 7（字面量运算符拿到的是数组的完整长度，见 [[over.literal]]）。
-2. 从字符**数组**构造时，走的也是这个构造函数（数组退化为指针），**不是** range 构造函数：
+¶2–¶4 前置条件是 `str` 指向一个以 `charT()` 结尾的序列；构造时用 `traits::length(str)` 求长度，复杂度与长度成正比。所以中间的空字符会截断视图：`std::string_view sv = "abc\0def";` 的 `size()` 是 3。
 
 ```cpp run ok
 #include <string_view>
@@ -98,110 +104,150 @@ template<class R> constexpr explicit basic_string_view(R&& r);
 int main() {
   char buf[8] = "ab";
   std::array<char, 4> arr{'x', 'y', 'z', 'w'};
-  assert(std::string_view{buf}.size() == 2);   // const char*：strlen 语义
-  assert(std::string_view{arr}.size() == 4);   // range：整个 array
+  assert(std::string_view{buf}.size() == 2);   // 数组退化为指针：strlen 语义
+  assert(std::string_view{arr}.size() == 4);   // range 构造：整个 array
 }
 ```
 
-`buf` 能隐式转换为 `const char*`，所以被 range 构造函数的 ¶12.4 排除（见下文）。这是有意为之：字符数组几乎总是被当作 C 字符串使用，把尾部的 `'\0'` 和未用空间都算进视图会出乎所有人的意料。
+字符数组走的也是这个构造函数，而不是下面的 range 构造函数。这是有意的：字符数组几乎总是当作 C 字符串用，把结尾的空字符和没用到的空间都算进视图，会让所有人意外。
 
-### 从 `nullptr`：被删除 {{c++23}}
+### nullptr 被删除
 
-`basic_string_view(nullptr_t) = delete;` 来自 [[P2166R1]]。以前 `std::string_view sv = nullptr;` 能编译（走 `const charT*` 构造函数），然后在 `traits::length(nullptr)` 里崩溃——违反 ¶2 的前置条件，{{ub}}。现在它在编译期被拒绝：
+C++23 起 `basic_string_view(nullptr_t)` 被删除（[[P2166R1]]）。以前 `std::string_view sv = nullptr;` 能编译，然后在 `traits::length(nullptr)` 里崩溃。现在它在编译期被拒绝：
 
 ```cpp error
 #include <string_view>
-std::string_view sv = nullptr;   // error: invokes a deleted function
+std::string_view sv = nullptr;   // error: 调用了被删除的函数
 ```
 
-注意这只拦得住字面的 `nullptr`。一个值为空的 `const char*` 变量照样能通过编译，然后违反前置条件。
+这只拦得住字面上的 `nullptr`。值为空的 `const char*` 变量仍然能通过编译，运行时违反前置条件。
 
-### 从指针 + 长度（¶5–6）
+### 从迭代器对 {{c++20}}
 
-前置条件：`[str, str + len)` 有效。**不要求**终止符，也不检查内嵌 `'\0'`。`str` 可以为空指针，只要 `len == 0`（`[nullptr, nullptr)` 是有效的空范围）。
+¶7 C++20 加入的 `(begin, end)` 构造函数（[[P1391R4]]）有四个约束：`It` 满足 `contiguous_iterator`；`End` 满足 `sized_sentinel_for<It>`；`It` 的值类型是 `charT`；`End` 不能转换为 `size_type`。
 
-### 从迭代器对（¶7–10）{{c++20}}
+最后一个约束是为了不和 `(const charT*, size_type)` 抢重载：`string_view(p, 5)` 中的 `5` 不能被当成哨兵。¶9 构造的结果是 `data_ = to_address(begin)`、`size_ = end - begin`。
 
-[[P1391R4]] 加入。约束（¶7）：
+### 从 range：explicit {{c++23}}
 
-- ¶7.1 `It` 满足 `contiguous_iterator`；
-- ¶7.2 `End` 满足 `sized_sentinel_for<It>`；
-- ¶7.3 `iter_value_t<It>` 就是 `charT`；
-- ¶7.4 `End` **不能**转换为 `size_type`。
+¶12 C++23 加入的 range 构造函数（[[P1989R2]]）在 C++23 定稿前改成了 `explicit`（[[P2499R0]]）。它的约束如下，其中 `d` 是 `remove_cvref_t<R>` 类型的左值：
 
-¶7.4 是为了避免与 `(const charT*, size_type)` 争抢：`string_view(p, 5)` 中 `int` 如果能当作哨兵类型推导，就会出现歧义或选错重载。¶8 的前置条件要求这些概念被**建模**（不仅语法满足），¶9：`data_ = to_address(begin)`、`size_ = end - begin`。
+| 约束 | 作用 |
+|---|---|
+| ¶12.1 `remove_cvref_t<R>` 不是 `basic_string_view` | 不抢复制构造 |
+| ¶12.2 `R` 是 `contiguous_range` 和 `sized_range` | 能取得 `data()` 和 `size()` |
+| ¶12.3 `range_value_t<R>` 是 `charT` | 不转换元素类型 |
+| ¶12.4 `R` 不能转换为 `const charT*` | 字符数组仍按 C 字符串处理 |
+| ¶12.5 `d.operator ::std::basic_string_view<charT, traits>()` 不是有效表达式 | 自带转换函数的类型（如 `std::string`）用自己的转换函数 |
 
-推导指引（[string.view.deduct] ¶1）：`basic_string_view(It, End) -> basic_string_view<iter_value_t<It>>`。
+¶12.5 使 `std::string` 到 `string_view` 的转换总是走 `string` 的隐式转换函数，而不是这个构造函数。traits 不同时，例如 `basic_string<char, ci_traits>` 要转成 `std::string_view`，转换函数的目标类型对不上，¶12.5 不再排除它，于是可以用这个构造函数显式转换。
 
-### 从 range（¶11–14）{{c++23}}
+改成 `explicit` 的理由是：连续的字符 range 不一定是字符串。`std::vector<char>` 可能是以空字符结尾的缓冲区，也可能是二进制数据；`std::array<char, 16>` 可能只用了前几个字节。如果允许隐式转换，`f(std::string_view)` 就会悄悄接受这些对象，并把结尾的空字符也算进长度：
 
-这是被讨论得最多的一个构造函数。它由 [[P1989R2]] 加入 C++23，又在 C++23 定稿前由 [[P2499R0]] 改为 **`explicit`**。约束（¶12，其中 `d` 是 `remove_cvref_t<R>` 类型的左值）：
+<div class="compare" markdown="1">
 
-| 条款 | 约束 | 目的 |
-|---|---|---|
-| ¶12.1 | `remove_cvref_t<R>` 不是 `basic_string_view` | 不劫持拷贝构造 |
-| ¶12.2 | `R` 建模 `contiguous_range` 与 `sized_range` | 能取得 `data()`/`size()` |
-| ¶12.3 | `range_value_t<R>` 是 `charT` | 不做元素类型转换 |
-| ¶12.4 | `R` **不能**转换为 `const charT*` | 字符数组走 C 字符串语义（见上） |
-| ¶12.5 | `d.operator ::std::basic_string_view<charT, traits>()` 不是有效表达式 | 自带转换函数的类型（例如 `std::string`）走自己的转换函数 |
-
-¶12.5 的作用往往被忽略：`std::string` 有 `operator basic_string_view()`（[string.accessors] ¶3），于是 `string → string_view` 永远走那个**隐式**转换函数，而不是这个 `explicit` 构造函数。它还有一个更微妙的效果——traits 不同时（例如 `basic_string<char, ci_traits>` 转 `std::string_view`），转换函数的目标类型不匹配，¶12.5 不再排除，于是**显式**的 range 构造函数可以把它转过来。
-
-**为什么要 `explicit`？** 因为"连续的字符 range"不等于"字符串"。`std::vector<char>` 可能是一段以 `'\0'` 结尾的 C 缓冲区，也可能是二进制数据；`std::array<char, 16>` 可能只用了前几个字节。隐式转换会让 `f(std::string_view)` 悄悄接受这些东西，而它们的长度语义（"包括尾部的零"）与字符串的直觉不同：
+```cpp error
+#include <string_view>
+#include <vector>
+void f(std::string_view);
+void g(std::vector<char>& v) {
+  f(v);   // error: 构造函数是 explicit
+}
+```
 
 ```cpp run ok
 #include <string_view>
 #include <vector>
 #include <cassert>
-
 int main() {
   std::vector<char> v{'a', 'b', '\0'};
-  // std::string_view s1 = v;     // error: explicit
-  std::string_view s2{v};          // OK：直接初始化
-  assert(s2.size() == 3);          // 尾部的 '\0' 也算在内
+  std::string_view s{v};   // 直接初始化
+  assert(s.size() == 3);   // 含结尾的 '\0'
 }
 ```
 
-¶12 的约束里**没有** `borrowed_range`。这与 `std::span` 不同（[[views.contiguous]] 的 range 构造函数要求右值 range 是 borrowed 的，或者元素是 const 的——而 `string_view` 的元素本来就是 const）。所以下面的代码能编译，并立刻悬垂：
+</div>
 
-```cpp ub
+约束里没有要求 `R` 是 borrowed range，所以临时的 `vector` 也能用来构造视图，并且立即悬垂：
+
+```cpp
 #include <string_view>
 #include <vector>
-std::string_view x{std::vector<char>{'a', 'b'}};   // UB 隐患：临时 vector 在完整表达式结束时销毁
+std::string_view x{std::vector<char>{'a', 'b'}};
+// x 悬垂：临时 vector 在完整表达式结束时销毁，之后访问 x 的元素是 UB
 ```
 
-推导指引（[string.view.deduct] ¶2）：`basic_string_view(R&&) -> basic_string_view<range_value_t<R>>`，约束只要求 `contiguous_range`。
+### 推导指引 [string.view.deduct]
 
-## 迭代器、容量、元素访问
+¶1 `basic_string_view(It, End)` 推导为 `basic_string_view<iter_value_t<It>>`。¶2 `basic_string_view(R&&)` 推导为 `basic_string_view<range_value_t<R>>`，只要求 `R` 是 `contiguous_range`。
 
-**迭代器**（[string.view.iterators]）：¶1 `const_iterator` 是实现定义的类型，满足常量 *Cpp17RandomAccessIterator*、建模 `contiguous_iterator`、满足 constexpr 迭代器要求；¶2 容器迭代器的全部要求（[[container.requirements]]）同样适用。¶3：非空时 `addressof(*begin()) == data_`；**空时 `begin()` 是一个未指明的值**，只保证 `[begin(), end())` 是有效范围——所以不要假定空视图的 `begin()` 能还原出 `data()`。libc++ 的迭代器就是 `const char*`。
+## 悬垂
 
-**容量**（[string.view.capacity]）：`size()`/`length()` 返回 `size_`；`max_size()` 是能引用的最大字符数；`empty()`。
+`string_view` 的问题几乎都可以归结为一点：它不延长任何对象的生命周期。引用绑定到临时对象时的生命周期延长（[[class.temporary]]）只对引用有效。`string_view` 是类类型，从临时 `string` 构造它，只是调用了 `string` 的转换函数，临时对象照常在完整表达式结束时销毁。
 
-**元素访问**（[string.view.access]）——这里有 C++26 的加固（[[P3471R4]]，*Hardened preconditions* 的含义见 [[structure.specifications]]）：
+```cpp
+std::string make();
+void f(std::string_view);
 
-| 成员 | 前置条件 | 失败时 |
+f(make());                                   // OK：临时对象活到 f 返回之后
+std::string_view a = make();                 // 悬垂
+std::string_view b = std::string("x") + "y"; // 悬垂
+std::string_view c = "abc"s;                 // 悬垂：""s 产生临时 string
+std::string_view d = "abc";                  // OK：字面量具有静态存储期
+
+std::string_view g() {
+  std::string s = "local";
+  return s;                                  // 悬垂：返回局部 string 的视图
+}
+```
+
+本机 Clang 23 对 `a`、`b`、`c` 给出 `-Wdangling-gsl` 警告，对 `g` 给出 `-Wreturn-stack-address` 警告，两者都默认开启。Clang 内置了一份标准库类型清单，知道 `std::string_view` 是指针类类型、`std::string` 是拥有者类型。只要中间隔一层函数，编译器就看不出来了：
+
+```cpp run ub
+#include <string>
+#include <string_view>
+#include <iostream>
+
+std::string_view trim(std::string_view s) {          // 返回实参的子视图
+  while (!s.empty() && s.front() == ' ') s.remove_prefix(1);
+  return s;
+}
+std::string read_line() { return "   a line long enough to avoid SSO, really"; }
+
+int main() {
+  std::cout << trim(read_line()) << '\n';            // OK：临时对象活到完整表达式结束
+  std::string_view v = trim(read_line());            // 悬垂，没有警告
+  std::cout << v << '\n';                            // UB：ASan 报 heap-use-after-free
+}
+```
+
+Clang 的扩展属性 `[[clang::lifetimebound]]` 可以把这层关系告诉编译器。把形参声明为 `std::string_view s [[clang::lifetimebound]]` 之后，`v` 的那一行也会触发 `-Wdangling-gsl`。
+
+!!! pitfall "短字符串让悬垂看起来没事"
+    如果 `read_line()` 返回的字符串很短（libc++ 中不超过 22 个 `char`），字符就存放在 `string` 对象内部（短字符串优化，见 [[basic.string]]）。临时对象在栈上，销毁后那块内存往往原封不动，AddressSanitizer 也不一定能发现。测试通过不能说明没有悬垂。
+
+`string_view` 什么时候可以安全地保存：
+
+- 作为形参总是安全的，实参会活到调用结束。
+- 作为返回值，只有返回实参的一部分（由调用者负责实参的生命周期）或者静态存储（字面量、静态对象）时才安全。
+- 作为成员或者放进容器，必须保证被引用的对象活得比视图久。这是悬垂最常见的来源。
+- 注意 `auto`：`auto x = s.subview(1);` 推导出 `string_view`，而 `auto x = s.substr(1);` 推导出 `string`，两者的生命周期完全不同。
+
+## 访问元素 [string.view.access]
+
+| 成员 | 前置条件 | 违反时 |
 |---|---|---|
-| `operator[](pos)` | 加固：`pos < size()` | 加固实现中为契约违反，否则 {{ub}} |
-| `at(pos)` | — | 抛 `out_of_range` |
-| `front()`/`back()` | 加固：`!empty()` | 同上 |
-| `data()` | — | — |
+| `operator[](pos)` | 加固：`pos < size()`（¶1） | 加固实现中是契约违反，否则 {{ub}} |
+| `at(pos)` | 无 | `pos >= size()` 时抛 `out_of_range`（¶5） |
+| `front()`、`back()` | 加固：`!empty()`（¶6、¶9） | 同 `operator[]` |
 
-!!! note "比 `string::operator[]` 更严"
-    ¶1 的注明确指出：这个前置条件比 `basic_string::operator[]` 的更强。`string` 允许 `s[s.size()]`（返回终止符的引用），`string_view` 不允许 `sv[sv.size()]`——视图后面不一定有字符。
+¶1 的注特意指出，这个前置条件比 `basic_string::operator[]` 的更强。`string` 保证 `data()[size()]` 是一个空字符（[[basic.string]]），所以允许 `s[s.size()]`；视图后面不一定还有字符，所以不允许 `sv[sv.size()]`。
 
-在 libc++ 中，加固模式由宏 `_LIBCPP_HARDENING_MODE` 选择（本机默认为 none）。用 fast 模式编译 `sv[3]`（`sv == "abc"`），程序在越界处以陷阱指令终止（本机退出码 133，即 SIGTRAP）；默认模式下则读出字面量的终止符 0 并"正常"运行——这正是 UB 最危险的样子。
+C++26 把这些前置条件标为加固前置条件（hardened preconditions，[[P3471R4]]，见 [[structure.specifications]]）：在加固实现中，违反它们一定会被检查并按契约违反处理。libc++ 用宏 `_LIBCPP_HARDENING_MODE` 选择加固模式，本机默认不开启。对 `sv == "abc"` 访问 `sv[3]`，默认模式下读出字面量结尾的空字符 0 并正常结束；用 fast 模式编译时，程序在越界处陷入，退出码 133（SIGTRAP）。
 
-### `data()` 不保证终止（¶12–13）
+### data() 不保证以空字符结尾
 
-!!! std
-    Unlike `basic_string::data()` and *string-literal*s, `data()` can return a pointer to a buffer that is not null-terminated. Therefore it is typically a mistake to pass `data()` to a function that takes just a `const charT*` and expects a null-terminated string.
-
-    `data()` 返回的缓冲区**可以不以空字符终止**。把它交给只接受 `const charT*` 并期待 C 字符串的函数，通常是错误的。
-
-这是一条注（不具规范效力），但它总结的是规范内容的直接后果：
-
-```cpp run
+```cpp run ok
 #include <string_view>
 #include <cstdio>
 #include <cstdlib>
@@ -209,77 +255,74 @@ std::string_view x{std::vector<char>{'a', 'b'}};   // UB 隐患：临时 vector 
 int main() {
   std::string_view whole = "1234567";
   std::string_view part = whole.substr(0, 3);    // "123"
-  std::printf("%d\n", std::atoi(part.data()));   // 打印 1234567，而不是 123
-  std::printf("%.*s\n", static_cast<int>(part.size()), part.data());  // 正确：显式长度
+  std::printf("%d\n", std::atoi(part.data()));   // 打印 1234567，不是 123
+  std::printf("%.*s\n", static_cast<int>(part.size()), part.data());  // 正确：显式给出长度
 }
 ```
 
-这段代码没有 UB（`whole` 来自字面量，后面确实有终止符），但结果错了；如果 `part` 引用的是一个没有终止符的缓冲区，`atoi` 就会越界读，成为 {{ub}}。需要 C 字符串时只有两条路：用带长度的 API（`printf("%.*s")`、`fwrite`、`std::from_chars`），或者构造一个 `std::string`。
+这段代码没有 UB，因为 `whole` 来自字面量，后面确实有空字符，但结果错了。如果 `part` 引用的缓冲区后面没有空字符，`atoi` 就会越界读，成为 {{ub}}。¶13 的注总结了这一点：
 
-## 修改器（[string.view.modifiers]）
+!!! std
+    Unlike `basic_string::data()` and *string-literal*s, `data()` can return a pointer to a buffer that is not null-terminated. Therefore it is typically a mistake to pass `data()` to a function that takes just a `const charT*` and expects a null-terminated string.
 
-修改的是**视图**而不是字符：
+需要以空字符结尾的字符串时，要么用带长度的接口（`printf("%.*s")`、`fwrite`、`std::from_chars`），要么先构造一个 `std::string`。
 
-- `remove_prefix(n)`：加固前置条件 `n <= size()`，效果 `data_ += n; size_ -= n;`；
-- `remove_suffix(n)`：加固前置条件 `n <= size()`，效果 `size_ -= n;`；
-- `swap(s)`：交换两个视图。
+### 迭代器与容量
 
-## 字符串操作（[string.view.ops]）
+[string.view.iterators] ¶1 `const_iterator` 是实现定义的类型，满足常量随机访问迭代器的要求，并建模 `contiguous_iterator`。libc++ 中它就是 `const char*`。¶3 非空时 `begin()` 指向 `data_`；空视图的 `begin()` 是未指定的值，只保证 `[begin(), end())` 是有效范围。
 
-**`copy(s, n, pos)`**（¶1–6）：复制 `min(n, size() - pos)` 个字符到 `s`，返回复制数；`pos > size()` 抛 `out_of_range`。**不写终止符**。
+[string.view.capacity] 中，`size()` 和 `length()` 返回 `size_`，`empty()` 返回 `size_ == 0`。
 
-**`substr(pos, n)` 与 `subview(pos, n)`**（¶7–10）：返回 `basic_string_view(data() + pos, rlen)`，`rlen = min(n, size() - pos)`；`pos > size()` 抛 `out_of_range`。注意：
+## 修改视图 [string.view.modifiers]
 
-- `pos == size()` 合法，返回空视图；
-- `n` 可以超过剩余长度，自动截断；
-- 结果和原视图引用**同一块存储**，不复制字符；
-- `subview` 是工作草案在 C++26 之后新增的同义成员，存在的意义在 `basic_string` 那边：`string::substr` 返回 `string`（复制），`string::subview` 返回 `string_view`（不复制），给 `string_view` 也加上 `subview` 是为了让泛型代码能对两者用同一个名字。
+这些成员改的是视图本身，不是字符：
 
-**`compare`**（¶11–19）：核心是 ¶12——用 `traits::compare(data(), str.data(), rlen)` 比较前 `rlen = min(size(), str.size())` 个字符，非零就返回它；为零时按 Table 88 由长度决定（短的小）。其余重载都是 `substr(...).compare(...)` 的简写，所以带位置参数的版本会抛 `out_of_range`。`compare(basic_string_view)` 是 `noexcept` 的。
+- ¶1–¶2 `remove_prefix(n)`：加固前置条件 `n <= size()`，效果是 `data_ += n; size_ -= n;`；
+- ¶3–¶4 `remove_suffix(n)`：加固前置条件 `n <= size()`，效果是 `size_ -= n;`；
+- ¶5 `swap(s)`：交换两个视图。
 
-**`starts_with`/`ends_with`**（¶20–27，C++20，[[P0457R2]]）与 **`contains`**（¶28，C++23，[[P1679R3]]）：
+## 子串、比较与前缀 [string.view.ops]
+
+¶1–¶6 `copy(s, n, pos)` 把 `min(n, size() - pos)` 个字符复制到 `s`，返回复制的个数。它不写结尾的空字符。`pos > size()` 时抛 `out_of_range`。
+
+¶7–¶10 `substr(pos, n)` 和 `subview(pos, n)` 返回 `basic_string_view(data() + pos, rlen)`，其中 `rlen = min(n, size() - pos)`：
+
+- `pos == size()` 是合法的，结果是空视图；`pos > size()` 抛 `out_of_range`；
+- `n` 超过剩余长度时自动截断；
+- 结果与原视图引用同一块存储，不复制字符。
+
+`subview` 是较新的工作草案加入的，对视图来说与 `substr` 完全相同。它是为 `basic_string` 准备的：`string::substr` 返回复制出来的 `string`，`string::subview` 返回不复制的视图。视图也有同名成员，泛型代码就可以对两者用同一个名字。
+
+¶11–¶14 `compare(str)` 先用 `traits::compare(data(), str.data(), rlen)` 比较前 `rlen = min(size(), str.size())` 个字符，结果非零就返回它；为零时由长度决定，短的较小（Table 88）。¶15–¶19 其余的 `compare` 重载都等价于先调用 `substr`，所以带位置参数的版本可能抛 `out_of_range`。
+
+¶20–¶28 `starts_with`、`ends_with`（C++20，[[P0457R2]]）和 `contains`（C++23，[[P1679R3]]）：
 
 - `starts_with(x)` 等价于 `basic_string_view(data(), min(size(), x.size())) == x`；
-- `starts_with(charT)` 等价于 `!empty() && traits::eq(front(), x)`——空视图返回 `false`，**不会**违反 `front()` 的前置条件；
+- `starts_with(charT c)` 等价于 `!empty() && traits::eq(front(), c)`，空视图返回 `false`，不会违反 `front()` 的前置条件；
 - `contains(x)` 等价于 `find(x) != npos`。
 
-接受 `basic_string_view` 和 `charT` 的版本是 `noexcept`，接受 `const charT*` 的版本不是（它要先构造视图，有前置条件）。
+接受 `basic_string_view` 和 `charT` 的版本是 `noexcept` 的；接受 `const charT*` 的版本不是，因为它要先用指针构造视图，有前置条件。
 
-## 查找（[string.view.find]）
+## 查找 [string.view.find]
 
-¶1：最坏复杂度 O(`size() * str.size()`)，"although implementations should do better"。¶2 把所有 `const charT*`、`(const charT*, n)`、`charT` 重载归结为 `basic_string_view` 版本。六个函数的定义（¶3–20）形式完全一样：找满足条件的最低/最高位置 `xpos`，找不到返回 `npos`。
+¶1 查找函数的最坏复杂度是 O(`size() * str.size()`)，标准建议实现做得更好。¶2 所有 `const charT*`、`(const charT*, n)`、`charT` 重载都归结为 `basic_string_view` 版本。六个函数的定义形式相同：找满足条件的最低或最高位置 `xpos`，找不到就返回 `npos`。
 
-| 函数 | 方向 | `xpos` 条件 |
+| 函数 | 方向 | `xpos` 的条件 |
 |---|---|---|
-| `find` | 最低，`xpos >= pos` | 子串匹配 |
-| `rfind` | 最高，`xpos <= pos` | 子串匹配 |
-| `find_first_of` | 最低 | `data_[xpos]` 等于 `str` 中**某个**字符 |
-| `find_last_of` | 最高 | 同上 |
-| `find_first_not_of` | 最低 | `data_[xpos]` 不等于 `str` 中**任何**字符 |
-| `find_last_not_of` | 最高 | 同上 |
+| `find`（¶3–¶5） | 最低，`xpos >= pos` | 从 `xpos` 开始与 `str` 匹配 |
+| `rfind`（¶6–¶8） | 最高，`xpos <= pos` | 同上 |
+| `find_first_of`（¶9–¶11） | 最低 | `data_[xpos]` 等于 `str` 中某个字符 |
+| `find_last_of`（¶12–¶14） | 最高 | 同上 |
+| `find_first_not_of`（¶15–¶17） | 最低 | `data_[xpos]` 不等于 `str` 中任何字符 |
+| `find_last_not_of`（¶18–¶20） | 最高 | 同上 |
 
-边界：
+几个边界情况：
 
-- `find("", pos)`：当 `pos <= size()` 时返回 `pos`（空串在任何位置都匹配，条件 ¶3.2 `pos + 0 <= size()`）；`pos > size()` 返回 `npos`。**查找函数从不抛异常**，`pos` 越界只是找不到。
-- `rfind` 的 `pos` 是"匹配起点的上界"，不是"搜索区间的终点"，所以 `rfind(x, pos)` 可以找到跨过 `pos` 的匹配。
-- `find_first_of(charT)` 与 `find(charT)` 等价。
+- 查找函数从不抛异常。`pos` 越界只是找不到。
+- `find("", pos)` 在 `pos <= size()` 时返回 `pos`，因为空串在任何位置都匹配。
+- `rfind(x, pos)` 的 `pos` 是匹配起点的上界，所以能找到跨过 `pos` 的匹配。
 
-## 比较运算符（[string.view.comparison]）
-
-```cpp
-template<class charT, class traits>
-  constexpr bool operator==(basic_string_view<charT, traits> lhs,
-                            type_identity_t<basic_string_view<charT, traits>> rhs) noexcept;
-template<class charT, class traits>
-  constexpr see below operator<=>(basic_string_view<charT, traits> lhs,
-                                  type_identity_t<basic_string_view<charT, traits>> rhs) noexcept;
-```
-
-¶1：`==` 返回 `lhs.compare(rhs) == 0`。¶2–4：`<=>` 的结果类型 `R` 是 `traits::comparison_category`（若存在），否则 `weak_ordering`；*Mandates* `R` 是比较类别类型；返回 `static_cast<R>(lhs.compare(rhs) <=> 0)`。
-
-**为什么第二个参数要包 `type_identity_t`？** ¶5 的注解释了：要让 `string_view` 能和"任何可隐式转换为 `string_view` 的类型"比较。模板实参推导不考虑隐式转换（[[temp.deduct.call]]），所以如果两个参数都是 `basic_string_view<charT, traits>`，`sv == "abc"` 会推导失败（`const char*` 推不出 `charT`）。`type_identity_t<...>` 把第二个参数变成**非推导语境**（[[g:non-deduced-context]]），`charT`/`traits` 只从 `lhs` 推导，`rhs` 就可以经隐式转换匹配。
-
-那 `"abc" == sv` 呢？C++20 的重写候选会把它当作 `sv == "abc"` 再试一次（[[over.match.oper]]），所以一个模板足够覆盖两个方向。C++17 时代标准用一句"实现应提供足够多的额外重载"来解决这个问题，C++20 换成了这种显式写法。
+## 比较运算符 [string.view.comparison]
 
 ```cpp run ok
 #include <string>
@@ -289,22 +332,35 @@ using namespace std::literals;
 
 int main() {
   std::string s = "abc";
-  assert("abc"sv == "abc");     // const char* → string_view
-  assert("abc" == "abc"sv);     // 重写候选：交换参数
+  assert("abc"sv == "abc");     // const char* 隐式转换为 string_view
+  assert("abc" == "abc"sv);     // 重写候选：交换操作数
   assert("abc"sv == s);         // string 的转换函数
   assert(("abc"sv <=> "abd"sv) < 0);
 }
 ```
 
-## 流输出（[string.view.io]）
+标准只声明了两个运算符模板：
 
-¶1：作为格式化输出函数（[[ostream.formatted.reqmts]]）：按 `os.width()` 填充，写出 `max(os.width(), str.size())` 个字符，然后 `os.width(0)`。它按长度输出，**内嵌的 `'\0'` 会原样写出**，不会被截断。
+```cpp
+template<class charT, class traits>
+  constexpr bool operator==(basic_string_view<charT, traits> lhs,
+                            type_identity_t<basic_string_view<charT, traits>> rhs) noexcept;
+template<class charT, class traits>
+  constexpr /* see below */ operator<=>(basic_string_view<charT, traits> lhs,
+                                        type_identity_t<basic_string_view<charT, traits>> rhs) noexcept;
+```
 
-## 哈希（[string.view.hash]）
+¶1 `==` 返回 `lhs.compare(rhs) == 0`。¶2–¶4 `<=>` 的结果类型 `R` 是 `traits::comparison_category`，没有这个成员时是 `weak_ordering`；`R` 必须是比较类别类型；结果是 `static_cast<R>(lhs.compare(rhs) <=> 0)`。
 
-¶1：五个 `hash` 特化都是启用的（[[unord.hash]]）。注：字符串视图的哈希值等于对应字符串对象的哈希值（[basic.string.hash] 的规范条款保证 `hash<S>()(s) == hash<SV>()(SV(s))`）。
+第二个形参包了一层 `type_identity_t`，原因在 ¶5 的注里。模板实参推导不考虑隐式转换（[[temp.deduct.call]]），如果两个形参都是 `basic_string_view<charT, traits>`，`sv == "abc"` 就会推导失败，因为从 `const char*` 推不出 `basic_string_view<charT, traits>`。`type_identity_t<...>` 使第二个形参成为不推导的语境（[[g:non-deduced-context]]），`charT` 和 `traits` 只从 `lhs` 推导，`rhs` 就能经隐式转换匹配。
 
-这条等式是**异构查找**（C++20，[[P0919R3]]、[[P1690R1]]）的基础：`unordered_map<std::string, V>` 想用 `string_view` 查找而不构造临时 `string`，需要一个透明的哈希器——而它可以直接委托给 `hash<string_view>`，因为结果与 `hash<string>` 一致：
+`"abc" == sv` 则由 C++20 的重写候选处理：编译器会把它当作 `sv == "abc"` 再试一次（[[over.match.oper]]）。所以一个模板就能覆盖两个方向，`!=`、`<` 等也都由重写得到。
+
+## 输出、哈希与 sv 字面量
+
+[string.view.io] ¶1 `operator<<` 是格式化输出函数（[[ostream.formatted.reqmts]]）：按 `os.width()` 填充，然后调用 `os.width(0)`。它按长度输出，中间的空字符也会写出去。
+
+[string.view.hash] ¶1 五个标准别名都有启用的 `hash` 特化（[[unord.hash]]）。注 1 指出，视图的哈希值等于对应字符串的哈希值，这由 [[basic.string.hash]] 保证。所以 `unordered_map<std::string, V>` 可以用 `string_view` 查找而不构造临时 `string`（C++20 的异构查找，[[P0919R3]]、[[P1690R1]]），透明的哈希器直接用 `hash<string_view>` 即可：
 
 ```cpp run ok
 #include <string>
@@ -327,107 +383,61 @@ int main() {
 }
 ```
 
-注意只有标准的五种字符类型、默认 traits 的视图有 `hash` 特化；`basic_string_view<char, ci_traits>` 没有。
+只有使用默认 traits 的视图有 `hash` 特化，`basic_string_view<char, ci_traits>` 没有。
 
-## `sv` 字面量（[string.view.literals]）
+[string.view.literals] ¶1–¶5 `operator""sv(str, len)` 返回 `basic_string_view{str, len}`，在 `std::literals::string_view_literals` 中（[[P0403R1]]）。`len` 来自字面量本身，所以中间的空字符会保留：`"abc\0def"sv` 的 `size()` 是 7。字符串字面量具有静态存储期（[[lex.string]]），所以 `"..."sv` 不会悬垂，是返回 `string_view` 最安全的写法。
 
-¶1–5：`operator""sv(const charT* str, size_t len)` 返回 `basic_string_view{str, len}`。`len` 是字面量数组长度减一（不含末尾的终止符，但**包含**内嵌的 `'\0'`）。字面量对象具有静态存储期（[[lex.string]]），所以 `"..."sv` 永远不会悬垂——这是返回 `string_view` 最安全的写法。
+<details class="fine" markdown="1"><summary>其余条文</summary>
 
-## 悬垂：string_view 的头号事故
+[string.view.synop] 的头注释是 mostly freestanding：独立实现也提供 `string_view`，但会抛异常的 `at`、`copy`、`substr`、`subview` 和带位置参数的 `compare` 在独立实现中被删除，`operator<<` 只在宿主实现中提供。
 
-`string_view` 的所有危险都可以归结为一句话：**它不延长任何东西的生命周期**。引用绑定临时对象时的生命周期延长（[[class.temporary]]）只对引用有效，`string_view` 是类类型，从临时 `string` 构造它只是调用了 `string` 的转换函数，临时对象照常在完整表达式结束时销毁。
+概要还把 `ranges::enable_view` 和 `ranges::enable_borrowed_range` 都特化为 `true`。后者意味着对右值 `string_view` 调用 ranges 算法会得到真正的迭代器，而不是 `ranges::dangling`（[[g:borrowed-range]]、[[range.range]]）：视图销毁了，字符还在。
 
-```cpp
-std::string make();
+[string.view.synop] ¶1 包含 `<string_view>` 后，[utility.swap] 中的 `swap` 和 [iterator.range] 中的 `begin`、`size`、`data` 等函数模板都可以使用。
 
-void f(std::string_view);
-f(make());                                   // OK：临时对象活到 f 返回之后
+[string.view.cons] ¶8 要求迭代器对构造函数的概念不仅在语法上满足，而且被建模；¶10 它抛出 `end - begin` 抛出的异常。¶13–¶14 range 构造函数用 `ranges::data(r)` 和 `ranges::size(r)` 初始化，并传播它们的异常。
 
-std::string_view a = make();                 // 悬垂
-std::string_view b = std::string("x") + "y"; // 悬垂
-std::string_view c = "abc"s;                 // 悬垂：s 字面量产生临时 string
-std::string_view d = "abc";                  // OK：字面量是静态存储期
+[string.view.capacity] ¶2 `max_size()` 返回视图能引用的最大字符数。
 
-std::string_view g() {
-  std::string s = "local";
-  return s;                                  // 悬垂：返回局部 string 的视图
-}
-```
+</details>
 
-Clang 对上面的 `a`/`b`/`c`/`g` 都会给出警告（`-Wdangling-gsl`、`-Wreturn-stack-address`，默认开启），因为 Clang 内置了一份标准库类型清单，自动把 `std::string_view` 当作"指针类"（`gsl::Pointer`）类型、把 `std::string` 当作"所有者"（`gsl::Owner`）类型。但只要中间隔一层函数，编译器就看不见了：
+## 历史
 
-```cpp run ub
-#include <string>
-#include <string_view>
-#include <iostream>
-
-std::string_view trim(std::string_view s) {          // 返回实参的子视图
-  while (!s.empty() && s.front() == ' ') s.remove_prefix(1);
-  return s;
-}
-std::string read_line() { return "   a line long enough to avoid SSO, really"; }
-
-int main() {
-  std::cout << trim(read_line()) << '\n';            // OK：临时对象活到完整表达式结束
-  std::string_view v = trim(read_line());            // 悬垂：临时 string 已销毁，没有警告
-  std::cout << v << '\n';                            // UB：AddressSanitizer 报 heap-use-after-free
-}
-```
-
-Clang 的扩展属性 `[[clang::lifetimebound]]` 可以把这层关系告诉编译器：把 `trim` 的形参声明为 `std::string_view s [[clang::lifetimebound]]` 之后，第二行同样会触发 `-Wdangling-gsl`。
-
-!!! pitfall "短字符串让 bug 隐身"
-    如果 `read_line()` 返回的是短字符串（libc++ 中 ≤ 22 个 `char`），字符存放在 `string` 对象内部（SSO，见 [[basic.string]]）。临时对象在栈上，销毁后那块栈内存可能原封不动，AddressSanitizer 也未必报告。"测试时没问题"在这里毫无意义。
-
-### 把 `string_view` 存起来的守则
-
-- 作为**参数**：总是安全的（调用者的实参活到调用结束）。
-- 作为**返回值**：只在返回的是参数的子视图（调用者负责）或静态存储（字面量、静态对象）时安全。
-- 作为**成员**：对象的生命周期必须被被引用对象完全覆盖。容器里存 `string_view` 是常见的悬垂来源。
-- 遇到 `auto`：`auto x = s.subview(1);` 推导出 `string_view`，而 `auto x = s.substr(1);` 推导出 `string`——两者的生命周期语义完全不同。
+!!! history
+    - C++17 引入 `string_view`（[[P0254R2]] 同时给 `std::string` 加上到 `string_view` 的隐式转换），以及 `sv` 字面量（[[P0403R1]]）。
+    - C++20 加入迭代器对构造函数（[[P1391R4]]）、`starts_with`/`ends_with`（[[P0457R2]]），比较运算符改为 `==` 和 `<=>`。C++17 时标准只是要求实现提供足够多的额外重载来支持与可转换类型的比较。
+    - C++23 加入 `contains`（[[P1679R3]]）、删除 `nullptr` 构造（[[P2166R1]]）、加入 `explicit` 的 range 构造函数（[[P1989R2]]、[[P2499R0]]），并保证平凡可复制（[[P2251R1]]）。
+    - C++26 把元素访问和 `remove_prefix`/`remove_suffix` 的前置条件改为加固前置条件（[[P3471R4]]）。
 
 ## 思考题
 
-!!! question "1. `std::string_view sv = std::string(“hi”); std::cout << sv.size();` 有 UB 吗？"
+!!! question "思考题 1"
+    `std::string_view sv = std::string("hi"); std::cout << sv.size();` 有未定义行为吗？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-没有。`sv` 的 `size_` 是在构造时从临时 `string` 复制来的普通整数，读取它不访问被销毁的存储。[string.view.template.general] ¶2 只让"元素的指针、迭代器和引用"失效；`size()` 返回成员值，与元素无关。但 `sv.data()` 返回的指针此时是无效指针值（[[g:invalid-pointer-value]]），解引用它（包括 `sv[0]`、`sv.front()`、输出 `sv`）才是 {{ub}}。这类"能编译、读 size 正常"的视图正是悬垂 bug 难以发现的原因。
+没有。`size_` 是构造时从临时 `string` 复制来的整数，读取它不会访问已销毁的存储。[string.view.template.general] ¶2 只让指向元素的指针、迭代器和引用失效。
 
+但此时 `sv.data()` 是无效的指针值（[[g:invalid-pointer-value]]），`sv[0]`、`sv.front()`、输出 `sv` 都要访问元素，都是 {{ub}}。能编译、`size()` 也正常，正是悬垂难以发现的原因。
 </details>
 
-!!! question "2. `void f(std::string_view); std::vector<char> v; f(v);` 能编译吗？`f(std::string_view(v))` 呢？"
+!!! question "思考题 2"
+    `void f(std::string_view); std::vector<char> v;` 之后，`f(v)` 能编译吗？`f(std::string_view(v))` 呢？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-`f(v)` 非良构：形参是拷贝初始化，需要隐式转换，而 range 构造函数是 `explicit` 的（[[P2499R0]]），`vector` 也没有到 `string_view` 的转换函数。`f(std::string_view(v))` 合法：函数式转换是直接初始化，可以调用 `explicit` 构造函数；`vector<char>` 满足 ¶12 的全部约束（连续、有大小、值类型为 `char`、不能转换为 `const char*`、没有 `operator string_view`）。
+`f(v)` 非良构。形参用复制初始化，需要隐式转换，而 range 构造函数是 `explicit` 的，`vector` 也没有到 `string_view` 的转换函数。
 
+`f(std::string_view(v))` 合法。函数式转换是直接初始化，可以调用 `explicit` 构造函数；`vector<char>` 满足 ¶12 的所有约束：连续、有大小、值类型是 `char`、不能转换为 `const char*`、没有 `operator string_view`。
 </details>
 
-!!! question "3. 为什么 `string_view::operator[]` 的前置条件是 `pos < size()`，而 `string::operator[]` 是 `pos <= size()`？"
+!!! question "思考题 3"
+    为什么 `string_view::operator[]` 要求 `pos < size()`，而 `string::operator[]` 只要求 `pos <= size()`？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-`basic_string` 有不变式：`data() + size()` 指向一个值为 `charT()` 的对象（[basic.string.general] ¶3），所以 `s[s.size()]` 有东西可读。`basic_string_view` 没有这个不变式——它可能引用 `"hello"` 的前三个字符，`sv[3]` 读到的是 `'l'` 而不是终止符；也可能引用一个缓冲区的末尾，`sv[size()]` 越界。[string.view.access] ¶1 的注专门指出了这一差别。
-
+`basic_string` 保证 `data() + size()` 指向一个值为 `charT()` 的对象（[[basic.string]]），所以 `s[s.size()]` 有东西可读。视图没有这个保证。它可能引用 `"hello"` 的前三个字符，这时 `sv[3]` 是 `'l'` 而不是空字符；也可能引用缓冲区的最后几个字符，这时 `sv[sv.size()]` 越界。[string.view.access] ¶1 的注专门指出了这个差别。
 </details>
-
-## 小结
-
-| 主题 | 规则 |
-|---|---|
-| 本质 | `const charT*` + 长度，不拥有，平凡可复制（¶4），按值传 |
-| 默认构造 | `data() == nullptr`，`size() == 0` |
-| 从 `const charT*` | 用 `traits::length`，内嵌 `'\0'` 截断；字符数组也走这里 |
-| 从 `nullptr` | 删除（C++23） |
-| 从 range | `explicit`（C++23）；排除可转 `const charT*` 的类型和自带转换函数的类型；**不要求** borrowed |
-| `data()` | 不保证 `'\0'` 终止；不要交给 C 字符串接口 |
-| `operator[]` | 加固前置条件 `pos < size()`，比 `string` 严 |
-| `substr`/`subview` | 不复制，`pos > size()` 抛 `out_of_range` |
-| 查找 | 从不抛；找不到返回 `npos` |
-| 比较 | 第二参数 `type_identity_t`，配合重写候选覆盖双向隐式转换 |
-| 哈希 | 与对应 `string` 相同，支持异构查找 |
-| 生命周期 | 不延长任何对象；临时 `string`、`""s`、局部变量是三大悬垂来源 |
