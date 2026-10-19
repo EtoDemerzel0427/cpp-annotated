@@ -1,195 +1,84 @@
 ---
 title: 从类型推导模板实参
-summary: 所有推导语境共用的核心算法：把用模板形参写成的类型 P 与实际类型 A 结构匹配。可推导的形式（T*、T&、T[i]、函数类型、成员指针、TT<T>、TT<i>……）、各 P/A 对独立推导再合并、完整的非推导语境列表（限定名的前缀、decltype、含形参的表达式、包索引……）、包的推导、常量模板形参的类型推导、数组界的类型是 size_t。
+summary: 所有推导场合共用的算法：把用模板形参写成的类型 P 与实际类型 A 按结构对齐，拆开指针、引用、数组、函数、成员指针和模板特化来求模板实参；哪些位置是非推导语境；包怎样推导；常量模板形参的类型怎样推导。
 status: done
 covers: temp.deduct.type
 papers: P0887R1
 related: temp.deduct, temp.deduct.call, temp.deduct.partial, temp.deduct.decl, temp.variadic, temp.arg.nontype, temp.spec.partial.match, topics/type-deduction
 tags: 模板, 模板实参推导, 非推导语境, 包
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[[temp.deduct.type]] 是模板实参推导的核心。无论是从函数调用（[[temp.deduct.call]]）、取地址（[[temp.deduct.funcaddr]]）、转换函数（[[temp.deduct.conv]]）、偏序（[[temp.deduct.partial]]）、函数声明（[[temp.deduct.decl]]），还是部分特化的匹配（[[temp.spec.partial.match]]），最终都归结为本节的问题：
+!!! tldr
+    - 推导就是结构匹配：把用模板形参写成的类型 `P` 和实际类型 `A` 对齐，只能拆开指针、引用、数组、函数、成员指针、模板特化这些类型构造器。
+    - 每一对 `P`/`A` 独立推导再合并；结果冲突、有多个解、或者有模板形参没有确定，推导就失败。推导不考虑隐式转换。
+    - 限定名的前缀（`typename A<T>::type`）、`decltype`、含模板形参的表达式（`N+1`）等位置是非推导语境：不从这里求值，只用别处求得的值代入。`std::type_identity_t<T>` 就是有意制造的非推导语境。
+    - 包可以推导出零个或多个实参，但不在末尾的包不推导。
+    - 推导常量模板形参时，它的类型必须与实际模板形参的类型相同：`template<int N> void f(std::array<int, N>)` 推不出来，要写 `std::size_t N` 或 `auto N`。
 
-> 给定一个用模板形参写成的类型 `P`，和一个实际类型 `A`，求模板实参，使 `P` 代入后与 `A` 兼容。
+## P 与 A（¶1–¶2）
 
-它本质上是一种结构化的模式匹配（类似函数式语言中的 unification，但只是单向的，只有 `P` 含变量）。理解了这一节，也就清楚了哪些能推导、哪些不能推导的全部边界。
+```cpp run ok title="forms.cpp"
+#include <cstddef>
+#include <type_traits>
 
-## 基本概念：P、A、推导出的 A（¶1–¶2）
+template<class R, class... As> constexpr auto arity(R(*)(As...)) { return sizeof...(As); }
+template<class C, class M> constexpr bool is_mem_obj(M C::*) { return !std::is_function_v<M>; }
+template<template<class...> class TT, class... Ts> constexpr auto count(const TT<Ts...>&) { return sizeof...(Ts); }
+template<class T, std::size_t N> constexpr auto len(T(&)[N]) { return N; }
 
-¶1 在每种推导语境中，都是把一个用模板形参表示的类型 `P`，与一个实际类型 `A` 比较，求出模板实参值（类型形参求类型、常量形参求值、模板模板形参求模板），使 `P` 代入后的类型（称为**推导出的 A**，deduced A）与 `A` 兼容。
+struct S { int x; void f(); };
+template<class...> struct List { };
+int fn(int, char, double);
+int arr[7];
 
-¶2 有时只有一对 `P`/`A`，有时有一组。每一对独立推导，然后合并结果。以下任一情形推导失败：
+static_assert(arity(&fn) == 3);                // 函数类型：R = int，As = int, char, double
+static_assert(is_mem_obj(&S::x));              // 成员指针：C = S，M = int
+static_assert(!is_mem_obj(&S::f));             // M = void()
+static_assert(count(List<int, char>{}) == 2);  // 模板特化：TT = List
+static_assert(len(arr) == 7);                  // 数组：T = int，N = 7
+int main() { }
+```
 
-- 某一对无法推导；
-- 某一对推导出不止一组可能的值；
-- 不同的对推导出不同的值；
-- 某个模板实参既未被推导也未被显式指定。
+每个调用里，编译器都把形参类型（如 `R(*)(As...)`）和实参类型（`int(*)(int, char, double)`）一层层对齐，从对应位置读出 `R`、`As` 的值。
 
-另外，类型形参的类型只在别处无法推导时，才从数组界推导。（这对应下文 ¶13–¶14：`template<class T, T n> void f(int(&)[n])` 中 `T` 从界的类型 `size_t` 得出，但若 `T` 能从别处推导，以别处为准。）
+¶1 推导发生在很多场合：函数调用（[[temp.deduct.call]]）、取函数模板的地址（[[temp.deduct.funcaddr]]）、转换函数模板（[[temp.deduct.conv]]）、偏序（[[temp.deduct.partial]]）、从函数声明推导（[[temp.deduct.decl]]）、部分特化的匹配（[[temp.spec.partial.match]]）。每种场合最后都归结为本节的问题：给定一个用模板形参写成的类型 `P` 和一个实际类型 `A`，求模板实参（类型形参求一个类型，常量形参求一个值，模板模板形参求一个模板），使 `P` 代入后的类型（称为推导出的 `A`）与 `A` 兼容。
 
-```cpp
-template<class T> void f(T x, T y) { /* ... */ }
+¶2 有时只有一对 `P`/`A`，有时有一组，例如函数的每个形参各一对。每一对独立推导，然后合并。下面任一情形推导失败：某一对无法推导；某一对有不止一组解；不同的对推出不同的值；某个模板实参既没有推导出来，也没有显式指定。
+
+```cpp error
+template<class T> void f(T x, T y) { }
 struct A { };
 struct B : A { };
 void g(A a, B b) {
-    f(a, b);    // error: T 被推导为 A 和 B
+    f(a, b);    // error: T 推导为 A 和 B
     f(b, a);    // error: 同上
     f(a, a);    // OK：T = A
     f(b, b);    // OK：T = B
 }
 ```
 
-不同的对推导出不同的值时，即使存在隐式转换（`B` → `A`），推导也会失败，因为推导不考虑转换（[[temp.deduct.call#4]]）。
+虽然 `B` 能转换成 `A`，但推导不考虑转换（[[temp.deduct.call#4]] 只允许少数几种调整），所以 `f(a, b)` 失败。
 
-## P 的组成（¶3–¶4）
+一对 `P`/`A` 也可能同时推导几个形参，并且自相矛盾（¶7 例 3）：
 
-¶3 类型 `P` 可以由其他类型、模板、常量模板实参值组合而成：
-
-- ¶3.1 函数类型包括每个函数形参的类型、返回类型、异常说明；
-- ¶3.2 成员指针类型包括所指对象的类类型和成员的类型；
-- ¶3.3 类模板特化（如 `A<int>`）包括其模板实参列表引用的类型、模板、常量值；
-- ¶3.4 数组类型包括元素类型和界的值。
-
-¶4 大多数情况下，组成 `P` 的这些部分都参与推导：可以用来确定模板实参，且确定的值必须与别处一致。但在某些语境中，值不参与推导，而是使用别处推导出或显式指定的值。**若一个模板形参只用在非推导语境中且未显式指定，推导失败。**
-
-注 1 指出，按 [[temp.deduct.call]]，若 `P` 在推导语境中不含任何模板形参，就不做推导，所以 `P` 和 `A` 不必形式相同（只需能转换）。
-
-## 非推导语境（¶5–¶6）
-
-¶5 [[g:non-deduced-context|**非推导语境**]]（non-deduced context）有：
-
-| ¶ | 语境 | 例子（`T`/`N` 在此处不被推导） |
-|---|---|---|
-| 5.1 | 用 *qualified-id* 指定的类型或模板的 *nested-name-specifier* | `typename A<T>::type`、`std::type_identity_t<T>` |
-| 5.2 | *pack-index-specifier* 或 *pack-index-expression* {{c++26}} | `Ts...[0]` |
-| 5.3 | *type-constraint* | `C<T> auto` 中 `C<T>` 的部分 |
-| 5.4 | *decltype-specifier* 的表达式 | `decltype(T{} + 1)` |
-| 5.5 | *splice-specifier* 的常量表达式 {{c++26}} | `[: refl :]` 中的 `refl` |
-| 5.6 | 子表达式引用了模板形参的常量模板实参或数组界 | `A<N+1>`、`int[N*2]` |
-| 5.7 | 带默认实参的函数形参中使用的模板形参，且该默认实参在本次调用中被使用 | `f(T = 5)` 调用 `f()` |
-| 5.8 | 实参是重载集，且：有多个约束满足但类型不同的函数匹配（二义）、无函数匹配、或集合含函数模板 | `f(g)` 而 `g` 重载 |
-| 5.9 | 实参是初始化列表，但形参不是可从初始化列表推导的类型 | `template<class T> void g(T); g({1,2,3});` |
-| 5.10 | 不在形参列表末尾的函数形参包 | `template<class... Ts> void f(Ts..., int)` |
-
-### 为什么这些不能推导？
-
-- 5.1 限定名前缀：从 `typename A<T>::type` = `int` 反推 `T`，相当于对任意的类型函数求逆。`A<T>::type` 对很多 `T` 都可能是 `int`，甚至可能被特化成任何东西，因此本质上无法推导。
-- 5.4 decltype 与 5.6 表达式：同理，`N+1 == 5` 能解出 `N = 4`，但一般表达式（`N*N`、`f(N)`）无法求逆。标准统一规定，只要是涉及形参的子表达式（而不是形参本身），就不推导。
-- 5.10 非尾随包：无法知道包要对应几个实参。
-
-```cpp
-template<int i> void f1(int a[10][i]);
-template<int i> void f2(int a[i][20]);
-template<int i> void f3(int (&a)[i][20]);
-
-void g() {
-    int v[10][20];
-    f1(v);          // OK：i 推导为 20
-    f1<20>(v);      // OK
-    f2(v);          // error: 无法推导 i
-    f2<10>(v);      // OK
-    f3(v);          // OK：i 推导为 10
-}
-```
-
-（¶17 注 5 指出，除引用和指针类型外，主数组界不是函数形参类型的一部分。`int a[i][20]` 被调整为 `int (*a)[20]`，`i` 消失了，自然推不出来；`f3` 用引用保住了它。）
-
-```cpp
-template <int i> class A { };
-template <int i> void g(A<i+1>);
-template <int i> void f(A<i>, A<i+1>);
-
-void k() {
-    A<1> a1;
-    A<2> a2;
-    g(a1);          // error: 表达式 i+1 不推导
-    g<0>(a1);       // OK
-    f(a1, a2);      // OK：i 从 A<i> 推导为 1，A<i+1> 只用来检查（A<2>，一致）
-}
-```
-
-### std::type_identity：有意制造非推导语境
-
-5.1 常被用来关闭某个形参的推导。C++20 起标准库提供 `std::type_identity`（[[P0887R1]]）：
-
-```cpp run ok title="type_identity.cpp"
-#include <type_traits>
-template<class T> T vmax(T a, std::type_identity_t<T> b) { return a < b ? b : a; }
-
-auto r = vmax(1.5, 2);    // T 只从第一个实参推导为 double；2 隐式转换为 double
-static_assert(std::is_same_v<decltype(r), double>);
-
-int main() { }
-```
-
-`std::type_identity_t<T>` 是 `typename std::type_identity<T>::type`，`T` 处在 *nested-name-specifier* 中，属于非推导语境。于是第二个形参不参与推导，等到 `T` 由第一个实参确定后，它就是普通的 `double` 形参，允许任何隐式转换。没有它，`vmax(1.5, 2)` 会因 `T` 推导冲突（`double` vs `int`）而失败。
-
-`std::forward` 的形参 `std::remove_reference_t<T>&` 也是有意设置的非推导语境，目的是强制调用者写 `std::forward<T>(x)`。
-
-### 复合类型：部分推导、部分不推导（¶6）
-
-¶6 当一个类型名以包含非推导语境的方式指定时，组成该类型名的所有类型都是非推导的。但一个复合类型可以同时包含推导和非推导的部分。
-
-- `A<T>::B<T2>`：`T` 和 `T2` 都不推导（整个名字是限定名）。
-- `A<I+J>::X<T>`：`I`、`J`、`T` 都不推导。
-- `void f(typename A<T>::B, A<T>)`：第一个形参中的 `T` 不推导，第二个形参中的 `T` 推导。
-
-```cpp
-template<int i, typename T>
-T deduce(typename A<T>::X x,    // 这里 T 不推导
-         T t,                   // 这里推导 T
-         typename B<i>::Y y);   // 这里 i 不推导
-A<int> a;
-B<77>  b;
-int x = deduce<77>(a.xm, 62, b.ym);
-// T 推导为 int；a.xm 需能转换为 A<int>::X
-// i 显式指定为 77；b.ym 需能转换为 B<77>::Y
-```
-
-（¶19 注 7。）
-
-## 推导结果的一致性：例 3（¶7）
-
-¶7 标准例 3 汇集了几种典型情形：
-
-```cpp
-// 一对 P/A 推导两个实参，可能自相矛盾
+```cpp error
 template <class T, class U> void f(T (*)(T, U, U));
 int  g1(int, float, float);
 char g2(int, float, float);
 int  g3(int, char, float);
 void r() {
     f(g1);    // OK：T = int，U = float
-    f(g2);    // error: T 被推导为 char（返回）和 int（形参）
-    f(g3);    // error: U 被推导为 char 和 float
+    f(g2);    // error: T 从返回类型推导为 char，从形参推导为 int
+    f(g3);    // error: U 推导为 char 和 float
 }
 ```
 
-```cpp
-// 从函数类型的异常说明推导
-template<bool E> void f1(void (*)() noexcept(E));
-template<bool> struct A { };
-template<bool B> void f2(void (*)(A<B>) noexcept(B));
+## 能拆开的形式（¶3、¶8–¶12）
 
-void g1();
-void g2() noexcept;
-void g3(A<true>);
+¶3 类型 `P` 可以由别的类型、模板和常量值组成：函数类型包括各形参类型、返回类型和异常说明；成员指针类型包括类类型和成员类型；类模板特化 `A<int>` 包括它的模板实参；数组类型包括元素类型和界。
 
-void h() {
-    f1(g1);   // OK：E = false
-    f1(g2);   // OK：E = true
-    f2(g3);   // error: B 从 A<true> 推导为 true，从 noexcept 推导为 false
-}
-```
-
-（C++17 起异常说明是函数类型的一部分，所以 `noexcept(E)` 可以被推导。）
-
-例 3 的后两段对应 [[temp.deduct.call#4]] 的限定转换与派生到基类：`f(const T*)` 接受 `int*`；`f(B<T>&)` 接受 `D<int>` 和 `struct D2 : B<int>`。
-
-## 可推导的形式（¶8–¶12）
-
-¶8 类型模板实参 `T`、常量模板实参 `i`、表示类模板或别名模板的模板模板实参 `TT`、表示变量模板或概念的模板模板实参 `VV`，在 `P` 和 `A` 具有以下形式之一时可以推导：
+¶8 只有当 `P` 和 `A` 是下列形式之一时，才能推导类型形参 `T`、常量形参 `i`、表示类模板或别名模板的模板模板形参 `TT`、表示变量模板或概念的模板模板形参 `VV`：
 
 ```text
 cv(opt) T
@@ -206,260 +95,103 @@ TT(opt)<VV>
 TT(opt)<>
 ```
 
-其中：
+带 `(opt)` 的位置可以继续套用这些形式，也可以是非推导语境，或者是 `P` 和 `A` 里相同的非依赖类型或相同的常量值（¶8.1–¶8.4）。`<T>` 表示至少有一个实参含 `T` 的模板实参列表，`<>` 表示一个都不含。
 
-- ¶8.1 `T(opt)` 表示一个类型或形参类型列表，它要么递归地满足这些规则，要么是 `P` 或 `A` 中的非推导语境，要么在 `P` 和 `A` 中是相同的非依赖类型；
-- ¶8.2 `i(opt)` 表示一个表达式，它要么本身就是一个 `i`，要么在 `P` 或 `A` 中是值依赖的，要么在 `P` 和 `A` 中有相同的常量值；
-- ¶8.3 `TT(opt)` 表示类模板或模板模板形参；
-- ¶8.4 `noexcept(i(opt))` 表示异常说明，其 *noexcept-specifier* 的操作数（可以是隐式的）满足 `i(opt)` 的规则。
+¶11 这些形式可以像 `T` 一样层层组合，例如 `X<int> (*)(char[6])` 是 `type (*)(T)` 的形式，其中 `type` 是 `X<int>`，`T` 是 `char[6]`。¶12 除此之外，不能从其他构造推导模板实参。
 
-注 3 指出，若某个类型符合这些形式但不含任何 `T`、`i`、`TT`，就无法推导。`<X>` 表示至少一个实参含 `X` 的模板实参列表；`<>` 表示没有任何实参含 `T`、`i`、`TT`、`VV` 的列表。
+换句话说，推导只会拆开类型构造器。别名不在其中，它在推导之前就已经展开成目标类型。
 
-¶11 这些形式可以像 `T` 一样进一步组合：
+¶7 例 3 还演示了从异常说明推导。C++17 起异常说明是函数类型的一部分，所以 `noexcept(E)` 里的 `E` 可以推导：
 
-```text
-X<int> (*)(char[6])
+```cpp error
+template<bool E> void f1(void (*)() noexcept(E));
+template<bool> struct A { };
+template<bool B> void f2(void (*)(A<B>) noexcept(B));
+
+void g1();
+void g2() noexcept;
+void g3(A<true>);
+
+void h() {
+    f1(g1);   // OK：E = false
+    f1(g2);   // OK：E = true
+    f2(g3);   // error: B 从 A<true> 推导为 true，从 noexcept 推导为 false
+}
 ```
 
-是 `template-name<T> (*)(type[i])` 的形式，这又是 `type (*)(T)` 的变体，其中 `type` 是 `X<int>`、`T` 是 `char[6]`。
+## 非推导语境（¶4–¶6）
 
-¶12 除以上形式外，不能从涉及其他构造的函数实参推导模板实参。
-
-这份形式列表的意思是，**推导只能拆开类型构造器**，即指针、引用、数组、函数、成员指针、模板特化；限定名（非推导语境）和表达式则无法拆开。别名不在此列，因为别名在推导前就已展开为其目标类型。
-
-```cpp run ok title="forms.cpp"
+```cpp run ok title="type_identity.cpp"
 #include <type_traits>
-template<class T, class U> constexpr bool same = std::is_same_v<T, U>;
+template<class T> T vmax(T a, std::type_identity_t<T> b) { return a < b ? b : a; }
 
-template<class R, class... As> constexpr auto arity(R(*)(As...)) { return sizeof...(As); }
-template<class C, class M> constexpr bool is_mem_obj(M C::*) { return !std::is_function_v<M>; }
-template<template<class...> class TT, class... Ts> constexpr auto count(const TT<Ts...>&) { return sizeof...(Ts); }
-template<class T, std::size_t N> constexpr auto len(T(&)[N]) { return N; }
+auto r = vmax(1.5, 2);    // T 只从第一个实参推导为 double；2 转换为 double
+static_assert(std::is_same_v<decltype(r), double>);
 
-struct S { int x; void f(); };
-template<class...> struct List { };
-int fn(int, char, double);
-int arr[7];
-
-static_assert(arity(&fn) == 3);                // T(T) 形式
-static_assert(is_mem_obj(&S::x));              // T T::* 形式：C = S，M = int
-static_assert(!is_mem_obj(&S::f));             // M = void()
-static_assert(count(List<int, char>{}) == 2);  // TT<T> 形式
-static_assert(len(arr) == 7);                  // T[i] 形式
 int main() { }
 ```
 
-## 模板实参列表中的包（¶9）
+`std::type_identity_t<T>` 就是 `typename std::type_identity<T>::type`（C++20，[[P0887R1]]）。`T` 出现在 `::` 前面，这个位置不参与推导。`T` 由第一个实参定下来后代入，第二个形参就成了普通的 `double` 形参，可以接受任何能隐式转换的实参。没有它，`vmax(1.5, 2)` 会因 `T` 推出 `double` 和 `int` 两个值而失败。
 
-¶9 若 `P` 含有 `<T>`、`<i>`、`<TT>` 或 `<VV>` 形式，则把 `P` 的模板实参列表中的每个实参 `Pi` 与 `A` 的对应实参 `Ai` 比较。
+¶4 组成 `P` 的部分大多参与推导：可以用来确定模板实参，确定的值必须和别处一致。但在某些位置，值不参与推导，而是使用别处推导出或显式指定的值，这些位置叫**非推导语境**（[[g:non-deduced-context|non-deduced context]]）。一个模板形参如果只出现在非推导语境里，又没有显式指定，推导失败。
 
-- 若 `P` 的模板实参列表含有一个不是最后一个实参的包展开，整个模板实参列表都是非推导语境。
-- 若 `Pi` 是包展开，把它的模式与 `A` 的模板实参列表中剩余的每个实参比较，每次比较推导包的下一个位置。
-- 在偏序中，若 `Ai` 原本是包展开：¶9.1 `P` 中没有与 `Ai` 对应的实参，则忽略 `Ai`；¶9.2 否则若 `Pi` 不是包展开，推导失败。
+¶5 非推导语境有：
 
-```cpp ok
-template<class T1, class... Z> class S;                                 // #1
-template<class T1, class... Z> class S<T1, const Z&...> { };            // #2
-template<class T1, class T2>   class S<T1, const T2&> { };              // #3
-S<int, const int&> s;           // #2 和 #3 都匹配；#3 更特殊
+| ¶ | 语境 | 例子（`T`、`N` 在这里不推导） |
+|---|---|---|
+| 5.1 | 限定名中 `::` 前面的部分（*nested-name-specifier*） | `typename A<T>::type`、`std::type_identity_t<T>` |
+| 5.2 | 包索引 {{c++26}} | `Ts...[0]` |
+| 5.3 | 类型约束 | `C<T> auto` 中的 `C<T>` |
+| 5.4 | `decltype` 的操作数 | `decltype(T{} + 1)` |
+| 5.5 | 拼接说明符里的常量表达式 {{c++26}} | `[: refl :]` 中的 `refl` |
+| 5.6 | 子表达式引用了模板形参的常量模板实参或数组界 | `A<N+1>`、`int[N*2]` |
+| 5.7 | 这次调用用了默认实参的形参 | `f(T = 5)` 以 `f()` 调用 |
+| 5.8 | 实参是重载集，并且有多个类型不同的函数匹配、没有函数匹配，或集合里有函数模板 | `f(g)`，`g` 有重载 |
+| 5.9 | 实参是花括号初始化列表，形参又不是能从列表推导的类型 | `template<class T> void g(T); g({1,2,3});` |
+| 5.10 | 不在形参列表末尾的函数形参包 | `template<class... Ts> void f(Ts..., int)` |
 
-template<class T, class... U>            struct A { };                  // #1
-template<class T1, class T2, class... U> struct A<T1, T2*, U...> { };   // #2
-template<class T1, class T2>             struct A<T1, T2> { };          // #3
-template struct A<int, int*>;   // 选 #2
-```
+这些位置不推导，是因为一般无法反推。从 `typename A<T>::type` 等于 `int` 反推 `T`，相当于给任意类型函数求逆，`A` 还可能被特化成任何东西。`N+1 == 5` 能解出 `N`，但 `N*N`、`f(N)` 就不行，标准干脆规定只要模板形参出现在子表达式里就不推导。不在末尾的包则不知道该吃掉几个实参。
 
-第二组：`A<int, int*>` 同时匹配 #2（`U` 为空）和 #3。偏序时，#3 的 `T2` 可以是任意类型，而 #2 的 `T2*` 要求指针，所以 #2 更特殊。¶9.1 保证 #3 中没有与 #2 的 `U...` 对应的东西时，不会因此失败。
+非推导语境里的形参并不是被忽略了：推导完成后它照样要代入，代入后的类型必须有效，实参也必须能转换过去。
 
-## 函数形参列表中的包；函数类型推导中的转发引用（¶10）
+```cpp error
+template <int i> class A { };
+template <int i> void g(A<i+1>);
+template <int i> void f(A<i>, A<i+1>);
 
-¶10 若 `P` 含 `(T)` 形式，把 `P` 的形参类型列表的每个 `Pi` 与 `A` 的对应 `Ai` 比较。
-
-这里有一条特殊调整：若 `P` 和 `A` 是取函数模板地址（[[temp.deduct.funcaddr]]）或从函数声明推导（[[temp.deduct.decl]]）时产生的函数类型，且 `Pi` 和 `Ai` 是顶层形参类型列表中的形参，若 `Pi` 是转发引用而 `Ai` 是左值引用，就把 `Pi` 改为模板形参类型（`T&&` 改为 `T`）。注 4 说明，于是 `Pi` 为 `T&&`、`Ai` 为 `X&` 时，`T` 推导为 `X&`。
-
-```cpp run ok title="spec_fwd.cpp"
-#include <cstdio>
-template <class T> void f(T&&)  { std::puts("primary"); }
-template <> void f(int&)  { std::puts("#1 f<int&>"); }    // T&& 对 int&：调整为 T，T = int&
-template <> void f(int&&) { std::puts("#2 f<int>"); }     // T&& 对 int&&：T = int
-
-int main() {
-    int i = 0;
-    f(i);    // 调用 f<int&>(int&)，即 #1
-    f(0);    // 调用 f<int>(int&&)，即 #2
+void k() {
+    A<1> a1;
+    A<2> a2;
+    g(a1);          // error: i+1 不推导，i 无从确定
+    g<0>(a1);       // OK
+    f(a1, a2);      // OK：i 从 A<i> 推导为 1，A<i+1> 代入后是 A<2>，一致
 }
 ```
 
-没有这条调整，`template<> void f(int&)` 中 `T&&` 对 `int&` 做结构匹配会失败（`&&` 对 `&`），程序员就无法为左值实参对应的那个特化写显式特化。
+¶6 一个类型名只要以含非推导语境的方式写出，组成它的所有类型都不推导：`A<T>::B<T2>` 中 `T` 和 `T2` 都不推导，`A<I+J>::X<T>` 中 `I`、`J`、`T` 都不推导。但一个复合类型可以部分推导、部分不推导：`void f(typename A<T>::B, A<T>)` 中第一个形参里的 `T` 不推导，第二个里的推导。
 
-若与 `Pi` 对应的形参声明是函数形参包，就把包的 *declarator-id* 的类型与 `A` 剩余的每个形参类型比较。偏序时若 `Ai` 原本是函数形参包：¶10.1 `P` 没有对应形参类型则忽略；¶10.2 否则若 `Pi` 不是函数形参包，推导失败。
+¶4 的注 1 补充：如果 `P` 的推导语境里根本不含模板形参，就不对这一对做推导，`P` 和 `A` 也不必形式相同，只要实参能转换过去即可。
 
-```cpp ok
-template<class T, class... U> void f(T*, U...) { }   // #1
-template<class T>             void f(T) { }          // #2
-template void f(int*);                               // 选 #1
-```
+### 数组界
 
-`f(int*)` 同时匹配 #1（`U` 为空）和 #2（`T = int*`）。偏序时，#1 的 `T*` 比 #2 的 `T` 更特殊；¶10.1 让 #1 的 `U...` 在与 #2 比较时被忽略。
+```cpp error
+template<int i> void f1(int a[10][i]);
+template<int i> void f2(int a[i][20]);
+template<int i> void f3(int (&a)[i][20]);
 
-## 常量模板形参的类型（¶13–¶16，¶20）
-
-¶13 若常量模板形参 `P` 的类型是依赖的，而它的值从一个表达式推导出来，那么 `P` 类型中的模板形参从值的类型推导：
-
-```cpp ok
-template<long n> struct A { };
-
-template<typename T> struct C;
-template<typename T, T n> struct C<A<n>> { using Q = T; };
-
-using R = long;
-using R = C<A<2>>::Q;     // OK：T 从 A<2> 中模板实参值的类型推导为 long
-```
-
-注意 `T` 推导为 `long`（`A` 的形参类型），而不是 `int`（字面量 `2` 的类型），因为 `A<2>` 中的 `2` 已经被转换为 `long`。
-
-¶14 `T[N]` 中 `N` 的类型是 `std::size_t`：
-
-```cpp ok
-template<typename T> struct S;
-template<typename T, T n> struct S<int[n]> { using Q = T; };
-
-using V = decltype(sizeof 0);
-using V = S<int[42]>::Q;  // OK：T 从 int[42] 推导为 std::size_t
-```
-
-¶15 函数类型的 `noexcept(B)` 中 `B` 的类型是 `bool`：
-
-```cpp ok
-template<bool> struct A { };
-template<auto> struct B;
-template<auto X, void (*F)() noexcept(X)> struct B<F> { A<X> ax; };
-void f_nothrow() noexcept;
-B<f_nothrow> bn;          // OK：X 的类型推导为 bool
-```
-
-¶16 给出了一个从数组界推导的例子：
-
-```cpp ok
-template<class T, T i> void f(int (&a)[i]);
-int v[10];
-void g() { f(v); }        // OK：T 是 std::size_t
-```
-
-¶20 若 `P` 含 `<i>` 形式，除非 `i` 的类型与 `A` 中所指模板的对应模板形参 `p` 的类型相同，否则推导失败；若 `i` 的声明类型含占位类型，则以 `p` 的 *id-expression* 作为占位类型推导的对应实参。若 `P` 含 `[i]` 形式而 `i` 的类型不是整型，推导失败（脚注：`bool` 形参虽然可以从数组界推导，但结果总是 `true`，因为界非零）。若 `P` 含 `noexcept(i)` 而 `i` 的类型不是 `bool`，推导失败。
-
-```cpp
-template<int i> class A { };
-template<short s> void f(A<s>);
-void k1() {
-    A<1> a;
-    f(a);           // error: 推导失败——int 到 short 的类型不同
-    f<1>(a);        // OK：显式指定，不推导
-}
-
-template<const short cs> class B { };
-template<short s> void g(B<s>);
-void k2() {
-    B<1> b;
-    g(b);           // OK：模板形参类型的 cv 被忽略
-}
-
-template<auto> struct C;
-template<long long x> void f(C<x> *);
-void g(C<0LL> *ap) {
-    f(ap);          // OK：从 0LL 推导出 long long 值
-}
-
-template<int> struct D;
-template<auto x> void f(D<x> *);
-void g(D<0LL> *ap) {
-    f(ap);          // OK：x 推导为 int 值（D 的形参是 int，0LL 已转为 int）
-}
-
-template<int &> struct E;
-template<auto x> void f(E<x> *);
-int v;
-void g(E<v> *bp) {
-    f(bp);          // error: x 的类型 int 与 E<v> 中模板形参的类型 int& 不匹配
-}
-
-template<const int &> struct F;
-template<decltype(auto) x> void f(F<x> *);
-int i;
-void g(F<i> *ap) {
-    f(ap);          // OK：x 推导为类型为 const int& 的常量模板形参
-}
-```
-
-`E` 与 `F` 的对比显示了 ¶20 中关于占位类型那句话的作用：`auto x` 对 `p`（类型 `int&`）做 `auto` 推导，得到 `int`，与 `int&` 不同，所以失败；`decltype(auto) x` 则得到 `const int&`，类型相同，所以成功。
-
-标准例 13 的最后一段：
-
-```cpp
-template <decltype(auto) q> struct G;
-template <auto x> long *f(G<x> *);              // #1
-template <decltype(auto) x> short *f(G<x> *);   // #2
-
-const int j = 0;
-short *g(G<(j)> *ap) {    // OK：q 的类型是 const int&
-    return f(ap);         // OK：只有 #2 匹配
-}
-long *g(G<j> *ap) {       // OK：q 的类型是 int
-    return f(ap);         // OK：#1 更特殊
-}
-```
-
-!!! impl "Clang 的偏差"
-    截至写作时，Clang 23 对最后一个调用 `f(ap)`（`G<j>`）报告二义，标准说 #1 更特殊。其余例子 Clang 的行为与标准一致。
-
-## 函数、函数指针、默认实参、模板模板形参（¶21–¶23）
-
-¶21 模板实参可以从函数类型、函数指针类型、成员函数指针类型推导：
-
-```cpp
-template<class T> void f(void(*)(T, int));
-template<class T> void foo(T, int);
-void g(int, int);
-void g(char, int);
-void h(int, int, int);
-void h(char, int);
-
-int m() {
-    f(&g);      // error: 二义（两个 g 都匹配，T 不同）
-    f(&h);      // OK：void h(char, int) 是唯一匹配
-    f(&foo);    // error: 推导失败，因为 foo 是模板
-    return 0;
-}
-```
-
-这三行分别对应 ¶5.8 的三种情形。注意 `f(&g)` 的结果是无法推导 `T`（形参变成非推导语境，`T` 又没有别处可推），所以报的是没有匹配的函数。
-
-¶22 模板类型形参不能从函数默认实参的类型推导：
-
-```cpp
-template <class T> void f(T = 5, T = 7);
 void g() {
-    f(1);           // OK：调用 f<int>(1, 7)
-    f();            // error: 无法推导 T
-    f<int>();       // OK：调用 f<int>(5, 7)
+    int v[10][20];
+    f1(v);          // OK：i 推导为 20
+    f1<20>(v);      // OK
+    f2(v);          // error: 无法推导 i
+    f2<10>(v);      // OK
+    f3(v);          // OK：i 推导为 10
 }
 ```
 
-`f(1)` 中第二个形参用了默认实参，按 ¶5.7 它是非推导语境，`T` 只从第一个实参推导。
+¶17 的注 5 解释了这个例子：除了引用和指针，最外层的数组界不属于函数形参的类型。`int a[i][20]` 被调整成 `int (*a)[20]`，`i` 消失了，自然推不出来；`f3` 用引用保住了它。
 
-¶23 模板模板形参对应的模板实参，从函数调用实参列表中所用的类模板特化的模板实参的类型推导：
-
-```cpp ok
-template <template <class T> class X> struct A { };
-template <template <class T> class X> void f(A<X>) { }
-template<class T> struct B { };
-A<B> ab;
-void use() { f(ab); }      // 调用 f(A<B>)：X 推导为 B
-```
-
-## 包推导出零个或多个实参（¶24）
-
-¶24（注 8）涉及形参包的推导可以为每个包推导出零个或多个实参。
+## 模板实参列表和函数形参列表中的包（¶9–¶10、¶24）
 
 ```cpp ok
 template<class> struct X { };
@@ -475,22 +207,192 @@ X<int(int, float, double)> x2;  // 部分特化；ArgTypes = float, double
 X<int(float, int)> x3;          // 主模板（第一个形参不是 int）
 Y<> y1;                         // 主模板；Types 为空
 Y<int&, float&, double&> y2;    // 部分特化；T = int&，Types = float, double
-Y<int, float, double> y3;       // 主模板；Types = int, float, double
+Y<int, float, double> y3;       // 主模板；float、double 不是引用
 int fv = f(g);                  // OK；Types = int, float
 ```
 
-`Y<int, float, double>` 不匹配部分特化：`Types&...` 要求 `float`、`double` 都是左值引用类型。
+¶24 的注 8 指出，包可以推导出零个或多个实参。
 
-## 陷阱
+¶9 `P` 含模板实参列表时，把它的每个实参 `Pi` 和 `A` 的对应实参 `Ai` 比较。`Pi` 是包展开时，用它的模式依次和 `A` 剩下的每个实参比较，每次比较确定包的下一个元素。如果包展开不是列表的最后一个实参，整个模板实参列表都是非推导语境。
 
-!!! pitfall "推导会穿过别名模板"
-    `template<class T> using Vec = std::vector<T>;` 后，`template<class T> void f(Vec<T>)` 等价于 `f(std::vector<T>)`，可以推导。但如果别名模板展开后 `T` 落在非推导语境里，例如 `template<class T> using Id = typename std::type_identity<T>::type;`，`f(Id<T>)` 中的 `T` 就不可推导，因为推导看的是展开后的类型。
+¶10 `P` 含函数形参类型列表时，规则相同：形参包的类型依次和 `A` 剩下的每个形参类型比较。
 
-!!! pitfall "依赖的成员类型永远推不出来"
-    `template<class C> void f(typename C::iterator)` 无法从迭代器推导出容器 `C`（¶5.1）。标准算法因此以迭代器类型本身为模板形参：`template<class It> void sort(It, It)`。
+¶9 和 ¶10 各有两条只在偏序（[[temp.deduct.partial]]）中用到的规则。偏序时如果 `Ai` 原本是包：`P` 中没有和它对应的东西，就忽略它（¶9.1、¶10.1）；否则如果 `Pi` 不是包，推导失败（¶9.2、¶10.2）。它们让带包的特化能和不带包的特化比较：
 
-!!! pitfall "数组界：引用保留，值丢失"
-    `void f(T a[N])` 等价于 `void f(T* a)`，`N` 推不出（¶17）；必须写 `T (&a)[N]`。
+```cpp ok
+template<class T1, class... Z> class S;                                 // #1
+template<class T1, class... Z> class S<T1, const Z&...> { };            // #2
+template<class T1, class T2>   class S<T1, const T2&> { };              // #3
+S<int, const int&> s;           // #2 和 #3 都匹配；#3 更特殊
+
+template<class T, class... U> void f(T*, U...) { }   // #4
+template<class T>             void f(T) { }          // #5
+template void f(int*);                               // 选 #4：T* 比 T 更特殊
+```
+
+### 函数类型里的转发引用（¶10）
+
+```cpp run ok title="spec_fwd.cpp"
+#include <cstdio>
+template <class T> void f(T&&)  { std::puts("primary"); }
+template <> void f(int&)  { std::puts("#1 f<int&>"); }    // T&& 对 int&：调整为 T，T = int&
+template <> void f(int&&) { std::puts("#2 f<int>"); }     // T&& 对 int&&：T = int
+
+int main() {
+    int i = 0;
+    f(i);    // 调用 #1
+    f(0);    // 调用 #2
+}
+```
+
+¶10 在两种场合对函数类型做一个调整：取函数模板地址时（[[temp.deduct.funcaddr]]），以及从函数声明推导时（[[temp.deduct.decl]]，例如显式特化）。如果顶层形参 `Pi` 是**转发引用**（无 cv 的 `T&&`，`T` 是函数模板的类型形参），而 `Ai` 是左值引用，就把 `Pi` 改成 `T`，于是 `T` 推导为 `X&`。没有这个调整，`T&&` 和 `int&` 按结构对不上，就无法为左值那个特化写显式特化。
+
+## 常量模板形参的类型（¶13–¶16、¶20）
+
+常量模板形参的类型如果依赖于别的模板形参，推出它的值时也会推出它的类型。
+
+¶13 值从一个表达式推出时，类型从值的类型推出：
+
+```cpp ok
+template<long n> struct A { };
+
+template<typename T> struct C;
+template<typename T, T n> struct C<A<n>> { using Q = T; };
+
+using R = long;
+using R = C<A<2>>::Q;     // OK：T 推导为 long
+```
+
+`T` 是 `long` 而不是 `int`：`A<2>` 里的 `2` 已经转换成 `A` 的形参类型 `long`。
+
+¶14 数组类型 `T[N]` 中 `N` 的类型是 `std::size_t`；¶15 函数类型的 `noexcept(B)` 中 `B` 的类型是 `bool`：
+
+```cpp ok
+#include <cstddef>
+template<typename T> struct S;
+template<typename T, T n> struct S<int[n]> { using Q = T; };
+using V = S<int[42]>::Q;  // T 推导为 std::size_t
+static_assert(sizeof(V) == sizeof(std::size_t));
+
+template<bool> struct A { };
+template<auto> struct B;
+template<auto X, void (*F)() noexcept(X)> struct B<F> { A<X> ax; };
+void f_nothrow() noexcept;
+B<f_nothrow> bn;          // X 的类型推导为 bool
+```
+
+¶16 的例子用函数调用演示同一件事：`template<class T, T i> void f(int (&a)[i]);` 以 `int v[10]` 调用时，`T` 是 `std::size_t`。¶2 末句规定，类型形参只有在别处推不出时，才从数组界推导。
+
+¶20 `P` 含 `<i>` 时，`i` 的类型必须与 `A` 所属模板中对应形参的类型完全相同（顶层 cv 除外），否则推导失败：
+
+```cpp error
+template<int i> class A { };
+template<short s> void f(A<s>);
+void k1() {
+    A<1> a;
+    f(a);           // error: int 与 short 不同
+    f<1>(a);        // OK：显式指定，不推导
+}
+
+template<const short cs> class B { };
+template<short s> void g(B<s>);
+void k2() {
+    B<1> b;
+    g(b);           // OK：模板形参类型上的 cv 被忽略
+}
+```
+
+如果 `i` 的类型含占位符（`auto`、`decltype(auto)`），就把对应的形参当作初始化表达式来推导这个占位符：
+
+```cpp error
+template<int> struct D;
+template<auto x> void f(D<x> *);
+void g(D<0LL> *ap) {
+    f(ap);          // OK：D 的形参是 int，x 推导为 int 值
+}
+
+template<int &> struct E;
+template<auto x> void f(E<x> *);
+int v;
+void g(E<v> *bp) {
+    f(bp);          // error: auto 推导出 int，与形参类型 int& 不同
+}
+
+template<const int &> struct F;
+template<decltype(auto) x> void f(F<x> *);
+int i;
+void g(F<i> *ap) {
+    f(ap);          // OK：decltype(auto) 推导出 const int&
+}
+```
+
+¶20 还规定：`P` 含 `[i]` 而 `i` 不是整型，或含 `noexcept(i)` 而 `i` 不是 `bool`，推导失败。
+
+!!! impl "Clang 的偏差"
+    标准例 13 的最后一段是：
+
+    ```cpp
+    template <decltype(auto) q> struct G;
+    template <auto x> long *f(G<x> *);              // #1
+    template <decltype(auto) x> short *f(G<x> *);   // #2
+
+    const int j = 0;
+    short *g(G<(j)> *ap) { return f(ap); }   // q 的类型是 const int&，只有 #2 匹配
+    long *g(G<j> *ap) { return f(ap); }      // q 的类型是 int，#1 更特殊
+    ```
+
+    本机 Clang 23 对最后一个调用报告二义。按标准应选 #1。
+
+## 函数实参、默认实参、模板模板形参（¶21–¶23）
+
+¶21 模板实参可以从函数类型、函数指针类型、成员函数指针类型推导。实参是重载集时，按 ¶5.8 处理：
+
+```cpp error
+template<class T> void f(void(*)(T, int));
+template<class T> void foo(T, int);
+void g(int, int);
+void g(char, int);
+void h(int, int, int);
+void h(char, int);
+
+int m() {
+    f(&g);      // error: 两个 g 都匹配，T 不同
+    f(&h);      // OK：只有 void h(char, int) 匹配，T = char
+    f(&foo);    // error: 重载集里有模板
+    return 0;
+}
+```
+
+前后两个错误中，这个形参都成了非推导语境，`T` 又没有别处可推，所以报的是没有匹配的函数。
+
+¶22 类型形参不能从默认实参的类型推导：
+
+```cpp error
+template <class T> void f(T = 5, T = 7);
+void g() {
+    f(1);           // OK：f<int>(1, 7)，第二个形参用了默认实参，不参与推导
+    f();            // error: 无法推导 T
+    f<int>();       // OK：f<int>(5, 7)
+}
+```
+
+¶23 模板模板形参从实参类型中的类模板特化推导：
+
+```cpp ok
+template <template <class T> class X> struct A { };
+template <template <class T> class X> void f(A<X>) { }
+template<class T> struct B { };
+A<B> ab;
+void use() { f(ab); }      // X 推导为 B
+```
+
+## 常见误解
+
+!!! pitfall "以为别名模板总能推导"
+    `template<class T> using Vec = std::vector<T>;` 之后，`f(Vec<T>)` 等价于 `f(std::vector<T>)`，能推导。但 `template<class T> using Id = typename std::type_identity<T>::type;` 展开后 `T` 落在限定名里，`f(Id<T>)` 就推不出来。推导看的是展开后的类型。
+
+!!! pitfall "想从迭代器推出容器"
+    `template<class C> void f(typename C::iterator)` 无法从迭代器推出 `C`（¶5.1）。所以标准算法直接以迭代器类型为模板形参：`template<class It> void sort(It, It)`。
 
 ## 思考题
 
@@ -505,30 +407,24 @@ int fv = f(g);                  // OK；Types = int, float
 <details markdown="1">
 <summary>答案</summary>
 
-`T` 从第一个形参推导为 `int`（第二个形参中的 `T` 是非推导语境）。推导完成后代入：`Box<int>::value_type` 不存在，这是函数类型中的无效类型，推导失败（SFINAE）。如果没有其他候选，报 "no matching function"。这说明非推导语境中的形参虽然不参与推导，但仍要在推导后代入并检查。
+不能（假设没有别的候选）。`T` 从第一个形参推导为 `int`，第二个形参里的 `T` 是非推导语境。推导完成后代入，`Box<int>::value_type` 不存在，函数类型无效，推导失败，模板退出候选集，报告没有匹配的函数。
 </details>
 
 !!! question "思考题 2"
-    为什么 `template<int N> void f(std::array<int, N>)` 对 `std::array<int, 3>` 推导失败，而 `template<std::size_t N> void f(std::array<int, N>)` 成功？
+    为什么 `template<int N> void f(std::array<int, N>)` 对 `std::array<int, 3>` 推导失败？
 
 <details markdown="1">
 <summary>答案</summary>
 
-按 ¶20，`P` 含 `<i>` 形式时，`i` 的类型必须与 `A` 所指模板中对应模板形参的类型相同。`std::array` 的第二个形参类型是 `std::size_t`，而 `N` 的类型是 `int`，不同，推导失败。写 `std::size_t N` 或 `auto N` 都行（后者按占位类型推导得 `std::size_t`）。
+按 ¶20，`N` 的类型必须和 `std::array` 第二个模板形参的类型相同。那个形参的类型是 `std::size_t`，`N` 是 `int`，推导失败。写 `std::size_t N` 或 `auto N` 都可以，后者推导出 `std::size_t`。
 </details>
 
-## 小结
+<details class="fine" markdown="1"><summary>其余条文</summary>
 
-| 规则 | 段落 | 要点 |
-|---|---|---|
-| 各 P/A 对独立推导再合并；冲突、多解、未定则失败 | ¶2 | 不考虑转换 |
-| 类型形参只在别处无法推导时才从数组界推导 | ¶2 | — |
-| 非推导语境：限定名前缀、包索引、类型约束、decltype、拼接、含形参的子表达式、使用默认实参的形参、重载集、初始化列表、非尾随包 | ¶5 | `type_identity_t` |
-| 非推导语境扩及整个类型名 | ¶6 | 复合类型可部分推导 |
-| 可推导形式：`T*`、`T&`、`T[i]`、`T(T)noexcept(i)`、`T T::*`、`TT<...>` 等，可递归组合 | ¶8, ¶11 | 其他构造不能推导 |
-| 模板实参列表中非末尾的包 → 整个列表非推导 | ¶9 | — |
-| 函数类型推导中转发引用对左值引用：`T&&` 调整为 `T` | ¶10 | 用于显式特化/取地址 |
-| 常量形参的类型从值的类型推导；`T[N]` 的 N 是 `size_t`；`noexcept(B)` 的 B 是 `bool` | ¶13–¶15 | — |
-| `<i>` 的类型必须与对应形参的类型相同 | ¶20 | `int N` 对 `array<int, 3>` 失败 |
-| 函数默认实参不能推导类型形参 | ¶22 | — |
-| 包可推导出零个或多个实参 | ¶24 | — |
+¶8 注 3：某个类型符合上述形式，但不含任何 `T`、`i`、`TT`，就无法推导。
+
+¶19 注 7 再次强调：只出现在非推导语境中的模板形参不参与推导，例如 `deduce<77>(a.xm, 62, b.ym)` 中 `T` 从第二个实参推出，`i` 由显式实参给出。
+
+¶20 的脚注：`bool` 类型的形参虽然可以从数组界推导，但结果总是 `true`，因为数组界不为零。
+
+</details>

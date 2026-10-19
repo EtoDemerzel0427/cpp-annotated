@@ -1,38 +1,20 @@
 ---
 title: 异常处理
-summary: 第 14 章导读——try 块与 handler 的语法、异常对象的诞生与销毁、栈回溯、handler 匹配、异常说明（noexcept）、std::terminate 的全部触发场景，以及它们在 Itanium ABI 上的实现
+summary: 第 14 章导读：一次异常从抛出、查找 handler、栈回溯到异常对象销毁的全过程，以及各节分别规定哪一步。
 status: done
 related: except.pre, except.throw, except.ctor, except.handle, except.spec, except.special, expr.throw, expr.unary.noexcept, support.exception, toolchain/exception-implementation
 tags: 导读, 异常
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-第 14 章 [except] 规定 C++ 的**异常处理**（exception handling）：一种把**控制**和**信息**从执行中的某一点，转移到此前经过、仍未退出的某个 handler 的机制。它是 C++ 里唯一一种能**跨越任意多层函数调用**、并且沿途**自动调用析构函数**的非局部控制转移——`return` 只能退一层，`longjmp` 能退多层却不管析构（[[csetjmp.syn]]）。
+!!! tldr
+    - 异常是 C++ 里唯一一种能跨越任意多层函数调用、并且沿途自动调用析构函数的控制转移。
+    - 一次异常由三件事组成：初始化一个异常对象，找到类型匹配的 handler，栈回溯销毁途经的自动对象。
+    - handler 按运行时类型匹配，只允许少数几种转换，不做一般的隐式转换。
+    - 异常处理机制自身出错（回溯中析构函数抛出、找不到 handler、穿出 `noexcept` 函数）一律调用 `std::terminate`。
+    - 主流实现在不抛异常的路径上没有额外指令，代价全部放在真正抛出的时候。
 
-本章很短（六节），但它和标准的许多别的部分紧密咬合：
-
-- 抛出异常的**表达式**在 [[expr.throw]]；`noexcept` **运算符**在 [[expr.unary.noexcept]]；
-- 异常说明是**函数类型**的一部分（[[dcl.fct#13]]），因此影响函数指针转换（[[conv.fctptr]]）、重载、虚函数覆盖；
-- 异常对象的存储、`std::exception_ptr`、`std::uncaught_exceptions`、`std::terminate` 的库接口在 [[support.exception]]；
-- 构造函数抛出异常时"已经构造好的子对象"由 [[class.base.init]]、[[dcl.init.aggr]] 等定义，栈回溯（[[except.ctor]]）据此决定析构谁；
-- 常量求值中允许抛出并捕获异常 {{c++26}}（[[expr.const.core#2]] 第 24、25 项）。
-
-## 本章地图
-
-| 节 | 条款 | 回答的问题 |
-|---|---|---|
-| 14.1 | [[except.pre]] | `try` 块、handler、function-try-block 的语法；不能用 `goto`/`switch` 跳进 try 块；跳出 try 块时析构什么 |
-| 14.2 | [[except.throw]] | 抛出异常 = 初始化一个**异常对象**；它存在哪、何时销毁、类型有什么要求；"未捕获"的精确定义；异常处理机制自己调用的函数再抛异常 ⇒ `std::terminate` |
-| 14.3 | [[except.ctor]] | **栈回溯**：按构造完成的逆序销毁自动对象；构造/析构半途抛出时哪些子对象要析构；委托构造函数；`new` 表达式归还内存 |
-| 14.4 | [[except.handle]] | handler **匹配**规则（只有四种情形，没有一般的隐式转换！）；按顺序尝试；`catch(...)`；"当前处理的异常"；function-try-block 的特殊规则；找不到 handler 时怎么办 |
-| 14.5 | [[except.spec]] | **异常说明**：`noexcept(常量表达式)`；潜在抛出的表达式；析构函数、释放函数、预置特殊成员的隐式异常说明；何时"需要"计算异常说明 |
-| 14.6 | [[except.special]] | `std::terminate` 的所有触发场景；在这些场景下是否回溯栈 |
-
-建议阅读顺序：[[except.pre]] → [[except.throw]] → [[except.handle]] → [[except.ctor]] → [[except.spec]] → [[except.special]]。先理解"异常对象"和"handler 匹配"，栈回溯与 noexcept 就是在这两者之上的细节。
-
-## 一次异常的完整生命
-
-用一个例子把各节串起来：
+## 一次异常的完整过程
 
 ```cpp run title="lifecycle.cpp" ok
 #include <cstdio>
@@ -46,10 +28,10 @@ struct Err { int code; };
 
 void inner() {
     Res r{"inner"};
-    throw Err{42};                 // [except.throw]：初始化异常对象，类型 Err
-}                                  // [except.ctor]：栈回溯销毁 r（此时异常"未捕获"）
+    throw Err{42};
+}
 
-void middle() noexcept(false) {
+void middle() {
     Res r{"middle"};
     inner();
 }
@@ -58,9 +40,9 @@ int main() {
     try {
         Res r{"try"};
         middle();
-    } catch (const Err& e) {       // [except.handle]：Err 与 Err 同类型 ⇒ 匹配
+    } catch (const Err& e) {
         std::printf("caught %d (uncaught=%d)\n", e.code, std::uncaught_exceptions());
-    }                              // handler 退出：异常对象被销毁（[except.throw]/4.1）
+    }
 }
 ```
 
@@ -73,40 +55,44 @@ int main() {
 caught 42 (uncaught=0)
 ```
 
-时间线是：
+`return` 只能退出一层函数。`longjmp` 能退出多层，却不调用析构函数（[[csetjmp.syn]]）。异常两样都做到了，过程分五步：
 
-1. **抛出**：`throw Err{42}` 以拷贝初始化的方式创建**异常对象**（[[except.throw#3]]），存储方式未指定（不走 `operator new`）。从此刻起异常处于"未捕获"状态（[[except.throw#6]]）。
-2. **查找**：沿调用链向外寻找"最近的、类型匹配的"handler（[[except.throw#2]]、[[except.handle#3]]）。途中如果穿过 `noexcept` 函数的边界，直接 `std::terminate`（[[except.handle#7]]）。
-3. **回溯**：控制离开每一层时，销毁该层已经构造好的自动对象（[[except.ctor#2]]）。
-4. **激活**：handler 的参数初始化完成，handler 变为**活动的**（active），异常变为"已捕获"（[[except.handle#9]]、[[except.throw#8]]）。
-5. **结束**：handler 以非重抛的方式退出，异常对象销毁（除非还有 `std::exception_ptr` 引用它，[[except.throw#4]]）。
+1. **抛出**：`throw Err{42}` 初始化一个**异常对象**，它的存储由实现另行管理，不经过 `operator new`（[[except.throw]]）。从这时起异常处于未捕获状态，`std::uncaught_exceptions()` 返回 1。
+2. **查找**：沿调用链向外，找最近进入、尚未退出、并且有类型匹配的 handler 的 try 块（[[except.handle]]）。如果查找穿出一个 `noexcept` 函数，直接调用 `std::terminate`。
+3. **回溯**：控制离开每一层时，销毁这一层已经构造完成的自动对象，这叫**栈回溯**（[[except.ctor]]）。
+4. **捕获**：handler 的参数 `e` 初始化完成后，handler 变为活动的，异常变为已捕获。
+5. **销毁**：handler 以重抛以外的方式退出时，异常对象被销毁；如果还有 `std::exception_ptr` 引用它，就等最后一个引用消失。
 
-## 设计哲学：零开销与"错误路径很贵"
+## 各节分工
 
-C++ 的异常是按照"**不抛就不付钱**"（zero-overhead / zero-cost）的思路设计的：主流实现（Itanium C++ ABI，见 [[toolchain/exception-implementation]]）在正常路径上**不执行任何额外指令**，只在只读数据段里放一张"调用点 → 清理代码"的表；一旦真的抛出，运行时库查表、解析 DWARF 栈帧信息、两遍扫描栈，代价比普通返回高好几个数量级。标准里很多看似奇怪的规则都源于这一取舍：
+| 节 | 回答的问题 |
+|---|---|
+| [[except.pre]] | `try`、`catch` 和 function-try-block 的语法；为什么不能用 `goto` 跳进 try 块 |
+| [[except.throw]] | 异常对象是什么类型、存在哪里、何时销毁；什么时候算未捕获 |
+| [[except.ctor]] | 栈回溯销毁哪些对象；构造到一半抛出时哪些子对象要析构 |
+| [[except.handle]] | handler 怎样匹配；当前处理的异常；找不到 handler 时怎么办 |
+| [[except.spec]] | `noexcept` 说明；哪些函数隐式是 `noexcept` 的 |
+| [[except.special]] | 所有调用 `std::terminate` 的情形，以及此时是否回溯栈 |
 
-- **异常对象的存储方式未指定**（[[except.throw#4]]）——实现可以使用专门的堆、线程局部的紧急缓冲区，以便在内存耗尽时仍能抛出 `std::bad_alloc`。
-- **找不到 handler 时是否回溯栈由实现定义**（[[except.handle#8]]）——两阶段实现在"搜索"阶段就知道没有 handler，于是不回溯直接 terminate，保留完整的崩溃现场。
-- **`noexcept` 违约时栈可以只回溯一部分**（[[except.terminate#2]]）——让编译器在 `noexcept` 函数里省掉清理代码。
-- **handler 匹配不做一般的类型转换**（[[except.handle#3]]）——匹配必须在运行时由类型信息（`std::type_info`）完成，不可能在运行时做重载决议。
+建议按 [[except.pre]] → [[except.throw]] → [[except.handle]] → [[except.ctor]] → [[except.spec]] → [[except.special]] 的顺序读。先弄清异常对象和 handler 匹配，栈回溯和 `noexcept` 都建立在这两者之上。
 
-## 异常与标准其他部分的交汇
+## 零开销设计留下的痕迹
+
+Itanium C++ ABI（GCC 和 Clang 在 Linux、macOS 上使用的 ABI）在正常执行路径上不插入任何指令，只在只读数据段里放一张表，记录每个调用点抛出时该执行哪段清理代码。真正抛出时，运行时库查表、解析栈帧信息、扫描两遍栈，比一次普通返回慢几个数量级（细节见 [[toolchain/exception-implementation]]）。标准里有几条看似奇怪的规则正是为这种实现留的余地：
+
+- 异常对象的存储方式未指定（[[except.throw#4]]）。实现可以准备一块紧急缓冲区，内存耗尽时仍能抛出 `std::bad_alloc`。
+- 找不到 handler 时是否回溯栈由实现定义（[[except.terminate#2]]）。两阶段实现在搜索阶段就知道没有 handler，于是不回溯，直接终止，保留完整的崩溃现场。
+- 查找穿出 `noexcept` 函数时，栈可以只回溯一部分（[[except.terminate#2]]）。编译器因此可以省掉 `noexcept` 函数里的清理代码。
+- handler 匹配不做一般的类型转换（[[except.handle#3]]）。匹配在运行时依据类型信息完成，运行时没法做重载决议。
+
+## 与其他章节的交汇
 
 | 交汇点 | 规则所在 |
 |---|---|
-| 构造函数抛出异常时，`new` 表达式归还内存 | [[expr.new]]，[[except.ctor#5]] |
-| 静态/线程存储期变量的动态初始化抛出 ⇒ `std::terminate` | [[basic.start.dynamic]]，[[except.terminate#1]] |
-| 契约违约处理函数抛出异常 {{c++26}} | [[basic.contract.eval]]，[[except.terminate#1]] |
+| 抛出异常的表达式；`noexcept` 运算符 | [[expr.throw]]，[[expr.unary.noexcept]] |
+| 异常说明是函数类型的一部分，影响函数指针转换和虚函数覆盖 | [[dcl.fct#13]]，[[conv.fctptr]] |
+| `new` 表达式中构造函数抛出时归还内存 | [[expr.new]]，[[except.ctor]] |
+| 静态或线程存储期变量的动态初始化抛出时调用 `std::terminate` | [[basic.start.dynamic]]，[[except.terminate]] |
 | 协程体内未捕获的异常交给 `promise.unhandled_exception()` | [[dcl.fct.def.coroutine]] |
-| 常量求值中抛出、捕获异常 {{c++26}} | [[expr.const.core#2]] |
-| `dynamic_cast` 到引用失败、`typeid(*nullptr_poly)` 抛异常 | [[expr.dynamic.cast]]，[[expr.typeid]] |
-| `std::exception_ptr`、`std::nested_exception` | [[propagation]]，[[except.nested]] |
-
-## 小结
-
-!!! summary
-    - 一次异常 = **一个异常对象** + **一次 handler 搜索** + **一次栈回溯**；三者分别由 [[except.throw]]、[[except.handle]]、[[except.ctor]] 规定。
-    - handler 匹配只有四种情形：同类型、无歧义的 public 基类、指针/成员指针的有限转换、`nullptr_t` 到指针（[[except.handle#3]]）。
-    - 异常说明（`noexcept`）是函数类型的一部分；违反它不是 UB 而是 `std::terminate`（[[except.spec]]、[[except.handle#7]]）。
-    - 异常处理机制自身出错时一律 `std::terminate`，场景清单在 [[except.terminate]]。
-    - 实现细节（两阶段回溯、personality routine、LSDA）见 [[toolchain/exception-implementation]]。
+| 常量求值中抛出并捕获异常 {{c++26}} | [[expr.const.core#2]] |
+| `std::exception_ptr`、`std::nested_exception`、`std::terminate` 的库接口 | [[support.exception]] |
