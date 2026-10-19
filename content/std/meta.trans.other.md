@@ -1,61 +1,97 @@
 ---
 title: 其他变换
-summary: type_identity、remove_cvref、decay、enable_if、conditional、void_t，以及本节的重头戏——common_type 的精确算法（退化、条件运算符、CREF 回退、左折叠、用户特化许可）与 common_reference 的 COMMON-REF 算法和 basic_common_reference 定制点；underlying_type、invoke_result、apply_result、unwrap_reference
+summary: decay、enable_if、conditional 等常用变换，common_type 与 common_reference 的求解算法，以及 underlying_type、invoke_result、unwrap_reference。
 status: draft
 covers: meta.trans.other
 papers: P0898R3, P0887R1, P0550R2
 related: meta.trans, type.traits, meta.rel, expr.cond, conv.lval, conv.array, conv.func, dcl.enum, func.require, temp.deduct.call, concepts
 tags: 标准库, type_traits, common_type, common_reference, decay, SFINAE
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[meta.trans.other] 收录了不能简单归入"cv/引用/符号/数组/指针"的变换。其中有几行就能说清的工具（`type_identity`、`remove_cvref`、`enable_if`、`conditional`），也有标准库中最精巧的**类型算法**：`common_type` 与 `common_reference`。后两者是 C++20 范围库与概念（`std::common_with`、`std::common_reference_with`、`iter_common_reference_t`）的地基。
+!!! tldr
+    - `decay_t<T>` 模拟按值传参：去掉引用，数组和函数变成指针，再去掉顶层 cv；只想去掉引用和 cv 时用 `remove_cvref_t`。
+    - `conditional_t<B, T, F>` 不会短路，两个分支的类型都必须能形成。
+    - `common_type` 先把实参退化，再看用户特化，再用条件运算符求公共类型，多个实参时从左到右两两折叠。它复刻的是条件运算符的转换规则，不保证无损。
+    - `common_reference` 在可能时给出引用类型，例如 `int&` 与 `const int&` 的公共引用是 `const int&`；范围库靠它和 `basic_common_reference` 处理 `zip` 这类代理引用。
+    - `invoke_result` 按 *INVOKE* 求调用结果的类型，取代了 C++20 移除的 `result_of`。
 
-## 表 62 速览
+[meta.trans.other] 收录了不属于 cv、引用、符号、数组、指针五组的变换（第 1 段）。它们都是变换特征：结果在嵌套的 `type` 里，另有 `_t` 别名（[[meta.trans]]）。其中几个在条件不满足时没有 `type` 成员，这是它们能用于 SFINAE 的原因。
 
-| 模板 | `type` | 何时没有 `type` |
-|---|---|---|
-| `type_identity<T>` {{c++20}} | `T` | — |
-| `remove_cvref<T>` {{c++20}} | `remove_cv_t<remove_reference_t<T>>` | — |
-| `decay<T>` | 模拟按值传参：数组→指针、函数→指针、否则去引用去 cv | — |
-| `enable_if<B, T = void>` | `B` 为真时为 `T` | `B` 为假 |
-| `conditional<B, T, F>` | `B ? T : F` | — |
-| `common_type<T...>` | 见 ¶4 | 无公共类型时 |
-| `basic_common_reference<T, U, TQual, UQual>` | 主模板没有；供用户偏特化 | 默认就没有 |
-| `common_reference<T...>` {{c++20}} | 见 ¶6 | 无公共引用时 |
-| `underlying_type<T>` | 枚举的底层类型 | `T` 不是枚举 |
-| `invoke_result<Fn, Args...>` {{c++17}} | `decltype(INVOKE(declval<Fn>(), declval<Args>()...))` | 表达式非良构 |
-| `apply_result<Fn, Tuple>` | `decltype(INVOKE(declval<Fn>(), ELEMS-OF(Tuple)...))` | 非 *tuple-like* 或表达式非良构 |
-| `unwrap_reference<T>` {{c++20}} | `reference_wrapper<X>` → `X&`；否则 `T` | — |
-| `unwrap_ref_decay<T>` {{c++20}} | `unwrap_reference_t<decay_t<T>>` | — |
+## 常用的小工具
 
-此外概要里还有 `void_t`：`template<class...> using void_t = void;`。
+### `decay` 与 `remove_cvref`
 
-## 简单工具
+```cpp run title="decay.cpp" ok
+#include <type_traits>
+using namespace std;
 
-**`type_identity`**（[[P0887R1]]）：`type` 就是 `T`。它的价值在于 `type_identity_t<T>` 是一个**非推导语境**（[[temp.deduct.type]]）——嵌套名说明符左边的部分不参与推导。于是可以"关掉"某个形参的推导：
+static_assert(is_same_v<decay_t<const int&>, int>);
+static_assert(is_same_v<decay_t<const int[3]>, const int*>);
+static_assert(is_same_v<decay_t<int(int)>, int (*)(int)>);
+static_assert(is_same_v<remove_cvref_t<const int(&)[3]>, int[3]>);
 
-```cpp
-template<class T> void f(T a, std::type_identity_t<T> b);
-f(1.0, 2);   // T 只从第一个实参推导为 double；2 再隐式转换。没有它会推导冲突
+int main() {}
 ```
 
-**`remove_cvref`**（[[P0550R2]]）：先去引用再去 cv。C++20 之前人们常用 `decay_t` 代替它，但 `decay` 还会把数组和函数变成指针——`remove_cvref_t<const int(&)[3]>` 是 `int[3]`，而 `decay_t` 给出 `const int*`。
+`decay<T>` 的规则是：令 `U` 为 `remove_reference_t<T>`；如果 `U` 是数组，结果是 `remove_extent_t<U>*`；如果是函数，结果是 `add_pointer_t<U>`；否则结果是 `remove_cv_t<U>`。
 
-**`decay`**：
+它模拟的是一个实参按值传给函数时的类型变化（注 1）：左值到右值、数组到指针、函数到指针三种转换（[[conv.lval]]、[[conv.array]]、[[conv.func]]），外加去掉类类型的 cv。`std::make_pair`、`std::thread` 的构造函数、`std::bind` 都用 `decay_t` 决定保存一份什么类型的副本。数组退化时元素的 cv 会保留，所以 `decay_t<const int[3]>` 是 `const int*`。
 
-!!! std
-    Let `U` be `remove_reference_t<T>`. If `is_array_v<U>` is `true`, ... `remove_extent_t<U>*`. If `is_function_v<U>` is `true`, ... `add_pointer_t<U>`. Otherwise ... `remove_cv_t<U>`.
+`remove_cvref<T>` {{c++20}}（[[P0550R2]]）只做 `remove_cv_t<remove_reference_t<T>>`，不碰数组和函数。在它出现之前，人们常把 `decay_t` 当作去掉引用和 cv 的工具，遇到数组参数时就会得到意外的指针类型。
 
-    令 `U` 为 `remove_reference_t<T>`。若 `U` 是数组，结果为 `remove_extent_t<U>*`；若是函数，结果为 `add_pointer_t<U>`；否则为 `remove_cv_t<U>`。
+### `type_identity` {{c++20}}
 
-注 1 说明了它的意图：这类似左值用作右值时发生的左值到右值（[[conv.lval]]）、数组到指针（[[conv.array]]）、函数到指针（[[conv.func]]）转换，**但还会去掉类类型的 cv**，以便更贴切地模拟**按值传参**。`std::make_pair`、`std::thread` 的构造函数、`std::bind` 都用 `decay_t` 决定"存一份什么"。注意数组退化时**保留元素的 cv**：`decay_t<const int[3]>` 是 `const int*`。
+`type_identity<T>::type` 就是 `T`（[[P0887R1]]）。它的用处是制造一个[[temp.deduct.type|不推导的语境]]：`type_identity_t<T>` 实际是 `type_identity<T>::type`，`::` 左边的 `T` 不参与模板实参推导。
 
-**`enable_if`**：`B` 为真时 `type` 为 `T`，否则**没有** `type` 成员（"there shall be no member `type`"）。这一"没有"在模板实参推导中造成替换失败，从而实现 SFINAE（[[temp.deduct]]）。C++20 起大多数用法应改为 `requires` 子句。
+```cpp run title="type-identity.cpp" ok
+#include <type_traits>
 
-**`conditional`**：编译期的 `?:`。它**不会短路**：`conditional_t<B, T, F>` 要求 `T` 和 `F` 都是合法类型，两个分支都会被"求值"（形成类型）。想延迟某个分支的实例化，要把"取 `::type`"放到选择之后：`typename conditional_t<B, type_identity<X>, Lazy<Y>>::type`。
+template<class T>
+T add(T a, std::type_identity_t<T> b) { return a + b; }
 
-**`void_t`**：把任意多个类型映射为 `void`，配合偏特化做"检测惯用法"：
+int main() {
+  double d = add(1.0, 2);  // T 只从第一个实参推导
+  (void)d;
+}
+```
+
+如果第二个形参也写成 `T`，两个实参分别推导出 `double` 和 `int`，推导失败。用 `type_identity_t<T>` 后，`T` 只从第一个实参推导为 `double`，`2` 再隐式转换为 `double`。
+
+### `enable_if`、`conditional`、`void_t`
+
+`enable_if<B, T = void>` 在 `B` 为真时 `type` 是 `T`，否则没有 `type` 成员。在模板实参推导中引用一个不存在的 `type` 会导致替换失败，候选被丢弃而不是报错（SFINAE，[[temp.deduct]]）。C++20 之后，大多数这类用法可以改写为 `requires` 子句。
+
+`conditional<B, T, F>` 在 `B` 为真时 `type` 是 `T`，否则是 `F`。它是一个普通的类模板，`T` 和 `F` 在选择之前都要先形成，不存在短路：
+
+<div class="compare" markdown="1">
+
+```cpp error
+#include <type_traits>
+using namespace std;
+
+template<class T>
+using S = conditional_t<is_integral_v<T>,
+                        make_signed_t<T>, T>;
+S<double>* p;  // error: make_signed<double>
+```
+
+```cpp ok
+#include <type_traits>
+using namespace std;
+
+template<class T>
+using S = typename conditional_t<
+    is_integral_v<T>,
+    make_signed<T>, type_identity<T>>::type;
+S<double>* p;  // OK: double
+```
+
+</div>
+
+左边在 `T = double` 时要先形成 `make_signed_t<double>`，违反了 `make_signed` 的 *Mandates*。右边先在两个类模板之间选择，选出来之后才取 `::type`，没被选中的 `make_signed<double>` 不会实例化。
+
+`void_t` 在 `<type_traits>` 的概要中定义为 `template<class...> using void_t = void;`。它把任意多个类型映射为 `void`，常和偏特化一起用来检测某个表达式是否合法：
 
 ```cpp run title="void-t.cpp" ok
 #include <type_traits>
@@ -64,8 +100,11 @@ f(1.0, 2);   // T 只从第一个实参推导为 double；2 再隐式转换。�
 
 template<class T, class = void>
 struct has_size : std::false_type {};
+
 template<class T>
-struct has_size<T, std::void_t<decltype(std::declval<T&>().size())>> : std::true_type {};
+struct has_size<T,
+    std::void_t<decltype(std::declval<T&>().size())>>
+    : std::true_type {};
 
 static_assert( has_size<std::vector<int>>::value);
 static_assert(!has_size<int>::value);
@@ -73,49 +112,63 @@ static_assert(!has_size<int>::value);
 int main() {}
 ```
 
-## `common_type`：精确算法（¶4）
+对 `int`，偏特化中的 `decltype` 表达式替换失败，偏特化被丢弃，选中主模板。C++20 中同样的检测可以写成概念 `requires (T& t) { t.size(); }`。
 
-`common_type<T...>` 想回答"这些类型的值放在一起时，应该用什么类型表示"。它的规则看似复杂，其实是一个**以条件运算符为核心、外加两道保险的左折叠**。先看 ¶3 定义的说明用工具：
+## `common_type`
 
-| 记号 | 含义 |
-|---|---|
-| *CREF*`(A)` | `add_lvalue_reference_t<const remove_reference_t<A>>`，即 `const A&`（`A` 可引用时）|
-| *COND-RES*`(X, Y)` | `decltype(false ? declval<X(&)()>()() : declval<Y(&)()>()())` |
+`common_type<T...>` 回答：这些类型的值放在一起时用什么类型表示。它是 `std::common_with` 等概念的基础，`<chrono>` 用它决定两个不同 `duration` 相加的结果类型。
 
-*COND-RES* 那个奇怪的写法 `declval<X(&)()>()()` 是在"调用一个返回 `X` 的函数"：这样得到的表达式**恰好**具有类型 `X` 和对应的值类别（`X` 是左值引用 → 左值；右值引用 → xvalue；非引用 → 纯右值）。直接写 `declval<X>()` 做不到"纯右值"——它总是返回引用。
+```cpp run title="common-type.cpp" ok
+#include <string>
+#include <type_traits>
+using namespace std;
 
-### 按实参个数分情况
+struct B {};
+struct D : B {};
 
-**(4.1) 零个类型**：没有 `type`。
+static_assert(is_same_v<common_type_t<int, long>, long>);
+static_assert(is_same_v<common_type_t<short, char>, int>);
+static_assert(is_same_v<common_type_t<short, short>, short>);
+static_assert(is_same_v<common_type_t<int, unsigned>, unsigned>);
+static_assert(is_same_v<common_type_t<int&, const int&>, int>);
+static_assert(is_same_v<common_type_t<void, void>, void>);
+static_assert(is_same_v<common_type_t<B*, D*>, B*>);
+static_assert(is_same_v<common_type_t<string, const char*>,
+                        string>);
+static_assert(is_same_v<common_type_t<char, unsigned char, float>,
+                        float>);
 
-**(4.2) 一个类型 `T0`**：等同于 `common_type_t<T0, T0>`。所以 `common_type_t<const int>`、`common_type_t<int&>` 都是 `int`——单个类型的公共类型是它"退化后"的样子。
+int main() {}
+```
 
-**(4.3) 两个类型 `T1`、`T2`**：令 `D1 = decay_t<T1>`、`D2 = decay_t<T2>`。
+这些结果都来自条件运算符 `false ? x : y` 的类型（[[expr.cond]]）。算术类型之间做常用算术转换，所以 `int` 与 `long` 得到 `long`，`short` 与 `char` 先提升为 `int`；两个指针得到复合指针类型；`const char*` 能转换为 `string` 而反过来不行，所以得到 `string`。精确的规则见第 4 段。
 
-- **(4.3.1)** 若 `T1` 或 `T2` 不等于其退化类型，结果就是 `common_type_t<D1, D2>`（如果有）。即：**先退化，再递归**。这一步保证用户只需为退化后的类型写特化（¶5），`common_type<const Meters&, Feet>` 也能找到 `common_type<Meters, Feet>` 的特化。
-- **(4.3.2)** 注 4：如果存在特化 `common_type<D1, D2>`，下面两条都不适用——用户特化优先。
-- **(4.3.3)** 否则，若 `decay_t<decltype(false ? declval<D1>() : declval<D2>())>` 是合法类型，它就是结果。
-- **(4.3.4)** 否则，若 *COND-RES*`(`*CREF*`(D1),` *CREF*`(D2))` 是类型，结果是它的 `decay_t`——即**用 `const D1&` 和 `const D2&` 再试一次条件运算符**。
-- 都不行则没有 `type`。
+### 两个辅助记号
 
-**(4.4) 三个及以上**：先求 `C = common_type_t<T1, T2>`，再求 `common_type_t<C, R...>`——**左折叠**；任何一步失败，整体没有 `type`。
+¶3 定义了几个说明用的记号，`common_type` 用到其中两个：
 
-### 推演几个例子
+- *CREF*`(A)` 是 `add_lvalue_reference_t<const remove_reference_t<A>>`，对普通类型 `A` 就是 `const A&`。
+- *COND-RES*`(X, Y)` 是 `decltype(false ? declval<X(&)()>()() : declval<Y(&)()>()())`。
 
-| 表达式 | 结果 | 走到哪一步 |
-|---|---|---|
-| `common_type_t<int, long>` | `long` | 4.3.3：`?:` 做常用算术转换（[[expr.cond]] → [[expr.arith.conv]]）|
-| `common_type_t<short, short>` | `short` | 4.3.3：两边同类型，`?:` 不提升 |
-| `common_type_t<short, char>` | `int` | 4.3.3：不同类型 → 整型提升 |
-| `common_type_t<int, unsigned>` | `unsigned` | 常用算术转换 |
-| `common_type_t<int&, const int&>` | `int` | 4.3.1 先退化成 `<int, int>` |
-| `common_type_t<void, void>` | `void` | 4.3.3：`false ? void : void` 合法，类型为 `void` |
-| `common_type_t<B*, D*>`（`D : B`）| `B*` | 4.3.3：复合指针类型（[[expr.type]]）|
-| `common_type_t<std::string, const char*>` | `std::string` | 4.3.3：`const char*` 可转换为 `string`，反之不行 |
-| `common_type_t<int, std::string>` | 无 | 两边都不能转换为对方 |
-| `common_type_t<char, unsigned char, float>` | `float` | 4.4：`<char, unsigned char>` → `int`，`<int, float>` → `float` |
+*COND-RES* 的写法看起来绕。`declval<X(&)()>()` 得到一个返回 `X` 的函数，再调用它一次，得到的表达式类型正好是 `X`，值类别也和 `X` 对应：`X` 是左值引用时是左值，是右值引用时是 xvalue，不是引用时是纯右值。直接写 `declval<X>()` 得不到纯右值，因为 `declval` 总是返回引用。
 
-4.3.4 那道"保险"在什么时候起作用？当条件运算符对 xvalue 失败、对 const 左值却成功时：
+### 求解步骤
+
+¶4 按实参个数分情况：
+
+- (4.1) 没有实参时，没有 `type`。
+- (4.2) 一个实参 `T0` 时，结果等于 `common_type_t<T0, T0>`。所以 `common_type_t<const int>` 是 `int`。
+- (4.3) 两个实参 `T1`、`T2` 时，令 `D1`、`D2` 为它们的 `decay_t`，见下面四步。
+- (4.4) 三个及以上时，先求 `C = common_type_t<T1, T2>`，再求 `common_type_t<C, R...>`，即从左到右两两折叠。任何一步没有结果，整体就没有 `type`。
+
+两个实参的情况依次尝试：
+
+1. (4.3.1) 如果 `T1` 或 `T2` 与它的退化类型不同，结果就是 `common_type_t<D1, D2>`。也就是先退化再递归，这样用户只需要为退化后的类型写特化。
+2. (4.3.2) 如果存在用户特化 `common_type<D1, D2>`，直接用它，下面两步不适用（注 4）。
+3. (4.3.3) 否则，如果 `decay_t<decltype(false ? declval<D1>() : declval<D2>())>` 是合法类型，它就是结果。
+4. (4.3.4) 否则，如果 *COND-RES*`(`*CREF*`(D1),` *CREF*`(D2))` 是合法类型，结果是它的 `decay_t`。也就是用 `const D1&` 和 `const D2&` 再试一次条件运算符。
+
+第 3 步用的 `declval<D1>()` 是 xvalue。有些类型只能从 const 左值转换，从右值转换不可行，第 3 步失败后由第 4 步补上：
 
 ```cpp run title="common-type-cref.cpp" ok
 #include <type_traits>
@@ -123,139 +176,158 @@ int main() {}
 
 struct A {};
 struct B {
-    B(const A&);
-    B(A&&) = delete;          // 从右值 A 转换被删除
+  B(const A&);
+  B(A&&) = delete;  // 不能从右值 A 转换
 };
 
 template<class T, class U>
-concept HasCond = requires { false ? std::declval<T>() : std::declval<U>(); };
+concept HasCond = requires {
+  false ? std::declval<T>() : std::declval<U>();
+};
 
-static_assert(!HasCond<A, B>);                 // 4.3.3：A&& 转 B 选中被删除的构造函数 → 失败
-static_assert( HasCond<const A&, const B&>);   // 4.3.4：const A& 转 B 可行
+static_assert(!HasCond<A, B>);                // 第 3 步失败
+static_assert( HasCond<const A&, const B&>);  // 第 4 步成功
 static_assert(std::is_same_v<std::common_type_t<A, B>, B>);
 
 int main() {}
 ```
 
-4.3.4 是 C++20 与 `common_reference` 同期加入的；有了它，只能从 `const` 左值转换（而从右值转换不可行）的类型也能得到公共类型。
+### 用户特化
 
-### 用户特化许可（¶5）
+`common_type` 是 [[type.traits]] 禁止特化规则的例外之一。第 5 段允许程序为两个实参的 `common_type<T1, T2>` 写特化，条件是：
 
-!!! std
-    Notwithstanding the provisions of [meta.rqmts], and pursuant to [namespace.std], a program may specialize `common_type<T1, T2>` for types `T1` and `T2` such that `is_same_v<T1, decay_t<T1>>` and `is_same_v<T2, decay_t<T2>>` are each `true`.
+1. `T1` 和 `T2` 都是退化后的类型，即 `is_same_v<T1, decay_t<T1>>` 为真。为 `const X&` 写的特化永远不会被用到，因为第 1 步会先退化。
+2. 如果特化提供了 `type`，它必须是无 cv 的非引用类型，`T1`、`T2` 都能显式转换为它。
+3. `common_type_t<T1, T2>` 必须与 `common_type_t<T2, T1>` 相同，所以通常要成对特化。
 
-    尽管有 [meta.rqmts] 的规定，并依据 [namespace.std]，程序可以为满足 `is_same_v<T1, decay_t<T1>>` 与 `is_same_v<T2, decay_t<T2>>` 均为真的类型 `T1`、`T2` 特化 `common_type<T1, T2>`。
-
-这是 [[type.traits]] "不得特化"红线的第一个例外，附带三个条件：
-
-1. 只能特化**两个实参**、且都是**退化后类型**的版本（特化 `common_type<const X&, Y>` 永远不会被用到，因为 4.3.1 会先退化）；
-2. 若提供 `type`，它必须是 cv 无限定的非引用类型，且 `T1`、`T2` 都能**显式**转换为它；
-3. `common_type_t<T1, T2>` 与 `common_type_t<T2, T1>` 必须相同——所以通常要成对特化。
-
-违反这些规则**不需要诊断**（[[g:ifndr]]）。注 5 说明了这种特化的动机：当两个类型之间**只有显式转换**时，条件运算符找不到公共类型，必须由用户声明。标准库自己的例子是 `<chrono>` 中 `common_type<duration<...>, duration<...>>` 的特化。
+违反这些条件的程序非良构，但不要求诊断。注 5 说明了需要这种特化的场合：两个类型之间只有显式转换，条件运算符找不到公共类型。
 
 ```cpp run title="common-type-spec.cpp" ok
 #include <type_traits>
 
 struct Meters { double v; };
-struct Feet   { double v; explicit operator Meters() const; };
+struct Feet {
+  double v;
+  explicit operator Meters() const;
+};
 
-template<> struct std::common_type<Meters, Feet> { using type = Meters; };
-template<> struct std::common_type<Feet, Meters> { using type = Meters; };   // 对称性
+template<> struct std::common_type<Meters, Feet> {
+  using type = Meters;
+};
+template<> struct std::common_type<Feet, Meters> {
+  using type = Meters;
+};
 
-static_assert(std::is_same_v<std::common_type_t<const Meters&, Feet>, Meters>);   // 先退化，再命中特化
+static_assert(std::is_same_v<
+    std::common_type_t<const Meters&, Feet>, Meters>);
 
 int main() {}
 ```
 
-## `common_reference`：引用感知的公共类型（¶3、¶6、¶7）
+`common_type_t<const Meters&, Feet>` 先退化为 `common_type_t<Meters, Feet>`，再命中特化。标准库自己也这样做：`<chrono>` 为两个 `duration` 特化了 `common_type`。
 
-`common_type` 总是退化，结果永远是非引用类型。但范围库需要回答另一个问题：**"一个 `int&` 和一个 `const int&`，有没有一个引用类型能同时绑定它们？"**——答案是 `const int&`。`common_reference`（[[P0898R3]]）就是为此设计的。
+## `common_reference` {{c++20}}
 
-### ¶3 的 *COMMON-REF*
+`common_type` 总是退化，结果不会是引用。范围库还需要回答另一个问题：`int&` 和 `const int&` 有没有一个引用类型能同时绑定两者？答案是 `const int&`。`common_reference`（[[P0898R3]]）回答的就是这个问题，它是概念 `std::common_reference_with` 和 `std::indirectly_readable` 的基础。
 
-令 *COPYCV*`(FROM, TO)` 为给 `TO` 加上 `FROM` 的顶层 cv；*XREF*`(A)` 为一个一元别名模板，把 `A` 的 cv 和引用限定"复制"到它的实参上。给定 `A`、`B`，令 `X = remove_reference_t<A>`、`Y = remove_reference_t<B>`：
+```cpp run title="common-reference.cpp" ok
+#include <type_traits>
+#include <vector>
+using namespace std;
+
+struct B {};
+struct D : B {};
+using VBRef = vector<bool>::reference;
+
+static_assert(is_same_v<common_reference_t<int&, const int&>,
+                        const int&>);
+static_assert(is_same_v<common_reference_t<int&&, int&>,
+                        const int&>);
+static_assert(is_same_v<common_reference_t<int&&, int&&>, int&&>);
+static_assert(is_same_v<common_reference_t<B&, D&>, B&>);
+static_assert(is_same_v<common_reference_t<int&, long&>, long>);
+static_assert(is_same_v<common_reference_t<int>, int>);
+static_assert(is_same_v<common_reference_t<VBRef, bool&>, bool>);
+
+int main() {}
+```
+
+### *COMMON-REF*
+
+¶3 先定义了两个引用类型之间的 *COMMON-REF*`(A, B)`。还要两个记号：*COPYCV*`(FROM, TO)` 是给 `TO` 加上 `FROM` 的顶层 cv；*XREF*`(A)` 是一个别名模板，把 `A` 的 cv 和引用限定加到它的实参上。令 `X`、`Y` 为去掉引用后的 `A`、`B`：
 
 | 情形 | *COMMON-REF*`(A, B)` |
 |---|---|
-| (3.5) 都是左值引用 | *COND-RES*`(`*COPYCV*`(X, Y)&,` *COPYCV*`(Y, X)&)`，前提是它存在且**是引用类型** |
-| (3.6) 都是右值引用 | 令 `C = remove_reference_t<COMMON-REF(X&, Y&)>&&`；若 `A`、`B` 都能转换为 `C`，则为 `C` |
-| (3.7) `A` 右值、`B` 左值 | 令 `D = COMMON-REF(const X&, Y&)`；若 `A` 能转换为 `D`，则为 `D` |
-| (3.8) `A` 左值、`B` 右值 | *COMMON-REF*`(B, A)` |
+| (3.5) 都是左值引用 | *COND-RES*`(`*COPYCV*`(X, Y)&,` *COPYCV*`(Y, X)&)`，要求它存在且是引用类型 |
+| (3.6) 都是右值引用 | 令 `C` 为 `remove_reference_t<COMMON-REF(X&, Y&)>&&`；如果 `A`、`B` 都能转换为 `C`，结果是 `C` |
+| (3.7) `A` 是右值引用，`B` 是左值引用 | 令 `D` 为 *COMMON-REF*`(const X&, Y&)`；如果 `A` 能转换为 `D`，结果是 `D` |
+| (3.8) `A` 是左值引用，`B` 是右值引用 | *COMMON-REF*`(B, A)` |
 | (3.9) 其他 | 非良构 |
 
-直觉：两个左值引用时，先把双方的 cv "合并"（`int&` 与 `const int&` 都变成 `const int&`），再看条件运算符能否产生一个**左值**；一个左值一个右值时，退而求其次用 `const X&`（它能绑定右值）。
+两个左值引用时，先把双方的 cv 合并（`int&` 与 `const int&` 都变成 `const int&`），再看条件运算符能否得到一个左值。一个左值引用和一个右值引用时，改用 `const X&`，因为它也能绑定右值。
 
-### ¶6 的算法
+### 求解步骤
 
-1. 零个类型：无 `type`；一个类型：就是它本身（**不退化**——与 `common_type` 不同）。
-2. 两个类型 `T1`、`T2`，依次尝试：
-    - (6.3.1) 若两者都是引用，*COMMON-REF*`(T1, T2)` 良构，且 `T1*`、`T2*` 都能转换为结果的指针类型 → 用它；
-    - (6.3.2) 否则，若 `basic_common_reference<remove_cvref_t<T1>, remove_cvref_t<T2>, XREF(T1), XREF(T2)>::type` 良构 → 用它（**用户定制点**）；
-    - (6.3.3) 否则，若 *COND-RES*`(T1, T2)` 良构 → 用它；
-    - (6.3.4) 否则，若 `common_type_t<T1, T2>` 良构 → 用它；
-    - 否则无 `type`。
-3. 三个以上：左折叠，同 `common_type`。
+¶6 规定：没有实参时没有 `type`；一个实参时结果就是它本身，不退化，这一点与 `common_type` 不同；三个及以上时与 `common_type` 一样从左到右折叠。两个实参 `T1`、`T2` 时依次尝试：
 
-```cpp run title="common-reference.cpp" ok
+1. (6.3.1) 如果两者都是引用，*COMMON-REF*`(T1, T2)` 良构，而且 `T1*`、`T2*` 都能转换为结果的指针类型，就用它。
+2. (6.3.2) 否则，如果 `basic_common_reference<remove_cvref_t<T1>, remove_cvref_t<T2>, XREF(T1), XREF(T2)>::type` 良构，就用它。这是留给用户的定制点。
+3. (6.3.3) 否则，如果 *COND-RES*`(T1, T2)` 良构，就用它。
+4. (6.3.4) 否则，如果 `common_type_t<T1, T2>` 良构，就用它。
+5. 都不行就没有 `type`。
+
+以 `common_reference_t<int&, long&>` 为例。第 1 步按 (3.5) 求 *COND-RES*`(int&, long&)`：两个不同类型的左值经过常用算术转换，得到 `long` 纯右值，不是引用类型，所以 *COMMON-REF* 非良构。第 2 步没有特化。第 3 步 *COND-RES*`(int&, long&)` 是 `long`，这就是结果。`const long&` 不在任何一步的候选中，而且 `int&` 无法直接绑定到 `long` 对象上，只能绑定到转换出的临时量，算不上公共引用。
+
+### `basic_common_reference`
+
+`basic_common_reference<T, U, TQual, UQual>` 的主模板没有 `type`。第 7 段允许程序偏特化它，这是禁止特化规则的另一个例外。条件与 `common_type` 类似：`T`、`U` 是退化后的类型；如果有 `type`，`TQual<T>` 和 `UQual<U>` 都要能转换为它；交换 `(T, U)` 后结果相同。违反这些条件同样不要求诊断。
+
+`TQual` 和 `UQual` 就是 *XREF*`(T1)` 和 *XREF*`(T2)`，特化通过它们得知原来的实参带着什么 cv 和引用。标准库为 `pair`、`tuple`、`reference_wrapper` 提供了这样的偏特化。`views::zip` 的引用类型是 `tuple<int&, int&>`，值类型是 `tuple<int, int>`，两者能求出公共引用，`zip` 的迭代器才满足 `std::indirectly_readable`：
+
+```cpp run title="zip-common-ref.cpp" ok
 #include <ranges>
 #include <tuple>
 #include <type_traits>
 #include <vector>
 using namespace std;
 
-struct B {}; struct D : B {};
+using V = vector<int>;
+using Zip = decltype(views::zip(declval<V&>(), declval<V&>()));
+using Ref = ranges::range_reference_t<Zip>;
 
-static_assert(is_same_v<common_reference_t<int&, const int&>, const int&>);   // 6.3.1
-static_assert(is_same_v<common_reference_t<int&&, int&>, const int&>);        // 3.7
-static_assert(is_same_v<common_reference_t<int&&, int&&>, int&&>);            // 3.6
-static_assert(is_same_v<common_reference_t<B&, D&>, B&>);
-static_assert(is_same_v<common_reference_t<int&, long&>, long>);              // 6.3.3：?: 产生纯右值 long
-static_assert(is_same_v<common_reference_t<int>, int>);                       // 单个：不退化
-static_assert(is_same_v<common_reference_t<vector<bool>::reference, bool&>, bool>);
-
-// zip 的引用类型是 tuple<int&, int&>；它与值类型 tuple<int, int> 的公共引用
-// 靠标准库为 tuple 提供的 basic_common_reference 偏特化得出
-using ZipRef = ranges::range_reference_t<
-    decltype(views::zip(declval<vector<int>&>(), declval<vector<int>&>()))>;
-static_assert(is_same_v<ZipRef, tuple<int&, int&>>);
-static_assert(is_same_v<common_reference_t<tuple<int&, int&>&&, tuple<int, int>&>, tuple<int&, int&>>);
+static_assert(is_same_v<Ref, tuple<int&, int&>>);
+static_assert(is_same_v<
+    common_reference_t<Ref&&, tuple<int, int>&>, Ref>);
 
 int main() {}
 ```
 
-### `basic_common_reference`（¶7）
-
-主模板**没有** `type`。¶7 允许程序**偏特化**它（这是"不得特化"的第二个例外），条件与 `common_type` 类似：`T`、`U` 是退化后的类型；若有 `type`，`TQual<T>` 与 `UQual<U>` 都须能（隐式）转换为它；且对 `(T, U)` 与 `(U, T)` 的结果须相同；违反不需诊断。注 6：它用于影响 `common_reference` 的结果，以及在模板实参间只有显式转换时提供结果。
-
-`TQual`/`UQual` 就是 *XREF*`(T1)`/*XREF*`(T2)`：特化可以据此知道原来的实参带着什么 cv 和引用，从而算出"正确限定"的公共引用。标准库为 `pair`、`tuple`、`reference_wrapper` 等提供了这种偏特化，这正是 `views::zip` 的代理引用 `tuple<int&, int&>` 能与 `tuple<int, int>&` 建立公共引用、从而满足 `std::indirectly_readable` 的原因。
-
 ## `underlying_type`
 
-若 `T` 是枚举类型，`type` 为其底层类型（[[dcl.enum]]）；否则**没有** `type`（C++20 起，此前对非枚举是 UB）。*Mandates*：`T` 不是不完整的枚举类型。
+如果 `T` 是枚举类型，`underlying_type<T>::type` 是它的底层类型（[[dcl.enum]]）；否则没有 `type`。C++20 之前对非枚举类型使用它是未定义行为，现在可以用于 SFINAE。
 
-所谓"不完整的枚举类型"，是底层类型尚未确定的枚举：没有固定底层类型的枚举，在其枚举说明符的右花括号之前是不完整的（[[dcl.enum]]、[[basic.types.general#3]]）。带固定底层类型的不透明声明 `enum Fwd : int;` 已经足够：`underlying_type_t<Fwd>` 是 `int`。
+*Mandates* 要求 `T` 不是不完整的枚举类型，也就是底层类型还没确定的枚举。没有固定底层类型的枚举在其定义的右花括号之前是不完整的；带固定底层类型的不透明声明 `enum Fwd : int;` 已经足够。
 
 ```cpp run title="underlying-type.cpp" ok
 #include <type_traits>
 
-enum Fwd : int;                                   // 不透明声明，底层类型已固定
+enum Fwd : int;  // 不透明声明，底层类型已确定
 static_assert(std::is_same_v<std::underlying_type_t<Fwd>, int>);
 
 template<class T>
 concept HasUT = requires { typename std::underlying_type<T>::type; };
-static_assert(!HasUT<int>);                        // 非枚举：没有 type，SFINAE 友好
+static_assert(!HasUT<int>);  // 不是枚举：没有 type
 
 int main() {}
 ```
 
 ## `invoke_result` 与 `apply_result`
 
-`invoke_result<Fn, ArgTypes...>`：若 *INVOKE*`(declval<Fn>(), declval<ArgTypes>()...)`（[[func.require]]）作为不求值操作数良构，`type` 为它的 `decltype`；否则没有 `type`。访问检查在无关语境中进行，只看直接语境（注 2，同 [[meta.unary.prop]]）。*Preconditions*：各类型完整、*cv* `void` 或未知边界数组。
+`invoke_result<Fn, ArgTypes...>` {{c++17}} 在 *INVOKE*`(declval<Fn>(), declval<ArgTypes>()...)`（[[func.require]]）作为不求值操作数良构时，`type` 是这个表达式的 `decltype`；否则没有 `type`。与 [[meta.rel]] 中的 `is_invocable` 一样，访问检查在无关的语境中进行，只看直接语境；直接语境以外的错误（例如实例化某个函数体时出错）会让程序非良构（注 2）。各类型须是完整类型、`void` 或未知边界的数组（*Preconditions*）。
 
-它在 C++17 取代了 `result_of<F(Args...)>`——后者借用函数类型 `F(Args...)` 充当"调用签名"，于是 `F` 被放在了返回类型的位置（不能是函数或数组类型），`Args` 也会经历函数形参的类型调整（数组、函数退化为指针，顶层 cv 被丢弃），C++17 弃用、C++20 移除。
+它取代了 C++17 弃用、C++20 移除的 `result_of<F(Args...)>`。`result_of` 借用函数类型 `F(Args...)` 来表示一次调用，于是 `F` 处在返回类型的位置，不能是函数或数组类型；`Args` 也会像函数形参一样被调整，数组和函数变成指针，顶层 cv 被丢掉。
 
-¶8 的例子把 *INVOKE* 的各种形态都走了一遍：
+¶8 的例子覆盖了 *INVOKE* 的各种形式：
 
 ```cpp run title="invoke-result.cpp" ok
 #include <memory>
@@ -266,61 +338,48 @@ using PF1 = bool  (&)();
 using PF2 = short (*)(long);
 
 struct S {
-    operator PF2() const;               // S 可转换为函数指针：代理调用函数
-    double operator()(char, int&);
-    void fn(long) const;
-    char data;
+  operator PF2() const;
+  double operator()(char, int&);
+  void fn(long) const;
+  char data;
 };
 
 using PMF = void (S::*)(long) const;
 using PMD = char S::*;
 
-static_assert(is_same_v<invoke_result_t<S, int>, short>);                     // 经由转换函数调用 PF2
-static_assert(is_same_v<invoke_result_t<S&, unsigned char, int&>, double>);   // operator() 更好
+static_assert(is_same_v<invoke_result_t<S, int>, short>);
+static_assert(is_same_v<invoke_result_t<S&, unsigned char, int&>,
+                        double>);
 static_assert(is_same_v<invoke_result_t<PF1>, bool>);
-static_assert(is_same_v<invoke_result_t<PMF, unique_ptr<S>, int>, void>);      // 类指针对象
-static_assert(is_same_v<invoke_result_t<PMD, S>, char&&>);                     // 数据成员 + 右值对象 → xvalue
+static_assert(is_same_v<invoke_result_t<PMF, unique_ptr<S>, int>,
+                        void>);
+static_assert(is_same_v<invoke_result_t<PMD, S>, char&&>);
 static_assert(is_same_v<invoke_result_t<PMD, const S*>, const char&>);
 
 int main() {}
 ```
 
-第一行值得细想：`S` 有非 `const` 的 `operator()(char, int&)`，但 `declval<S>()` 是 xvalue，`int` 实参无法绑定 `int&`，于是 `operator()` 不可行；`S` 还能通过 `operator PF2() const` 转换为函数指针，这在函数调用中构成**代理调用函数**（[[over.call.object]]），最终调用 `short(*)(long)`。
+第一行最值得细看。`declval<int>()` 不是左值，无法绑定 `operator()` 的 `int&` 形参，所以 `operator()` 不可行。`S` 还能通过 `operator PF2() const` 转换为函数指针，这样的转换函数在调用表达式中构成代理调用函数（[[over.call.object]]），最终调用的是 `short(*)(long)`，结果类型为 `short`。
 
-`apply_result<Fn, Tuple>`（当前草案新增）：若 *tuple-like*`<Tuple>` 为真且 *INVOKE*`(declval<Fn>(), ELEMS-OF(Tuple)...)` 良构，`type` 为其 `decltype`。*ELEMS-OF* 的定义见 [[meta.rel]] ¶3。本地 libc++ 尚未提供。
+倒数第二行：用右值对象访问数据成员，结果是 xvalue，所以类型是 `char&&`。
 
-## `unwrap_reference` 与 `unwrap_ref_decay`
+`apply_result<Fn, Tuple>` 是 C++23 之后的新措辞。如果 `Tuple` 满足 *tuple-like* 且 *INVOKE*`(declval<Fn>(), ELEMS-OF(Tuple)...)` 良构，`type` 是这个表达式的 `decltype`。*ELEMS-OF* 把 tuple 按 `get<0>`、`get<1>`…… 展开，定义见 [[meta.rel#3]]。本机 libc++ 尚未提供 `apply_result`。
 
-`unwrap_reference<T>`：若 `T` 是 `reference_wrapper<X>` 的特化，`type` 为 `X&`；否则为 `T`。注意它**不先退化**：`unwrap_reference_t<const reference_wrapper<int>>` 仍是 `const reference_wrapper<int>`。`unwrap_ref_decay<T>` 先 `decay_t` 再 `unwrap_reference_t`，正好描述了 `std::make_pair(x, std::ref(y))` 的成员类型：按值退化，但 `std::ref` 包装的会变成引用。
+## `unwrap_reference` 与 `unwrap_ref_decay` {{c++20}}
 
-¶2：这四个模板（含 `_t` 别名）在包含 `<functional>` 时也可用——它们与 `reference_wrapper` 同住一处更合理。
+`unwrap_reference<T>` 在 `T` 是 `reference_wrapper<X>` 时给出 `X&`，否则给出 `T`。它不先退化，所以 `unwrap_reference_t<const reference_wrapper<int>>` 仍是 `const reference_wrapper<int>`。
 
-## 实现视角
+`unwrap_ref_decay<T>` 是 `unwrap_reference_t<decay_t<T>>`，它描述了 `std::make_pair` 和 `std::make_tuple` 的元素类型：实参按值退化，但用 `std::ref` 包装的实参变成引用。
 
-!!! impl "libc++ 的 `common_type`：内建优先，回退时逐条对照标准"
-    Clang 提供内建模板 `__builtin_common_type`，libc++ 优先使用：
+¶2：这两个模板及其 `_t` 别名在包含 `<functional>` 时也可以使用，因为它们和 `reference_wrapper` 关系密切。
 
-    ```cpp
-    #if __has_builtin(__builtin_common_type)
-    template <class... _Args>
-    struct common_type : __builtin_common_type<__common_type_t, __type_identity, __empty, _Args...> {};
-    #else
-    // ... 纯模板实现，注释里逐条标注 "bullet 1 - sizeof...(Tp) == 0"、
-    //     "sub-bullet 3 - if decay_t<decltype(false ? declval<D1>() : declval<D2>())> ..."
-    ```
-
-    内建接受三个"回调"模板：`__common_type_t` 用于递归查询（以便命中用户特化）、`__type_identity` 用于包装结果、`__empty` 表示"没有 `type`"。回退实现的 sub-bullet 3 写的是 `true ? declval<_Tp>() : declval<_Up>()`——条件运算符的类型与条件的值无关，`true` 与标准中的 `false` 等价。
+!!! impl "libc++ 的 `common_type`"
+    Clang 提供内建模板 `__builtin_common_type`，libc++ 在可用时直接使用它。内建接受几个回调模板：一个用于递归查询（这样才能命中用户特化），一个用于包装结果，一个表示没有 `type`。没有这个内建时，libc++ 退回到纯模板实现，代码注释逐条对应第 4 段的各个子项。
 
 ## 陷阱
 
-!!! pitfall "`common_type` 不是“能装下两者的类型”"
-    `common_type_t<int, unsigned>` 是 `unsigned`——负数会回绕。`common_type_t<long long, double>` 是 `double`——大整数会丢精度。它复刻的是条件运算符的常用算术转换，而不是"无损公共表示"。
-
-!!! pitfall "`conditional` 两个分支都会形成"
-    `conditional_t<is_integral_v<T>, make_signed_t<T>, T>` 在 `T = double` 时非良构：`make_signed_t<double>` 在选择之前就被形成了。改为 `typename conditional_t<is_integral_v<T>, make_signed<T>, type_identity<T>>::type`。
-
-!!! pitfall "为非退化类型特化 `common_type` 是白费功夫"
-    4.3.1 总是先退化再递归，`template<> struct common_type<const X&, Y>` 永远不会被选中，而且违反了 ¶5 的许可条件。
+!!! pitfall "`common_type` 不保证无损"
+    `common_type_t<int, unsigned>` 是 `unsigned`，负数会变成很大的正数；`common_type_t<long long, double>` 是 `double`，大整数会丢失精度。它复刻的是条件运算符的常用算术转换，不是一个能无损容纳两者的类型。
 
 ## 思考题
 
@@ -328,30 +387,36 @@ int main() {}
     `std::common_type_t<int[3], int*>` 与 `std::common_type_t<int(), int(*)()>` 分别是什么？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-都走 4.3.1 先退化：`decay_t<int[3]>` 是 `int*`，`decay_t<int()>` 是 `int(*)()`。于是分别化为 `common_type_t<int*, int*>` = `int*` 和 `common_type_t<int(*)(), int(*)()>` = `int(*)()`。
+都在第 1 步先退化：`decay_t<int[3]>` 是 `int*`，`decay_t<int()>` 是 `int(*)()`。于是两者分别化为 `common_type_t<int*, int*>` 和 `common_type_t<int(*)(), int(*)()>`，结果是 `int*` 和 `int(*)()`。
 </details>
 
 !!! question "思考题 2"
-    为什么 `common_reference_t<int&, long&>` 是 `long` 而不是 `long&` 或 `const long&`？
+    为什么 `common_reference_t<int&&, int&>` 是 `const int&`，而不是 `int&`？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-6.3.1：两个都是左值引用，*COMMON-REF*`(int&, long&)` 按 3.5 计算 *COND-RES*`(int&, long&)`。条件运算符的两个操作数是不同类型的左值，需要常用算术转换，结果是 `long` **纯右值**（[[expr.cond]]），不是引用类型，所以 3.5 不成立，*COMMON-REF* 非良构。6.3.2 没有 `basic_common_reference` 特化。6.3.3 *COND-RES*`(int&, long&)` 良构，得到 `long`。`const long&` 不会被选中：没有任何一步把 `const long&` 当作候选——`int&` 不能直接绑定到 `long` 对象，只能绑定到转换出的临时量，那不是"公共引用"。
+按 (3.8)，*COMMON-REF*`(int&&, int&)` 化为 (3.7) 的情形：令 `D` 为 *COMMON-REF*`(const int&, int&)`。按 (3.5)，双方 cv 合并后都是 `const int&`，条件运算符得到 `const int` 左值，所以 `D` 是 `const int&`。`int&&` 能转换为 `const int&`，于是结果是 `const int&`。
+
+`int&` 不行，因为右值不能绑定到非 const 的左值引用。
 </details>
 
-## 小结
+## 速查
 
-| 工具 | 一句话 |
-|---|---|
-| `type_identity` | 制造非推导语境 |
-| `remove_cvref` vs `decay` | 前者只去引用和 cv；后者还做数组/函数到指针 |
-| `enable_if` / `void_t` | 靠"没有 `type`"/"替换失败"实现 SFINAE |
-| `conditional` | 不短路，两个分支都要合法 |
-| `common_type` | 先退化 → 用户特化 → `?:`（xvalue）→ `?:`（const 左值）→ 左折叠 |
-| `common_reference` | *COMMON-REF* → `basic_common_reference` → `?:` → `common_type` |
-| `underlying_type` | 非枚举时无 `type`（C++20 起）|
-| `invoke_result` | 取代 `result_of`；基于 *INVOKE* |
-| `unwrap_ref_decay` | `make_pair`/`make_tuple` 的成员类型规则 |
+| 模板 | `type` | 没有 `type` 的情况 |
+|---|---|---|
+| `type_identity<T>` {{c++20}} | `T` | |
+| `remove_cvref<T>` {{c++20}} | `remove_cv_t<remove_reference_t<T>>` | |
+| `decay<T>` | 按值传参后的类型 | |
+| `enable_if<B, T>` | `T` | `B` 为假 |
+| `conditional<B, T, F>` | `B ? T : F` | |
+| `common_type<T...>` | 见第 4 段 | 没有公共类型 |
+| `basic_common_reference<T, U, TQ, UQ>` | 主模板没有，供用户偏特化 | 默认 |
+| `common_reference<T...>` {{c++20}} | 见第 6 段 | 没有公共引用 |
+| `underlying_type<T>` | 枚举的底层类型 | `T` 不是枚举 |
+| `invoke_result<Fn, Args...>` {{c++17}} | *INVOKE* 表达式的类型 | 表达式非良构 |
+| `apply_result<Fn, Tuple>` | 展开 tuple 后 *INVOKE* 的类型 | 不是 tuple-like 或表达式非良构 |
+| `unwrap_reference<T>` {{c++20}} | `reference_wrapper<X>` 变成 `X&`，否则 `T` | |
+| `unwrap_ref_decay<T>` {{c++20}} | `unwrap_reference_t<decay_t<T>>` | |
