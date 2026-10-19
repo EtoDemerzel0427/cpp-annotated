@@ -1,15 +1,44 @@
 ---
 title: 头文件 <ctime> 概要
-summary: C 的时间函数在 C++ 中的样子——time_t / clock_t / tm / timespec，gmtime/localtime 的数据竞争，C23 带来的 timegm、gmtime_r、localtime_r、timespec_getres 与可选的 TIME_MONOTONIC，asctime/ctime 移入附录 D；与 <chrono> 的互操作
+summary: <ctime> 就是 C23 的 <time.h>：time_t、tm、timespec 和相关函数；gmtime、localtime 返回共享的静态对象，不保证没有数据竞争；C23 新增 timegm、gmtime_r、localtime_r、timespec_getres；与 <chrono> 怎样互相转换。
 status: done
 related: time, time.clock, depr.ctime, res.on.data.races, c.locales
 tags: 标准库, C 兼容, 时间
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-`<ctime>` 是 C 头文件 `<time.h>` 在 C++ 中的对应物。它与 `<chrono>` 是两套平行的设施：`<chrono>` 用类型表达单位和时钟，`<ctime>` 用整数和结构体。新代码应当首选 `<chrono>`，但与操作系统 API、C 库、文件格式打交道时仍然经常需要 `<ctime>`，两者之间的桥梁是 `system_clock::to_time_t` / `from_time_t`（[[time.clock]]）。
+!!! tldr
+    - `<ctime>` 的内容与 C23 的 `<time.h>` 相同，C++ 只额外规定了一条：`gmtime`、`localtime` 不要求避免数据竞争。
+    - 这两个函数返回指向同一个静态 `tm` 对象的指针，第二次调用会覆盖第一次的结果；需要线程安全时用 `gmtime_r`、`localtime_r` 或 `<chrono>`。
+    - C23 新增的 `timegm`、`gmtime_r`、`localtime_r`、`timespec_getres` 进入了概要，本机 libc++ 还没有在 `std` 里提供它们。
+    - `asctime`、`ctime` 已弃用，移到了附录 D。
+    - `<ctime>` 与 `<chrono>` 之间的桥梁是 `system_clock::to_time_t`/`from_time_t`；分解时间优先用 `year_month_day` 和 `hh_mm_ss`。
 
-## 概要
+## 共享的静态缓冲区（¶2）
+
+```cpp run unspecified
+#include <cstdio>
+#include <ctime>
+
+int main() {
+  std::time_t t1 = 1'709'298'307, t2 = 0;
+  std::tm* a = std::gmtime(&t1);
+  std::tm* b = std::gmtime(&t2);
+  std::printf("%d %d\n", a == b, a->tm_year + 1900);   // 本机：1 1970
+}
+```
+
+`gmtime`、`localtime` 返回的指针指向库内部的一个静态 `tm` 对象。本机上两次调用返回同一个地址，第二次调用把 `*a` 覆盖成了 1970 年。C 标准允许这两个函数共用同一个对象，所以 `a == b` 的结果是未指定的。
+
+单线程里这只是结果被覆盖；两个线程同时调用，就是在没有同步的情况下写同一个对象，构成数据竞争。
+
+¶2 标准明确规定 `gmtime` 和 `localtime` 不要求避免数据竞争。[[res.on.data.races]] 一般要求标准库函数不修改实参以外的对象，这两个函数是例外。附录 D 的 `asctime`、`ctime` 也是如此（[[depr.ctime#2]]）。
+
+线程安全的写法是 `gmtime_r`、`localtime_r`，由调用者提供 `tm` 缓冲区；或者直接用 `<chrono>`。
+
+`localtime` 和 `mktime` 还依赖进程的时区设置，在 POSIX 下是 `TZ` 环境变量，这是另一份全局状态。`<chrono>` 的 `time_zone` 是显式传递的对象，不同线程可以同时使用不同的时区（[[time.zone]]）。
+
+## 概要（¶1）
 
 ```cpp
 #define __STDC_VERSION_TIME_H__ 202311L
@@ -42,71 +71,56 @@ namespace std {
 }
 ```
 
-¶1：`<ctime>` 的内容与 C 标准库的 `<time.h>` 相同。概要末尾的"See also"指向 ISO/IEC 9899:2024（即 C23）的 7.29。
+¶1 `<ctime>` 的内容与 C 标准库的 `<time.h>` 相同，引用的是 C23（ISO/IEC 9899:2024）的 7.29。
 
-脚注 233 补充：`strftime` 支持 C 的转换说明符 `C` `D` `e` `F` `g` `G` `h` `r` `R` `t` `T` `u` `V` `z`，以及修饰符 `E` 和 `O`。这些说明符是 C99 加入的，脚注确认 C++ 的 `strftime` 也支持它们。
-
-¶2：`gmtime` 与 `localtime` **不要求避免数据竞争**（[[res.on.data.races]]）。
-
-## 与 C23 对齐
-
-这份概要以 C23 为基准，相比以 C17 为基准的旧版本，有几处变化（C++23 之后的新措辞）：
-
-| 新增 / 变化 | 说明 |
-|---|---|
-| `__STDC_VERSION_TIME_H__` | 值为 `202311L`，用于检测 `<time.h>` 的 C23 特性 |
-| `timegm` | `mktime` 的 UTC 版本：把 `tm` 当作 UTC 解释，返回 `time_t`。此前它只是 POSIX/BSD 扩展 |
-| `gmtime_r`、`localtime_r` | 把结果写入调用者提供的 `tm`，没有共享的静态缓冲区。此前是 POSIX 函数 |
-| `timespec_getres` | 查询 `timespec_get` 某个时间基准的分辨率 |
-| `TIME_MONOTONIC`、`TIME_ACTIVE`、`TIME_THREAD_ACTIVE` | `timespec_get` 的可选时间基准：单调时钟、进程 CPU 时间、线程 CPU 时间 |
-| `asctime`、`ctime` | 移出本概要，改在附录 D 的 [[depr.ctime]] 中声明，**已弃用** {{deprecated}} |
-
-`asctime` 与 `ctime` 被弃用，是因为它们返回指向静态缓冲区的指针，并且对年份超过 4 位等情形有缓冲区溢出的历史问题；[[depr.ctime]] ¶2 同样说明它们不要求避免数据竞争。替代品是 `strftime` 或 `std::format`。
-
-!!! impl "libc++ 尚未跟进"
-    截至写作时，本机 libc++ 的 `<ctime>` 中没有 `std::timegm`、`std::gmtime_r`、`std::localtime_r`、`std::timespec_getres`，也没有定义 `__STDC_VERSION_TIME_H__`；`asctime` 也没有弃用警告。在 macOS 上 `::timegm`、`::gmtime_r` 等作为 POSIX 函数存在于全局命名空间，可以直接使用。
-
-## 类型
+### 类型
 
 | 类型 | 含义 |
 |---|---|
-| `time_t` | 日历时间的实数类型。C 没有规定编码；POSIX 规定为自 1970-01-01 UTC 起的秒数（不计闰秒），与 `sys_seconds` 的数值一致 |
-| `clock_t` | `clock()` 的返回类型，处理器时间，以 `CLOCKS_PER_SEC` 为单位 |
-| `tm` | 分解时间：`tm_year`（自 1900 年起）、`tm_mon`（0–11）、`tm_mday`（1–31）、`tm_wday`（周日 = 0）、`tm_yday`、`tm_isdst` 等 |
+| `time_t` | 日历时间。C 没有规定编码；POSIX 规定为自 1970-01-01 UTC 起的秒数（不计闰秒），与 `sys_seconds` 的数值一致 |
+| `clock_t` | `clock()` 的返回类型，表示处理器时间，单位是 `1/CLOCKS_PER_SEC` 秒 |
+| `tm` | 分解时间：`tm_year`（自 1900 年起）、`tm_mon`（0–11）、`tm_mday`（1–31）、`tm_wday`（周日为 0）、`tm_yday`、`tm_isdst` 等 |
 | `timespec` | `tv_sec`（`time_t`）加 `tv_nsec`（`long`，纳秒） |
 
-`tm` 的月份从 0 开始、年份减去 1900，`weekday::c_encoding()` 与 `tm_wday` 相同——这些对应关系在与 `<chrono>` 互转时最容易出错。
+`tm` 的月份从 0 开始、年份要减去 1900，星期以周日为 0，与 `weekday::c_encoding()` 相同。这几处对应关系在与 `<chrono>` 互相转换时最容易出错。
 
-## 函数
+### 函数
 
 | 函数 | 作用 | `<chrono>` 中的对应 |
 |---|---|---|
 | `time(p)` | 当前日历时间 | `system_clock::now()` |
-| `clock()` | 进程使用的处理器时间 | 无（`steady_clock` 是墙上时间，不是 CPU 时间） |
+| `clock()` | 进程使用的处理器时间 | 无；`steady_clock` 量的是经过的实际时间 |
 | `difftime(t1, t0)` | `t1 − t0`，以秒为单位的 `double` | `duration<double>{tp1 - tp0}` |
-| `mktime(tm*)` | 本地时间 `tm` → `time_t`，并规范化 `tm` 的各字段 | `time_zone::to_sys(local_time)` |
-| `timegm(tm*)` | UTC 的 `tm` → `time_t` | `sys_days{year_month_day} + 时分秒` |
-| `gmtime`、`gmtime_r` | `time_t` → UTC 的 `tm` | `year_month_day{floor<days>(tp)}`、`hh_mm_ss` |
-| `localtime`、`localtime_r` | `time_t` → 本地时间的 `tm` | `zoned_time{current_zone(), tp}.get_local_time()` |
-| `strftime` | 按格式输出 `tm` | `std::format("{:%...}", tp)` |
+| `mktime(tm*)` | 本地时间的 `tm` 转为 `time_t`，并规范化 `tm` 的各字段 | `time_zone::to_sys(local_time)` |
+| `timegm(tm*)` | UTC 的 `tm` 转为 `time_t` | `sys_days{year_month_day}` 加时分秒 |
+| `gmtime`、`gmtime_r` | `time_t` 转为 UTC 的 `tm` | `year_month_day{floor<days>(tp)}`、`hh_mm_ss` |
+| `localtime`、`localtime_r` | `time_t` 转为本地时间的 `tm` | `zoned_time{current_zone(), tp}.get_local_time()` |
+| `strftime` | 按格式输出 `tm` | `std::format("{:%...}", tp)`（[[time.format]]） |
 | `timespec_get(ts, TIME_UTC)` | 纳秒精度的当前 UTC 时间 | `system_clock::now()` |
 
-### 数据竞争（¶2）
+脚注 233 补充，`strftime` 支持 C 的转换说明符 `C` `D` `e` `F` `g` `G` `h` `r` `R` `t` `T` `u` `V` `z`，以及修饰符 `E` 和 `O`。
 
-`gmtime`、`localtime`（以及附录 D 中的 `asctime`、`ctime`）返回指向**静态存储**中 `tm` 对象的指针。两个线程同时调用会写同一个对象，这是数据竞争（{{ub}}）；即使单线程，第二次调用也会覆盖第一次的结果。标准通过 ¶2 明确豁免了 [[res.on.data.races]] 对它们的一般要求。
+## C23 带来的变化
 
-```cpp
-std::tm* a = std::gmtime(&t1);
-std::tm* b = std::gmtime(&t2);   // a 与 b 可能指向同一个对象：*a 已被覆盖
-```
+这份概要以 C23 为基准。与以 C17 为基准的旧版相比，有下面几处变化，属于 C++23 之后的新措辞：
 
-线程安全的写法是 `gmtime_r` / `localtime_r`（调用者提供缓冲区），或者干脆用 `<chrono>`。
+| 新增或变化 | 说明 |
+|---|---|
+| `__STDC_VERSION_TIME_H__` | 值为 `202311L`，用来检测 `<time.h>` 的 C23 特性 |
+| `timegm` | `mktime` 的 UTC 版本：把 `tm` 当作 UTC 解释。此前只是 POSIX/BSD 扩展 |
+| `gmtime_r`、`localtime_r` | 结果写入调用者提供的 `tm`，没有共享的静态对象。此前是 POSIX 函数 |
+| `timespec_getres` | 查询 `timespec_get` 某个时间基准的分辨率 |
+| `TIME_MONOTONIC`、`TIME_ACTIVE`、`TIME_THREAD_ACTIVE` | `timespec_get` 可选的时间基准：单调时钟、进程 CPU 时间、线程 CPU 时间 |
+| `asctime`、`ctime` | 移出概要，改在附录 D 的 [[depr.ctime]] 中声明，已弃用 {{deprecated}} |
 
-`localtime` 与 `mktime` 还依赖进程的时区设置（POSIX 下的 `TZ` 环境变量），这是又一个全局状态。`<chrono>` 的 `time_zone` 则是显式传递的对象，不同线程可以同时使用不同时区。
+`asctime` 和 `ctime` 被弃用，是因为它们返回指向静态缓冲区的指针，而且在年份超过 4 位等情形下有缓冲区溢出的历史问题。替代品是 `strftime` 或 `std::format`。
 
-## 与 chrono 互转
+!!! impl "libc++ 尚未跟进"
+    本机 libc++ 的 `<ctime>` 中没有 `std::timegm`、`std::gmtime_r`、`std::localtime_r`、`std::timespec_getres`，也没有定义 `__STDC_VERSION_TIME_H__`；使用 `std::asctime` 也没有弃用警告。在 macOS 上，`::timegm`、`::gmtime_r` 等作为 POSIX 函数存在于全局命名空间，可以直接使用。
 
-```cpp title="ctime-chrono.cpp" ok
+## 与 `<chrono>` 互相转换
+
+```cpp run ok
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -117,7 +131,7 @@ int main() {
     auto tp = system_clock::from_time_t(t);
     std::printf("%d\n", floor<seconds>(tp).time_since_epoch().count() == t);   // 1
 
-    // chrono → tm（UTC），不经过 gmtime 的静态缓冲区
+    // chrono → tm（UTC），不经过 gmtime 的静态对象
     auto dp  = floor<days>(tp);
     year_month_day ymd{dp};
     hh_mm_ss hms{floor<seconds>(tp - dp)};
@@ -136,21 +150,15 @@ int main() {
 }
 ```
 
-## 陷阱
+`from_time_t` 和 `to_time_t` 只在 `system_clock` 上提供（[[time.clock]]）。分解时间时，`floor<days>` 得到日期部分，余下的部分交给 `hh_mm_ss`。
 
-!!! pitfall "用 clock() 测量墙上时间"
-    `clock()` 返回的是**处理器时间**：线程睡眠、等待 I/O 时不增加，多线程程序中可能比墙上时间增长得更快。测量经过的时间用 `steady_clock`。
+## 常见误解
 
-!!! pitfall "time_t 的单位与范围"
-    C 标准没有规定 `time_t` 是秒，也没有规定纪元；只有 POSIX 做了规定。32 位 `time_t` 在 2038-01-19 溢出。`system_clock::to_time_t` 的舍入方式由实现定义（[[time.clock]]）。
+!!! pitfall "用 `clock()` 测量经过的时间"
+    `clock()` 返回的是处理器时间：线程睡眠、等待 I/O 时不增加，多线程程序中可能比实际经过的时间增长得更快。测量经过的时间用 `steady_clock`。
 
-!!! pitfall "mktime 会修改实参"
-    `mktime` 会把 `tm` 规范化（例如把 `tm_mday = 32` 进位到下个月）并填写 `tm_wday`、`tm_yday`，而且按**本地时区**解释输入。把 UTC 的 `tm` 交给 `mktime` 会得到偏差一个时区偏移的结果——这正是 `timegm` 被 C23 标准化的原因。
+!!! pitfall "`time_t` 一定是秒"
+    C 标准没有规定 `time_t` 的单位和纪元，只有 POSIX 做了规定。32 位的 `time_t` 在 2038-01-19 溢出。`system_clock::to_time_t` 的舍入方式由实现定义（[[time.clock]]）。
 
-## 小结
-
-- `<ctime>` = C23 的 `<time.h>`：新增 `timegm`、`gmtime_r`、`localtime_r`、`timespec_getres` 和可选的单调/CPU 时间基准。
-- `asctime`、`ctime` 已弃用，移入附录 D。
-- `gmtime`、`localtime` 使用共享静态缓冲区，不保证无数据竞争。
-- 与 `<chrono>` 的桥梁是 `system_clock::to_time_t` / `from_time_t`；分解时间优先用 `year_month_day` + `hh_mm_ss`。
-- libc++ 尚未提供 C23 新增函数的 `std::` 版本。
+!!! pitfall "`mktime` 只是转换，不改实参"
+    `mktime` 会规范化 `tm`（例如把 `tm_mday = 32` 进位到下个月），填写 `tm_wday`、`tm_yday`，而且按本地时区解释输入。把 UTC 的 `tm` 交给 `mktime`，结果会差一个时区偏移。C23 把 `timegm` 标准化，就是为了解决这个问题。
