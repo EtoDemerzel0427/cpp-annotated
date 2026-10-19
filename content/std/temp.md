@@ -1,91 +1,84 @@
 ---
 title: 模板
-summary: 第 13 章导读：模板如何声明、如何被命名与给出实参、如何被约束、模板中的名字如何决议、何时实例化与特化、实参如何推导，以及读这一章时最容易混淆的几组概念。
+summary: 第 13 章导读：模板怎样声明、怎样给出实参、怎样约束，模板里的名字怎样查找，特化何时生成，函数模板的实参怎样推导，以及各部分在哪一页。
 status: draft
-related: temp.pre, temp.param, temp.names, temp.arg, temp.constr, temp.type, temp.concept, topics/concepts
-tags: 模板, 泛型编程
-updated: 2026-10-17
+related: temp.pre, temp.param, temp.names, temp.arg, temp.constr, temp.res, temp.spec, temp.deduct, topics/concepts, topics/two-phase-lookup
+tags: 模板, 泛型编程, 导读
+updated: 2026-10-19
 ---
 
-第 13 章 [temp] 是整本核心语言标准里篇幅最大、条文最细的一章。它要回答的不是模板能做什么，而是一组相当机械的问题：
+!!! tldr
+    - 模板是生成一族实体的规则，它的特化才是具体的类、函数或变量：`std::vector<int>` 是类，`std::vector` 不是。
+    - 模板里的构造分为待决的（依赖模板形参）和非待决的。非待决的部分在定义处检查，待决的部分推迟到实例化，这就是两阶段查找，也是要写 `typename` 和 `template` 的原因。
+    - 本章有大量 IFNDR 规则，因为同一个模板会在多个翻译单元、多个实例化点展开，编译器无法互相比对。
+    - 建议的顺序：[[temp.pre]] → [[temp.param]] → [[temp.names]] → [[temp.arg]]，再按需要读约束、名字决议、实例化和推导。
 
-1. 一个模板声明长什么样，哪些实体可以是模板，哪些实体虽不是模板却与模板相关（templated）？
-2. 模板形参有哪几种，各自能接受什么样的实参？`template<auto>`、类类型的常量模板形参、概念模板形参分别有什么限制？
-3. 写出一个 `X<...>` 之后，其中的 `<` 是不是小于号？这个 *template-id* 是否有效？两个 *template-id* 什么时候指同一个类型？
-4. 约束（constraints）如何规范化、如何判定满足、如何比较哪一个更受约束？
-5. 模板定义中的名字什么时候查找、在哪里查找（两阶段查找）？
-6. 特化什么时候被实例化？显式特化、部分特化、显式实例化之间是什么关系？
-7. 函数模板的实参如何推导，失败时（SFINAE）是硬错误还是安静地退出重载集？
+```cpp run ok
+#include <concepts>
+template<std::integral T>          // 模板形参和约束（13.2、13.5）
+T twice(T x) { return x + x; }     // 函数模板（13.1、13.7）
 
-读这一章之前，最好已经熟悉：名字查找（[[basic.lookup]]）、ODR（[[basic.def.odr]]）、常量表达式（[[expr.const]]）、重载决议（[[over.match]]）。第 13 章大量借用这些概念，而且往往在它们之上再加一层待决（dependent）的区分。
+template<class T>
+struct Box {
+  T v;
+  typename T::size_type n() const  // 待决名要写 typename（13.8）
+  { return v.size(); }
+};
 
-## 本章地图
+int main() {
+  auto a = twice(21);              // 推导出 T = int（13.10），隐式实例化 twice<int>（13.9）
+  // twice(1.5);                   // error: double 不满足 std::integral
+  return a - 42;
+}
+```
 
-按从声明到使用的顺序，第 13 章可以分成六块：
+这段代码几乎用到了第 13 章的每个部分：声明模板，给出模板实参，检查约束，查找模板里的名字，实例化特化，推导模板实参。这一章回答的就是这些步骤各自怎样进行。它大量借用名字查找（[[basic.lookup]]）、ODR（[[basic.def.odr]]）、常量表达式（[[expr.const]]）和重载决议（[[over.match]]），并在它们之上再区分待决与非待决。
 
-| 块 | 节 | 内容 | 本站笔记 |
-|---|---|---|---|
-| **声明** | 13.1 [[temp.pre]] | *template-head*、可模板化的声明、templated entity、*requires-clause* 的位置 | [[temp.pre]] |
-| | 13.2 [[temp.param]] | 五种模板形参；结构化类型；默认模板实参；形参包 | [[temp.param]] |
-| | 13.7 [[temp.decls]] | 类模板成员、成员模板、变参模板、友元、部分特化、函数模板重载与偏序、别名模板、概念定义 | [[temp.concept]] 等 |
-| **名字与实参** | 13.3 [[temp.names]] | *template-id* 的文法、`<` 的消歧、`template` 关键字、`>>`、有效性、concept-id | [[temp.names]] |
-| | 13.4 [[temp.arg]] | 类型/常量/模板模板实参各自的匹配规则；访问检查 | [[temp.arg]] |
-| | 13.6 [[temp.type]] | 两个 *template-id* 何时相同；模板实参等价 | [[temp.type]] |
-| **约束** | 13.5 [[temp.constr]] | 约束的五种形式、满足、规范化、按约束偏序 | [[temp.constr]]、[[temp.constr.order]] |
-| **名字决议** | 13.8 [[temp.res]] | 待决名、待决类型/表达式、两阶段查找、实例化点 | — |
-| **实例化与特化** | 13.9 [[temp.spec]] | 隐式实例化、显式实例化、显式特化 | — |
-| **函数模板特化** | 13.10 [[temp.fct.spec]] | 显式模板实参、模板实参推导（SFINAE 的出处）、重载决议中的模板 | — |
+## 本章结构
 
-专题 [[topics/concepts]] 把散落在 [[temp.constr]]、[[temp.concept]]、[[expr.prim.req]]、[[over.match.best]] 里的概念相关规则串成一条线。
+| 小节 | 内容 | 本站页面 |
+|---|---|---|
+| 13.1 | 模板声明的组成，templated 实体，*requires-clause*，定义的可达性 | [[temp.pre]] |
+| 13.2 | 模板形参：类型形参、常量形参、模板模板形参；默认实参；形参包 | [[temp.param]] |
+| 13.3 | *template-id*：`<` 何时是模板实参的开始，`template` 关键字，`>>` | [[temp.names]] |
+| 13.4 | 各种模板实参怎样与形参匹配 | [[temp.arg]] |
+| 13.5 | 约束：形式、满足、规范化、按约束排序 | [[temp.constr]]、[[temp.constr.order]] |
+| 13.6 | 两个 *template-id* 何时是同一个类型 | [[temp.type]] |
+| 13.7 | 类模板及其成员、变参模板、友元、部分特化、函数模板的重载与偏序、别名模板、概念 | [[temp.decls]]、[[temp.class]]、[[temp.spec.partial]]、[[temp.fct]]、[[temp.alias]]、[[temp.concept]] 等 |
+| 13.8 | 名字决议：待决名、待决类型和表达式、两阶段查找、实例化点 | [[temp.res]]、[[temp.dep]]、[[temp.dep.res]] |
+| 13.9 | 隐式实例化、显式实例化、显式特化 | [[temp.spec]]、[[temp.inst]]、[[temp.explicit]]、[[temp.expl.spec]] |
+| 13.10 | 显式模板实参、模板实参推导（SFINAE 的出处）、重载决议中的模板 | [[temp.fct.spec]]、[[temp.deduct]]、[[temp.over]] |
 
-## 贯穿全章的几个思想
+概念相关的规则分散在 [[temp.constr]]、[[temp.concept]]、[[expr.prim.req]]、[[over.match.best]] 中，专题 [[topics/concepts]] 把它们串在一起。两阶段查找见专题 [[topics/two-phase-lookup]]。
 
-### 1. 模板不是实体的宏，而是一族实体的生成器
+## 贯穿全章的几组概念
 
-按 [[temp.pre#1]]，模板定义的是一族类、函数或变量，一个类型族的别名，或者一个概念。模板本身并不是类、函数或变量，它的**特化**（specialization）才是。`std::vector` 不是类型，`std::vector<int>` 才是。这一区分在全章反复出现：
+### 模板与特化
 
-- 特化可以由实例化隐式生成，也可以由程序员显式提供（[[temp.spec]]）；
-- 一个模板的特化与任何其他模板的特化都不同（[[temp.pre#6]]）；
-- 概念是例外：概念不会被实例化，concept-id 是一个 `bool` prvalue，而不是概念的特化（[[temp.concept#5]]、[[temp.names#15]]）。
+按 [[temp.pre#1]]，模板定义的是一族类、函数或变量，一族类型的别名，或者一个概念。特化可以由实例化隐式生成，也可以由程序员显式提供（[[temp.spec]]）。不同模板的特化永远是不同的实体（[[temp.pre#6]]）。概念是例外：它从不实例化，`C<int>` 这样的 concept-id 只是一个 `bool` 纯右值（[[temp.concept#5]]、[[temp.names#15]]）。
 
-### 2. templated：本身不是模板，但处在模板之中
+### 模板与 templated 实体
 
-C++ 中大量实体本身不是模板，却定义在模板之内：类模板的成员函数、函数模板里的局部类、泛型 lambda 的闭包类型……[[temp.pre#8]] 把它们统称为 **templated entity**。很多规则的适用范围是 templated entity，而不是模板，例如只有 templated 函数才能有尾随 *requires-clause*，又如 [[stmt.select]] 中 `if constexpr` 的弃置语句不被实例化。
+类模板的成员函数、函数模板里的局部类、lambda 的闭包类型，本身都不是模板，但处在模板之中。[[temp.pre#8]] 称它们为 **templated 实体**。很多规则对 templated 实体都适用，例如只有 templated 函数能有尾随 *requires-clause*，`if constexpr` 舍弃的分支只在 templated 实体里不实例化。
 
-### 3. 待决与非待决：两阶段
+### 待决与非待决
 
-模板定义里的每个构造，要么是**待决**的（依赖模板形参，等到实例化才能确定），要么是**非待决**的（在定义处就能确定）。非待决的东西在定义处就检查（第一阶段），待决的东西推迟到实例化（第二阶段）。这一思想渗透到：
+模板定义里的每个构造，要么依赖模板形参，只能等到实例化时才能确定，叫**待决**（dependent）；要么在定义处就能确定，叫非待决。非待决的部分在定义处查找和检查，待决的部分推迟到实例化（[[temp.res]]）。所以待决的限定名是类型时要写 `typename`，后面跟模板实参列表时要写 `template`（[[temp.names#11]]）。
 
-- `<` 的解析与 `template` 关键字（[[temp.names#7]]）；
-- *template-id* 的约束只在实参都非待决时才检查（[[temp.names#14]]）；
-- 模板定义不可能有任何有效特化时，程序 IFNDR（[[temp.res]]）。
+### 等价与功能等价
 
-### 4. 等价（equivalent）与功能等价（functionally equivalent）
+两个涉及模板形参的表达式何时算相同？[[temp.over.link]] 按记号比较来定义**等价**，而不是按含义。两个构造含义相同但写法不同（功能等价而不等价），而程序的含义又取决于它们是否相同时，程序是 IFNDR。函数模板的重声明、原子约束的比较（[[temp.constr.atomic]]）都受此影响，约束之间的包含关系也因此要求使用同一个具名概念（[[temp.constr.order]]）。
 
-两个涉及模板形参的表达式何时算作相同？[[temp.over.link]] 给出了**等价**的定义：按 ODR 的记号比较，而不是按语义比较。如果两个构造语义相同但写法不同（功能等价而不等价），而程序的含义又取决于它们是否相同，那么程序 IFNDR。这条规则在函数模板重声明、约束的原子性比较（[[temp.constr.atomic#2]]）中都起作用，[[temp.constr.order|概念包含关系]]要求使用同一个具名概念，根源也在这里。
+### IFNDR 特别多
 
-### 5. 大量的 IFNDR
+模板分散在不同翻译单元中编译，实例化点可能有多个，编译器不可能跨翻译单元、跨实例化点比较一切，所以这一章有很多规则违反后是 IFNDR（非良构，不要求诊断）。例如：隐式实例化处看不到函数模板的定义，又没有显式实例化（[[temp.pre#10]]）；同一个原子约束在程序不同位置的满足结果不同（[[temp.constr.atomic]]）；模板不可能有任何合法的特化（[[temp.res]]）。
 
-第 13 章是标准里 IFNDR（ill-formed, no diagnostic required）最密集的地方。原因在于，模板分散在不同 TU 里编译，实例化点可能有多个，而编译器不可能跨 TU、跨实例化点比较一切。典型的 IFNDR 包括：
+## C++26 的变化
 
-- 隐式实例化处看不到函数模板的定义，又没有显式实例化（[[temp.pre#10]]）；
-- 同一个原子约束在程序不同位置的满足结果不同（[[temp.constr.atomic#3]]）；
-- 偏特化在实例化点不可达、而它本应被选中（[[temp.arg.template#2]]）；
-- 约束规范化中形成了无效类型（[[temp.constr.normal]]）。
+{{c++26}} 本章在 C++26 中变化较多，后面各页会反复遇到：
 
-## C++26 草案中本章的主要变化
-
-{{c++26}} 当前草案相对 C++23 在本章的变化很多，读者在后面各页会反复遇到：
-
-- 术语：原来的非类型模板形参（non-type template parameter）在草案中改称**常量模板形参**（constant template parameter），非类型模板实参相应改称常量模板实参。本站新写的页面统一使用新术语，并在首次出现处注明旧称。
-- 概念模板形参与变量模板模板形参（[[temp.param]]）：模板模板形参不再只能接受类模板/别名模板。
-- 折叠展开约束（fold expanded constraint，[[temp.constr.fold]]）：`(C<T> && ...)` 之间可以比较包含关系。
-- 包索引：`Ts...[N]` 与 *pack-index-template-name*（[[temp.names]]）。
-- 静态反射：*splice-specifier* 可以出现在模板实参列表前（[[temp.names#7]]），`std::meta::info` 可以作为常量模板实参（[[temp.type#2]]）。
-
-## 阅读建议
-
-- 第一次读：[[temp.pre]] → [[temp.param]] → [[temp.names]] → [[temp.arg]] → [[temp.type]]，建立"模板 = 头 + 声明，*template-id* = 名字 + 实参"的基本模型。
-- 想弄清 concepts：[[temp.concept]] → [[expr.prim.req]] → [[temp.constr]] → [[temp.constr.order]]，或者直接读专题 [[topics/concepts]]。
-- 想弄清为什么某处要写 `typename`/`template`：[[temp.names#7]] 与 [[temp.res]]。
-- 想弄清 SFINAE：[[temp.deduct]]。
+- 术语：原来的非类型模板形参（non-type template parameter）改称**常量模板形参**（constant template parameter），对应的实参改称常量模板实参。本站统一使用新术语。
+- 模板模板形参不再只能接受类模板和别名模板，也可以接受概念和变量模板（[[temp.param]]）。
+- 折叠展开约束（[[temp.constr.fold]]）让 `(C<Ts> && ...)` 这样的约束之间也能比较包含关系。
+- 包索引 `Ts...[N]`（[[temp.names]]）。
+- 静态反射：拼接说明符可以出现在模板实参列表之前（[[temp.names#7]]），`std::meta::info` 可以作为常量模板实参（[[temp.type]]）。
