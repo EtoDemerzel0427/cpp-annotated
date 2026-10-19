@@ -245,7 +245,7 @@ int Widget::value() const { return impl->v; }
 本机把这两个文件和一个移动构造、移动赋值 `Widget` 的 `main.cpp` 一起编译运行，ASan 和 UBSan 都没有报告。
 
 !!! impl "类内 `= default` 的移动构造函数"
-    按规则 2，类内 `Widget(Widget&&) = default;` 也是非委托构造函数，同样潜在调用 `impl` 的析构函数。但本机 Clang 23 对它不报错，只对类内定义的普通构造函数和移动赋值报错。依赖这一点的代码换一个编译器就可能无法编译，稳妥的做法是把所有特殊成员都放进 `.cpp`。
+    按规则 2，类内 `Widget(Widget&&) = default;` 也是非委托构造函数，同样潜在调用 `impl` 的析构函数。只是首次声明时预置的函数要到被 odr 使用时才隐式定义（[[dcl.fct.def.default#5]]），所以光写这一行、从不移动 `Widget` 时不会报错；本机 Clang 23 下，`Widget b(std::move(a));` 一出现就报 `invalid application of 'sizeof' to an incomplete type`，并注明 "in defaulted move constructor for 'Widget' first required here"。稳妥的做法是把所有特殊成员都放进 `.cpp`。
 
 `shared_ptr` 没有这个问题：它在构造时就把删除方式存进控制块，析构时不需要知道 `T`（[[util.sharedptr]]）。
 
