@@ -1,88 +1,98 @@
 ---
 title: 实参依赖查找（ADL）
-summary: 对无限定函数调用 f(args)，除了从调用处往外找，还要到实参类型的关联命名空间里找，并收集关联类的友元；本页讲清何时触发、何时被抑制、关联实体如何计算，以及隐藏友元、swap 两步法、CPO/niebloid、运算符、f<T>(x)、模块中的 ADL。
+summary: 无限定的函数调用 f(args) 除了从调用处向外查找，还会到实参类型所属的命名空间里查找，并找到相关类的友元。
 status: done
 papers: P0846R0, P1787R6
 related: basic.lookup, basic.lookup.unqual, over.match.oper, temp.dep.candidate, temp.names, class.friend, namespace.def, module.reach, module.context, customization.point.object, alg.func.obj
 tags: 名字查找, ADL, 重载, 模块, 泛型编程
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
-```cpp
+!!! tldr
+    - 写 `f(x)` 时，编译器除了按普通规则向外查找 `f`，还会到 `x` 的类型所属的命名空间里找名为 `f` 的函数，两边的结果合成一个重载集。这就是 ADL。
+    - 写成 `N::f(x)` 或 `(f)(x)`，或者普通查找找到了类成员、块作用域里的函数声明、变量，ADL 就不会发生。
+    - 要查找的命名空间由实参类型决定：类所在的命名空间、它的基类、模板实参的类型都算；`int`、`double` 这样的基本类型什么也不带来。
+    - 只在类内声明的友元函数（隐藏友元）只能通过 ADL 找到。把运算符写成隐藏友元，是让它既能用、又不污染重载集的标准做法。
+    - `using std::swap; swap(a, b);` 两步法、`std::ranges` 的定制点对象，都是为了在泛型代码里控制 ADL 而设计的。
+
+## 为什么需要 ADL
+
+```cpp run ok
 #include <iostream>
 #include <string>
 int main() {
     std::string s = "hi";
-    std::cout << s;           // 调用的是 std::operator<<(std::ostream&, const std::string&)
+    std::cout << s;   // 调用 std::operator<<(std::ostream&, const std::string&)
 }
 ```
 
-这段代码里没有 `using namespace std;`，`operator<<` 也不是 `std::ostream` 的成员（`string` 的输出运算符是命名空间作用域的函数模板）。在全局作用域的 `main` 中做无限定查找，根本找不到 `std::operator<<`。这段代码能工作，靠的是**实参依赖查找**（argument-dependent lookup，ADL，又称 Koenig 查找）：调用的实参类型属于 `std`，于是也要搜索 `std`。
+这里没有 `using namespace std;`，而 `string` 的输出运算符是 `std` 命名空间里的函数模板，不是 `std::ostream` 的成员。从全局的 `main` 向外查找，找不到 `std::operator<<`。
 
-没有 ADL，命名空间里的运算符重载几乎无法使用，只能写 `std::operator<<(std::cout, s)`。ADL 背后的理念常概括为**接口原则**（interface principle）：一个类的接口不仅包括它的成员，还包括与它在同一命名空间中、以它为参数的非成员函数（`swap`、`operator==`、`begin`/`end`……）。有了 ADL，这些函数用起来和成员一样自然。
+代码能编译，是因为**实参依赖查找**（argument-dependent lookup，ADL，又叫 Koenig 查找）：实参 `std::cout` 和 `s` 的类型都属于 `std`，所以查找 `operator<<` 时也要搜索 `std`。没有 ADL，命名空间里的运算符就只能写成 `std::operator<<(std::cout, s)`。
 
-代价是，调用哪个函数取决于实参类型来自哪里，ADL 可能找到你并不打算调用的函数。本页先读规则（¶1–¶6），再讲围绕它形成的惯用法与陷阱。
+ADL 让一个类型的非成员函数，例如同一命名空间里的 `swap`、`operator==`、`begin`，用起来和成员函数一样自然。代价是调用哪个函数取决于实参类型来自哪里，ADL 有时会找到你没打算调用的函数。
 
-## 何时进行 ADL（¶1）
+## ADL 什么时候发生（¶1）
 
-¶1 当函数调用（[[expr.call]]）的 *postfix-expression* 是一个 *unqualified-id*，并且对它的无限定查找（[[basic.lookup.unqual]]）没有找到以下任何一种声明时：
+```cpp run ok
+namespace N {
+    struct S { };
+    void f(S);
+}
+void g() {
+    N::S s;
+    f(s);         // OK：ADL 在 N 中找到 N::f
+}
+```
+
+¶1 函数调用的被调用部分（文法上叫 *postfix-expression*）如果是一个不带限定的名字（*unqualified-id*），就先对它做无限定查找（[[basic.lookup.unqual]]）。只要这次查找没有找到下面三种声明之一，结果里还要并入 ADL 找到的函数：
 
 - ¶1.1 类成员的声明；
-- ¶1.2 栖身于块作用域的函数声明；
-- ¶1.3 非函数、非函数模板的声明；
+- ¶1.2 栖居于块作用域的函数声明；
+- ¶1.3 既不是函数、也不是函数模板的声明（变量、类型、函数对象等）。
 
-该名字的查找结果还要加上在一组关联命名空间中做实参依赖查找的结果。关联命名空间取决于实参类型（对类型模板模板实参，还取决于模板实参所在的命名空间），见 ¶3–¶4。
+ADL 的结果是并入，不是替代。无限定查找找到的函数和 ADL 找到的函数合成一个重载集，再交给重载决议。
 
-注意，ADL 的结果是并入（includes），而不是替代：无限定查找找到的函数与 ADL 找到的函数合成一个重载集，再交给重载决议。
-
-### 抑制 ADL 的五种方式
+### 关掉 ADL 的几种写法
 
 | 写法 | 为什么没有 ADL |
 |---|---|
-| `N::f(x)` | 不是 *unqualified-id*（限定名） |
-| `(f)(x)` | *postfix-expression* 是带括号的表达式，不是 *unqualified-id* |
-| 在成员函数里调用，且类（或基类）有名为 `f` 的成员 | ¶1.1：找到了类成员 |
-| 在块作用域中声明了 `void f(...);` | ¶1.2：找到了块作用域函数声明 |
-| 无限定查找找到变量、函数对象、类型等 | ¶1.3：找到了非函数（例如 niebloid、CPO） |
+| `N::f(x)` | 限定名，不是 *unqualified-id* |
+| `(f)(x)` | 被调用部分是带括号的表达式，不是 *unqualified-id* |
+| 在成员函数里调用，类或基类有名为 `f` 的成员 | ¶1.1：找到了类成员 |
+| 同一块作用域里写了 `void f(int);` | ¶1.2：找到了块作用域函数声明 |
+| 普通查找找到变量、函数对象、类型 | ¶1.3：找到了非函数 |
 
 ```cpp run error
 namespace N {
     struct S { };
     void f(S);
 }
-
 void g() {
     N::S s;
-    f(s);             // OK：ADL 找到 N::f
-    (f)(s);           // error: 括号抑制 ADL，无限定查找找不到 f
+    (f)(s);       // error: 括号关掉 ADL，普通查找找不到 f
 }
-
 void h() {
     N::S s;
-    void f(int);      // 块作用域函数声明
-    f(s);             // error: ¶1.2 抑制 ADL，只剩 f(int)，N::S 不能转换为 int
+    void f(int);  // 块作用域函数声明
+    f(s);         // error: ¶1.2 关掉 ADL，只剩 f(int)，N::S 不能转换为 int
 }
-
 void k() {
     N::S s;
-    int f = 0;        // 非函数
-    f(s);             // error: ¶1.3 抑制 ADL；int 不能被调用
+    int f = 0;    // 非函数
+    f(s);         // error: ¶1.3 关掉 ADL；int 不能被调用
 }
-
 struct M {
     void f(int);
     void m() {
-        f(N::S{});    // error: ¶1.1 找到类成员 M::f，不做 ADL
+        f(N::S{});   // error: ¶1.1 找到成员 M::f，不做 ADL
     }
 };
 ```
 
-!!! lawyer "块作用域的 using 声明不抑制 ADL"
-    在 `void t() { using std::swap; swap(a, b); }` 中，无限定查找在块作用域找到的是一个 *using-declarator*。按 [[basic.lookup#3]]，单次搜索会把它替换为它指名的声明，即 `std::swap` 的那些函数模板，它们栖身于命名空间 std，而不是块作用域。因此 ¶1.2 不适用，ADL 照常进行。swap 两步法能够工作，规范上的依据就在这里（见下文）。而块作用域里的 `extern void swap(T&, T&);` 是块作用域函数声明，会抑制 ADL。
+标准例 3（¶6）展示了 ¶1.2 的一个实际后果。块作用域里的 `extern` 声明让一个本来更好的候选消失了：
 
-除了 ¶1 末尾的例子，标准例 3（¶6）还展示了 ¶1.2 的一个实际后果：
-
-```cpp run ok
+```cpp ok
 namespace NS {
     class T { };
     void f(T);
@@ -93,15 +103,23 @@ void g(NS::T, float);
 int main() {
     f(parm);                      // OK：ADL 找到 NS::f
     extern void g(NS::T, float);  // 块作用域函数声明
-    g(parm, 1);                   // OK：调用 ::g(NS::T, float)；NS::g(T, int) 本是更好的匹配，但 ADL 被抑制
+    g(parm, 1);                   // OK：调用 ::g(NS::T, float)
 }
 ```
 
-## 语法判定先于 ADL（¶2）
+`NS::g(T, int)` 对 `g(parm, 1)` 是精确匹配，本来会胜出。但无限定查找在块作用域找到了函数声明，ADL 没有发生，`NS::g` 根本不在候选里。
 
-¶2 注 1 提醒，判断一个表达式是不是函数调用的 *postfix-expression*，用的是普通查找规则，ADL 不参与解析。由此有两个推论。
+### 块作用域的 using 声明不关掉 ADL
 
-**其一，`f<T>(x)`。** 名字后面跟 `<` 时，要先决定它是不是模板名（[[temp.names#7]]）。从 C++20 起（P0846R0），若无限定查找什么也没找到，或者找到了一个或多个函数，`<` 也当作模板实参列表的开始；于是 `f<T>(x)` 成为一个调用，ADL 可以找到真正的函数模板：
+`using std::swap;` 也写在块作用域里，但它不是 ¶1.2 说的函数声明。[[basic.lookup#3]] 规定，搜索找到 using 声明时，要换成它指名的那些声明，也就是 `std::swap` 的函数模板。它们栖居于命名空间 `std`，不在块作用域，所以 ADL 照常进行。后文的 swap 两步法就依赖这一点。
+
+¶6 注 4 还指出，关联命名空间可以和无限定查找已经搜过的命名空间重合。两条路径找到同一个声明不算二义，它仍是重载集里的同一个函数。
+
+## 先判定是不是函数调用（¶2）
+
+¶2 注 1 提醒，表达式是不是函数调用，是在解析时用普通查找规则判定的。ADL 不参与这一步。这有两个后果。
+
+第一个后果关于 `f<T>(x)`。名字后面跟 `<` 时，解析器要先决定它是不是模板名（[[temp.names#7]]）。C++20 起（[[P0846R0]]），只要无限定查找什么也没找到，或者找到的是函数，`<` 就当作模板实参列表的开始。于是 `f<T>(x)` 成了一次调用，ADL 可以找到真正的函数模板：
 
 ```cpp run error
 int h;
@@ -112,91 +130,96 @@ namespace N {
     template <class T> int g(T);
     template <class T> int h(T);
 }
-
-int x = f<N::A>(N::A());   // OK：f 什么也没找到，按模板名处理，ADL 找到 N::f
-int y = g<N::A>(N::A());   // OK：g 找到一个函数（非模板），也按模板名处理
+int x = f<N::A>(N::A());   // OK：f 没找到，按模板名处理，ADL 找到 N::f
+int y = g<N::A>(N::A());   // OK：g 找到非模板函数，也按模板名处理
 int z = h<N::A>(N::A());   // error: h 找到变量，h< 不开始模板实参列表
 ```
 
-在 C++20 之前，`x` 和 `y` 两行都会解析成 `(f < N::A) > (N::A())` 之类的比较表达式而出错，所以那时 `std::get<0>(t)` 必须写限定名，或者先写 `using std::get;`。现在可以直接写 `get<0>(t)`：
+C++20 之前，`x`、`y` 两行都会被解析成比较表达式而出错。那时取 tuple 元素必须写 `std::get<0>(t)`，现在可以直接写：
 
 ```cpp run ok
 #include <tuple>
 int main() {
     std::tuple<int, double> t{1, 2.0};
-    return get<0>(t) - 1;      // C++20 起 OK：get 未找到 → 模板名；ADL 在 std 中找到 std::get
+    return get<0>(t) - 1;   // C++20 起 OK：ADL 在 std 中找到 std::get
 }
 ```
 
-**其二，不是调用就没有 ADL。**
+第二个后果是，不是调用就没有 ADL：
 
-```cpp
+```cpp run ok
 typedef int f;
 namespace N {
     struct A {
         friend void f(A &);
         operator int();
         void g(A a) {
-            int i = f(a);    // f 是 typedef：这是函数式类型转换 int(a)，不是调用
+            int i = f(a);   // f 是 typedef：这是类型转换 int(a)
+            (void)i;
         }
     };
 }
 ```
 
-`f(a)` 在语法上是显式类型转换（[[expr.type.conv]]），根本不涉及 ADL，也就找不到友元 `f`。
+`f` 找到的是 typedef，`f(a)` 在语法上是函数式类型转换（[[expr.type.conv]]），所以不做 ADL，友元 `f` 也就不会被找到。
 
-## 关联实体（¶3）
+## 实参类型带来哪些关联实体（¶3）
 
-¶3 对调用中的每个实参类型 T，有一组（可能为空的）[[g:associated-entities|关联实体]]（associated entities）。它完全由实参的类型（以及类型模板模板实参）决定，**指定类型时用到的 typedef 名与 using 声明不起作用**：只看类型本身，不看类型是怎么写出来的。
+¶3 对调用中的每个实参类型 `T`，标准规定了一组（可能为空的）[[g:associated-entities|关联实体]]（associated entities），主要是一些类和枚举。ADL 之后要到这些实体所在的命名空间里去找。关联实体只由类型本身决定，类型是用 typedef 还是 using 别名写出来的，都不影响结果。
 
-| T 的种类 | 关联实体 |
+| `T` 的种类 | 关联实体 |
 |---|---|
-| ¶3.1 `std::meta::info` {{c++26}} | 仅枚举类型 `std::meta::operators` |
-| ¶3.2 其他基本类型（`int`、`double`、`std::nullptr_t`、`void`……） | 空 |
-| ¶3.3 类类型（含联合） | 类本身；它是成员时，所属的类；若是完整类型，它的直接与间接基类 |
-| ¶3.3 类模板特化，另加 | 类型模板形参所对应实参类型的关联实体；用作类型模板模板实参的模板；用作类型模板模板实参的成员模板所属的类 |
+| ¶3.1 `std::meta::info` {{c++26}} | 只有枚举类型 `std::meta::operators` |
+| ¶3.2 其他基本类型（`int`、`double`、`std::nullptr_t`……） | 无 |
+| ¶3.3 类类型（含联合） | 类本身；它是嵌套类时，外围的类；它是完整类型时，它的直接和间接基类 |
+| ¶3.3 类模板特化，另加 | 类型模板实参的关联实体；用作模板模板实参的模板；用作模板模板实参的成员模板所属的类 |
 | ¶3.4 枚举类型 | 枚举本身；它是类成员时，所属的类 |
-| ¶3.5 指向 U 的指针、U 的数组 | U 的关联实体 |
-| ¶3.6 函数类型 | 各参数类型与返回类型的关联实体 |
-| ¶3.7 指向类 X 的成员函数的指针 | 参数类型、返回类型的关联实体，加上 X 的关联实体 |
-| ¶3.8 指向类 X 的数据成员的指针 | 成员类型的关联实体，加上 X 的关联实体 |
+| ¶3.5 `U*`、`U[n]` | `U` 的关联实体 |
+| ¶3.6 函数类型 | 各参数类型和返回类型的关联实体 |
+| ¶3.7 类 `X` 的成员函数指针 | 参数类型、返回类型的关联实体，加上 `X` |
+| ¶3.8 类 `X` 的数据成员指针 | 成员类型的关联实体，加上 `X` |
 
-另外，若实参是一个重载集（或其地址），关联实体是集合中每个成员的关联实体之并，即其参数类型与返回类型的关联实体；若该重载集用 *template-id* 命名，还要加上其模板模板实参以及类型模板实参的关联实体。
+实参也可以是函数名，即一个重载集（或取它的地址）。这时关联实体是集合中每个函数的参数类型和返回类型的关联实体之并；如果重载集用模板实参列表写出，还要加上那些模板实参带来的关联实体。
 
-注 3 指出，常量模板实参、变量模板模板实参、概念模板实参不贡献关联实体。
+注 3 指出，常量模板实参、变量模板模板实参、概念模板实参不带来关联实体。
 
-### 逐项说明
+### 基本类型：什么也没有
 
-**¶3.1（C++26）。** `std::meta::info` 是 `decltype(^^int)` 的类型别名，本身是一个基本类型（[[basic.fundamental]]）。如果没有特殊规则，以反射值为实参的调用不会关联任何命名空间，`members_of(r, ctx)` 这样的无限定调用就找不到 `std::meta::members_of`。因此标准规定它的关联实体是 `std::meta::operators` 这个枚举，该枚举位于 `std::meta`，从而使 `std::meta` 成为关联命名空间。C++23 及之前没有反射，也就没有这条规则。
+`swap(i, j)`（`int`）不会通过 ADL 找到 `std::swap`。在模板里，`g(1)` 这样的调用在实例化时也不会找到模板定义之后才声明的 `g`，因为第二阶段的查找只靠 ADL。
 
-**¶3.2 基本类型没有关联实体。** 所以 `swap(i, j)`（`int`）不会找到 `std::swap`；在两阶段查找中，`g(1)` 在实例化时也找不到定义点之后才声明的 `g`。
+### 反射值：一条专门的规则 {{c++26}}
 
-**¶3.3 类：所属类与基类。** 关联实体包括所属的类，因此嵌套类的实参会把外围类的友元带进来；关联实体包括完整类型的基类，因此在基类中定义的隐藏友元对派生类对象也可用。
+`std::meta::info` 是 `decltype(^^int)` 的别名，本身是基本类型。按 ¶3.2 它什么也不带来，`members_of(r, ctx)` 这样的无限定调用就找不到 `std::meta::members_of`。¶3.1 因此把它的关联实体规定为枚举 `std::meta::operators`，这个枚举位于 `std::meta`，于是 `std::meta` 成了关联命名空间。
+
+### 类：外围类和基类
+
+外围类是关联实体，所以嵌套类的实参会带出外围类的友元。完整类型的基类也是关联实体，所以基类里定义的友元对派生类对象同样可用。
 
 ```cpp run error
 namespace N {
     struct Out {
         struct In { };
         enum class E { a };
-        friend void p(In) { }        // Out 的友元，参数是嵌套类
+        friend void p(In) { }
         friend void q(E) { }
     };
 }
 namespace L {
     struct Base { friend void fb(const Base&) { } };
     struct D : Base { };
-    struct Inc;                      // 不完整
+    struct Inc;                      // 只声明，不完整
 }
-
 void t(L::Inc* pi) {
-    p(N::Out::In{});    // OK：In 的关联实体含所属类 Out → Out 的友元 p 被找到
-    q(N::Out::E::a);    // OK：¶3.4 枚举是类成员 → 所属类 Out
-    fb(L::D{});         // OK：D 完整，基类 Base 是关联实体 → Base 的友元
-    fb(*pi);            // error: Inc 不完整，基类不计入（这里它根本没有定义）
+    p(N::Out::In{});    // OK：In 的外围类 Out 是关联实体，找到 Out 的友元 p
+    q(N::Out::E::a);    // OK：¶3.4 枚举是 Out 的成员
+    fb(L::D{});         // OK：D 完整，基类 Base 是关联实体
+    fb(*pi);            // error: Inc 不完整，不计基类
 }
 ```
 
-**¶3.3 类模板特化：模板实参。** ADL 的意外结果大多来源于此：`std::vector<N::X>` 使 `N` 和 `std` 都成为关联命名空间。更进一步，实参的实参也算在内：`std::function<void(N::X)>` 的模板实参是函数类型 `void(N::X)`，按 ¶3.6，其参数类型 `N::X` 带来 N。
+### 模板实参：最容易带来意外
+
+ADL 的意外结果大多来自模板实参。`std::vector<N::X>` 让 `N` 和 `std` 都成为关联命名空间。实参的实参也算：`std::function<void(N::X)>` 的模板实参是函数类型 `void(N::X)`，按 ¶3.6 它的参数类型 `N::X` 带来 `N`。
 
 ```cpp run ok
 #include <functional>
@@ -211,13 +234,13 @@ namespace P { struct Y {}; void z(O::Box<Y>); }
 
 void t() {
     std::function<void(N::X)> fn;
-    f(fn);                 // OK：模板实参 void(N::X) → 参数类型 N::X → N
-    h(&N::cb);             // OK：实参是重载集 {N::cb} 的地址 → cb 的参数类型 N::X → N
-    z(O::Box<P::Y>{});     // OK：Box<P::Y> 的模板实参 P::Y → P
+    f(fn);                 // OK：模板实参 void(N::X) 的参数类型带来 N
+    h(&N::cb);             // OK：实参是重载集 {N::cb}，cb 的参数类型带来 N
+    z(O::Box<P::Y>{});     // OK：模板实参 P::Y 带来 P
 }
 ```
 
-typedef 不起作用：
+别名不起作用，只看它代表的类型：
 
 ```cpp run error
 namespace N { struct X {}; }
@@ -227,30 +250,32 @@ namespace T {
 }
 void t() {
     T::Alias a;
-    f(a);        // error: a 的类型是 N::X，关联命名空间只有 N；T 与别名无关
+    f(a);        // error: a 的类型是 N::X，关联命名空间只有 N，不含 T
 }
 ```
 
-## 关联命名空间与 ADL 找到什么（¶4）
+## 到哪里找、找什么（¶4）
 
-¶4 调用的[[g:associated-namespaces|关联命名空间]]是各关联实体的最内层外围非内联命名空间，以及这些命名空间的内联命名空间集（[[namespace.def]]）中的每个元素。
+¶4 调用的[[g:associated-namespaces|关联命名空间]]是每个关联实体的最内层外围非内联命名空间，再加上这些命名空间的内联命名空间集（[[namespace.def]]）。
 
-"非内联"与"内联命名空间集"这两条配合起来，使库的版本化内联命名空间对 ADL 透明。libc++ 的 `std::vector` 实际上是 `std::__1::vector`，其最内层外围非内联命名空间是 `std`，再加上 std 的内联命名空间集（含 `__1`），因此函数无论声明在 `std` 还是 `std::__1`，都能找到。
+这两条合起来，让库的版本化内联命名空间对 ADL 透明。libc++ 的 `std::vector` 实际上是 `std::__1::vector`，它最内层的外围非内联命名空间是 `std`，再加上 `std` 的内联命名空间集（含 `__1`）。所以相关函数无论声明在 `std` 还是 `std::__1`，ADL 都能找到。
 
-对名字 N，ADL 找到满足下列任一条件的函数与函数模板声明：
+对名字 `N`，ADL 找到满足下列任一条件的函数和函数模板声明：
 
-- ¶4.1 在任一关联命名空间中对 N 搜索所找到的；
-- ¶4.2 声明为关联实体中某个具有可达定义的类的友元的；
-- ¶4.3 （模块）被导出、附属于具名模块 M、不出现在查找点所在的翻译单元中，并且与某个附属于 M 的关联实体声明有相同的最内层外围非内联命名空间的。
+- ¶4.1 在某个关联命名空间中搜索 `N` 时找到的；
+- ¶4.2 被声明为某个关联类的友元，并且这个类的定义可达；
+- ¶4.3 来自具名模块的导出声明，满足若干条件（见下文模块一节）。
 
-### ¶4.1：是搜索，不是无限定搜索
+ADL 只收集函数和函数模板。关联命名空间里名为 `N` 的变量或类型会被直接忽略，不会造成二义。
 
-在关联命名空间中做的是搜索（单次搜索），不是无限定搜索：**关联命名空间中的 using 指令会被忽略**，外层命名空间也不看。
+### 在关联命名空间里只做一次搜索
+
+¶4.1 说的是**搜索**（search，[[basic.lookup]]），只看这个命名空间自己的声明。它不是从内向外的无限定查找，所以不看外层命名空间，也不跟随这个命名空间里的 using 指令：
 
 ```cpp run error
 namespace M { }
 namespace N {
-    using namespace M;     // ADL 不会顺着它进入 M
+    using namespace M;   // ADL 不会顺着它进入 M
     struct S { };
 }
 namespace M { void g(N::S); }
@@ -260,13 +285,11 @@ void t() {
 }
 ```
 
-另外，ADL 只收集函数与函数模板。即使关联命名空间中名为 N 的是一个变量或类型，也会忽略它（不会造成二义）。
+### 友元与隐藏友元
 
-### ¶4.2：友元与隐藏友元
+类内的 `friend void f(X);` 声明的是外围命名空间里的函数 `f`。但友元声明不绑定名字（[[class.friend#10]]、[[dcl.meaning.general#2]]）：在命名空间作用域出现匹配的声明之前，无限定查找和限定查找都找不到它。¶4.2 让 ADL 能找到它，条件是这个类是关联实体，并且定义可达。
 
-友元声明不绑定名字（[[class.friend#10]]、[[dcl.meaning.general#2]]）。类内的 `friend void f(X);` 声明了外围命名空间的函数 `f`，但在命名空间作用域出现匹配的声明之前，无限定查找和限定查找都找不到这个名字。¶4.2 让 ADL 能找到它，条件是该类是关联实体，且其定义可达。
-
-只在类内声明（通常就在类内定义）、不在命名空间作用域重新声明的友元函数，称为**隐藏友元**（hidden friend）。它只能通过 ADL 找到：
+只在类内声明（通常就在类内定义）、不在命名空间作用域再声明一次的友元函数，叫做**隐藏友元**（hidden friend）。它只能通过 ADL 找到：
 
 ```cpp run error
 #include <ostream>
@@ -274,52 +297,55 @@ namespace N {
     class P {
         int v = 0;
         friend bool operator==(const P&, const P&) = default;
-        friend std::ostream& operator<<(std::ostream& os, const P& p) { return os << p.v; }
+        friend std::ostream& operator<<(std::ostream& os, const P& p) {
+            return os << p.v;
+        }
         friend void touch(P&) { }
     };
 }
 void t(std::ostream& os) {
     N::P a, b;
-    os << a;           // OK：ADL（N::P 的友元）
+    os << a;           // OK：ADL 找到 N::P 的友元
     (void)(a == b);    // OK
     touch(a);          // OK
     N::touch(a);       // error: 限定查找找不到隐藏友元
 }
 ```
 
-提倡使用隐藏友元，有以下几个理由。
+推荐把运算符和定制函数写成隐藏友元，理由有三个。
 
-1. **重载集更小。** 命名空间作用域的 `operator==`、`operator<<` 会参与该命名空间内每一次同名运算符的查找；标准库这样的大命名空间里可能有上百个 `operator<<`，重载决议要逐个尝试，既拖慢编译，又让错误信息冗长。隐藏友元只在实参确实涉及该类时才出现。
-2. **不会因隐式转换而被意外选中。** 只有当实参类型的关联类就是这个类时，才能找到隐藏友元；一个仅仅能转换成该类的类型找不到它：
+第一，重载集更小。命名空间作用域的 `operator<<` 会参与这个命名空间里每一次 `<<` 的查找。标准库这样的大命名空间里可能有上百个 `operator<<`，重载决议要逐个尝试，既拖慢编译，也让错误信息变长。隐藏友元只在实参确实涉及这个类时才出现。
+
+第二，不会因为隐式转换被误选。只有实参的关联类就是这个类时，才找得到隐藏友元。一个只是能转换成这个类的类型，找不到它：
 
 ```cpp run error
 namespace units {
     struct Meters { double v; Meters(double d) : v(d) {} };
     struct ToMeters { operator Meters() const { return 1.0; } };
-    void show(Meters);                                  // 命名空间作用域
+    void show(Meters);                       // 命名空间作用域
 
     struct Feet {
         double v; Feet(double d) : v(d) {}
-        friend void show2(Feet) { }                     // 隐藏友元
+        friend void show2(Feet) { }          // 隐藏友元
     };
     struct ToFeet { operator Feet() const { return 1.0; } };
 }
 void t() {
     units::ToMeters m;
-    show(m);                 // OK：ADL 在 units 中找到 show(Meters)，经用户定义转换调用
+    show(m);                  // OK：ADL 在 units 中找到 show，经转换调用
     units::ToFeet f;
-    show2(units::Feet(1.0)); // OK
-    show2(f);                // error: ToFeet 的关联类不含 Feet，show2 找不到
+    show2(units::Feet(1.0));  // OK
+    show2(f);                 // error: ToFeet 的关联实体不含 Feet
 }
 ```
 
-3. **可以访问私有成员。** 友元本来就有访问权，无需公开 getter。
+第三，友元可以直接访问私有成员，不需要额外公开 getter。
 
-### ¶4.3 与 ¶5：模块中的 ADL
+## 模块中的 ADL（¶4.3、¶5）
 
-在模块中，名字是否先于查找点与声明是否可达是两回事（[[basic.lookup#2]]、[[module.reach]]）。¶4.3 规定，即使一个函数在当前 TU 中不先于调用点（例如它所在的命名空间 R 根本没有导出，或在此处不可见），只要它被导出、附属于模块 M，且与某个附属于 M 的关联实体在同一命名空间，ADL 就能找到它。
+在模块中，一个声明是否在查找点之前可见，和它的定义是否可达，是两回事（[[basic.lookup#2]]、[[module.reach]]）。¶4.3 让 ADL 还能找到这样的函数：它被导出，附属于某个具名模块 `M`，不在当前翻译单元里，并且和某个附属于 `M` 的关联实体位于同一个最内层非内联命名空间。即使这个函数所在的命名空间在当前翻译单元里根本不可见，也能找到。
 
-标准例 2（三个翻译单元，改写注释）：
+标准例 2 有三个翻译单元：
 
 ```cpp title="TU1: 模块 M"
 export module M;
@@ -343,68 +369,59 @@ export template<typename T, typename U> void apply(T t, U u) {
 }
 ```
 
-```cpp title="TU3: 模块单元 Q"
+```cpp title="TU3: 模块 Q 的实现单元"
 module Q;
 import N;
 namespace S {
     struct Z { template<typename T> operator T(); };
 }
 void test() {
-    auto x = make();     // OK：decltype(x) 是模块 M 中的 R::X
-    R::f(x);             // error: R 与 R::f 在此都不"先于"（M 未被导入）
-    f(x);                // OK：¶4.3——R::f 被导出、附属于 M，与关联实体 R::X 同在 R
-    f(x, S::Z());        // error: S 虽是关联命名空间，但 M 中的 S::f 与附属于 M 的关联实体
-                         //        不在同一命名空间（S::Z 附属于 Q，不是 M）
-    apply(x, S::Z());    // error: 实例化上下文中 S::f 可见，但 R::g 具有内部链接，
+    auto x = make();     // OK：x 的类型是模块 M 中的 R::X
+    R::f(x);             // error: 此处没有导入 M，R 和 R::f 都不可见
+    f(x);                // OK：¶4.3，R::f 被导出、附属于 M，与关联实体 R::X 同在 R
+    f(x, S::Z());        // error: S 是关联命名空间，但 M 中的 S::f 不满足 ¶4.3：
+                         //        S 中的关联实体 S::Z 附属于 Q，不附属于 M
+    apply(x, S::Z());    // error: 实例化上下文中 S::f 可见，但 R::g 有内部链接，
                          //        不能在 TU2 之外使用
 }
 ```
 
-¶4 最后一句针对依赖名：模板中依赖的调用名，除了在模板定义处之外，还要从实例化上下文（[[module.context]]）中的每个点做上述查找；此时额外忽略那些出现在其他 TU、附属于全局模块、并且已丢弃（[[module.global.frag]]）或具有内部链接的声明。两阶段查找中"第二阶段只做 ADL"的说法，在模块中的精确表述就是这一句。[[temp.dep.candidate]] 进一步规定，若考虑所有 TU 中具有外部链接的函数会得到不同（更好）的匹配，或使调用非良构，则程序 {{ifndr}}。
+¶4 的最后一句针对模板里的依赖名。对依赖调用，上述查找还要从实例化上下文（[[module.context]]）中的每个点再做一次。此时忽略另一个翻译单元里附属于全局模块、并且已被丢弃（[[module.global.frag]]）或有内部链接的声明。常说的两阶段查找中“第二阶段只做 ADL”，在模块里的精确表述就是这一句。
 
-## 关联命名空间可以与普通查找重叠（¶6）
+[[temp.dep.candidate#1]] 另有一条：如果把所有翻译单元中关联命名空间里具有外部链接的函数都考虑进来，依赖调用会找到更好的匹配或者变得非良构，那么程序非良构，不要求诊断。
 
-¶6 注 4 指出，关联命名空间可以包含无限定查找已经考虑过的命名空间。两条路径找到同一个声明不会造成二义，它们只是同一重载集里的同一个函数。上面 `NS::f` 的例子就是如此（若 `main` 在 NS 内部，两种查找都会找到 f）。
+## 惯用法一：swap 两步法
 
-## 惯用法一：std::swap 两步法
-
-泛型代码想交换两个 `T`，有几种写法：
-
-- 写 `std::swap(a, b)`：这是限定名，没有 ADL，用户在自己类型的命名空间里写的高效 `swap` 会被绕过；
-- 写 `swap(a, b)`：若 `T` 是 `int`，没有关联命名空间，又找不到 `std::swap`；
-- 用两步法：
+泛型代码要交换两个 `T` 时，`std::swap(a, b)` 是限定名，会绕过用户为自己的类型写的高效 `swap`；`swap(a, b)` 遇到 `int` 时又没有关联命名空间，找不到 `std::swap`。标准做法是两步：
 
 ```cpp run ok
 #include <utility>
 namespace N {
     struct Big { int d[100]; };
-    void swap(Big&, Big&) noexcept { }      // 自定义的高效 swap
+    void swap(Big&, Big&) noexcept { }   // 自定义的高效 swap
 }
 
 template<class T>
 void my_algo(T& a, T& b) {
-    using std::swap;     // 第一步：让无限定查找能找到 std::swap 作为后备
-    swap(a, b);          // 第二步：无限定调用；ADL 加入 T 所在命名空间的 swap
+    using std::swap;     // 第一步：让无限定查找找到 std::swap 作后备
+    swap(a, b);          // 第二步：无限定调用，ADL 加入 T 所在命名空间的 swap
 }
 
 int main() {
     N::Big a, b;
-    my_algo(a, b);       // 选 N::swap（非模板，比 std::swap 模板更优）
+    my_algo(a, b);       // 选 N::swap：非模板优于模板
     int i = 1, j = 2;
     my_algo(i, j);       // 选 std::swap
 }
 ```
 
-它能工作有三个前提：块作用域的 using 声明不抑制 ADL（见 ¶1 的 lawyer 框）；重载集同时含有 `std::swap` 与 `N::swap`；重载决议中非模板优于模板，更特化的模板优于更一般的模板。
+它能工作有三个前提：块作用域的 using 声明不关掉 ADL；重载集里同时有 `std::swap` 和 `N::swap`；重载决议中非模板优于模板，更特化的模板优于更一般的模板。
 
-这种固定写法容易写错（忘了 `using`，或写成 `std::swap`），因此 C++20 提供了 `std::ranges::swap`。它是一个定制点对象，在内部替你完成两步法。
+这个写法容易写错，比如忘了 `using` 或写成 `std::swap`。C++20 因此提供了 `std::ranges::swap`，它是一个定制点对象，在内部完成同样的事。
 
-## 惯用法二：定制点对象（CPO）与 niebloid
+## 惯用法二：定制点对象与 niebloid
 
-ADL 有两个系统性问题：
-
-1. **劫持**（hijacking）：泛型库里的每个无限定调用，都可能被实参类型所在命名空间中碰巧同名的函数劫持；
-2. **意外二义**：无限定调用库自己的函数时，ADL 可能在另一个关联命名空间里找到同样好的候选。
+ADL 有两个系统性问题。一是劫持（hijacking）：泛型库里的无限定调用，可能被实参类型所在命名空间里碰巧同名的函数抢走。二是意外二义：库调用自己的函数时，ADL 在另一个关联命名空间里找到同样好的候选。
 
 ```cpp run error
 #include <vector>
@@ -412,25 +429,25 @@ ADL 有两个系统性问题：
 #include <algorithm>
 namespace N {
     struct X { bool operator==(const X&) const = default; };
-    template<class It> int distance(It, It) { return 0; }     // 用户自己的 distance
+    template<class It> int distance(It, It) { return 0; }
     template<class It, class T> It find(It b, It, const T&) { return b; }
 }
 int main() {
     std::vector<N::X> v(3);
-    auto n  = distance(v.begin(), v.end());     // error: 二义：std::distance 与 N::distance
-    auto it = find(v.begin(), v.end(), N::X{}); // error: 二义：std::find 与 N::find
+    auto n  = distance(v.begin(), v.end());      // error: std::distance 与 N::distance 二义
+    auto it = find(v.begin(), v.end(), N::X{});  // error: std::find 与 N::find 二义
 }
 ```
 
-`v.begin()` 的类型是 `std::vector<N::X>` 的迭代器（libc++ 中是 `std::__wrap_iter<N::X*>`），模板实参 `N::X*` 把 N 带进关联命名空间，std 本来就是关联命名空间。两个函数模板同样好，于是二义。
+`v.begin()` 的类型是 `std::vector<N::X>` 的迭代器（libc++ 中是 `std::__wrap_iter<N::X*>`）。它的模板实参 `N::X*` 把 `N` 带进关联命名空间，`std` 本来就在其中。两个函数模板一样好，于是二义。
 
-**定制点对象**（customization point object，[[customization.point.object]]）的思路是把库的入口做成对象，而不是函数。
+**定制点对象**（customization point object，CPO，[[customization.point.object]]）把库的入口做成对象而不是函数：
 
-- 无限定查找找到的是一个变量（非函数），按 ¶1.3 抑制 ADL，调用者因而无法被劫持；
-- 对象不能重载，ADL 也永远不会找到它（ADL 只收集函数），所以它不会与别处的同名函数形成二义；
-- 对象的 `operator()` 内部再以受控的方式做 ADL（例如 `std::ranges::begin` 会查找实参的成员 `begin()` 或经 ADL 找到的非成员 `begin`，并用 `void begin(auto&) = delete;` 这类"毒丸"（poison pill）重载阻止无限定查找找到 `std::begin`），同时检查语义要求（返回类型须满足迭代器概念等）。
+- 无限定查找找到的是一个变量，按 ¶1.3 关掉 ADL，调用方不会被劫持；
+- ADL 只收集函数，永远不会找到这个对象，所以它不会和别处的同名函数形成二义；
+- 对象的 `operator()` 内部再以受控的方式做 ADL，同时检查语义要求。例如 `std::ranges::begin` 会查找成员 `begin()` 或经 ADL 找到的非成员 `begin`，并用 `void begin(auto&) = delete;` 这样的重载挡住 `std::begin`。
 
-`std::ranges` 中的算法（`find`、`sort`……）也是这种对象，俗称 **niebloid**（得名于 Eric Niebler）。C++20 只规定它们不被 ADL 找到、被无限定查找找到时抑制 ADL，并未要求必须是对象；当前草案（[[alg.func.obj]]）直接把它们定义为**算法函数对象**（algorithm function object），即一种 CPO：
+`std::ranges` 里的算法（`find`、`sort`……）也有同样的性质，俗称 niebloid（得名于 Eric Niebler）。C++20 只要求它们不被 ADL 找到、被无限定查找找到时关掉 ADL，没有规定必须是对象。C++26 起，标准直接把它们定义为**算法函数对象**（algorithm function object，[[alg.func.obj]]）：
 
 ```cpp run ok
 #include <ranges>
@@ -439,19 +456,16 @@ int main() {
 void foo() {
     using namespace std::ranges;
     std::vector<int> vec{1, 2, 3};
-    auto it = find(begin(vec), end(vec), 2);   // std::ranges::find：对象，抑制 ADL，不会选到 std::find
+    auto it = find(begin(vec), end(vec), 2);   // std::ranges::find：对象，关掉 ADL
     (void)it;
 }
 ```
 
-## 惯用法三：运算符与 ADL
+## 惯用法三：运算符
 
-运算符表达式 `a @ b` 不能加括号来抑制 ADL，也没有限定的写法。[[over.match.oper#3]] 规定，其非成员候选来自对 `operator@` 的无限定查找（含 ADL），且忽略所有成员函数。它与具名调用的关键差别在于：
+运算符表达式 `a @ b` 没有限定写法，也不能靠加括号关掉 ADL。[[over.match.oper#3]] 规定，它的非成员候选来自对 `operator@` 的无限定查找加 ADL，并且忽略所有成员函数；成员候选另外在 `a` 的类里搜索。所以和具名调用不同，运算符的 ADL 总会进行。
 
-- 在具名调用中，无限定查找找到类成员会抑制 ADL（¶1.1）；
-- 在运算符查找中，成员函数被忽略，ADL 总会进行；成员候选另由"在 T1 的作用域中搜索 `operator@`"产生。
-
-一个常见的陷阱是：无限定查找找到即停，所以**命名空间里只要声明了任何 `operator<<`，外层的 `operator<<` 就看不见了**，只能依靠 ADL：
+无限定查找找到就停。所以命名空间里只要声明了任何一个 `operator<<`，外层的 `operator<<` 就看不见了，只能靠 ADL：
 
 ```cpp run error
 #include <iostream>
@@ -462,57 +476,56 @@ std::ostream& operator<<(std::ostream& os, G) { return os; }
 
 namespace N {
     struct Z {};
-    std::ostream& operator<<(std::ostream& os, Z);   // 有了这个，查找在 N 停下
+    std::ostream& operator<<(std::ostream& os, Z);   // 无限定查找在 N 停下
     void f(const std::vector<int>& v, G g) {
-        std::cout << g;   // OK：G 在全局命名空间，全局是关联命名空间 → ADL 找到 ::operator<<
-        std::cout << v;   // error: 无限定查找停在 N；ADL 只看 std（vector<int>、ostream 的命名空间）
+        std::cout << g;   // OK：G 在全局命名空间，ADL 找到 ::operator<<
+        std::cout << v;   // error: ADL 只看 std，找不到全局的那个
     }
 }
 ```
 
-由此得到的结论是：**为某个类型定义的运算符，应该放在该类型所在的命名空间中（最好写成隐藏友元）**。在全局为 `std` 中的类型（如 `std::vector<int>`）写运算符，实际上依赖于无限定查找恰好能看到它，换一个命名空间就失效；而往 `std` 里添加这种声明又是标准禁止的（[[namespace.std]]）。
+为某个类型定义的运算符，应该放在这个类型所在的命名空间里，最好写成隐藏友元。在全局为 `std` 里的类型（如 `std::vector<int>`）写运算符，只是碰巧能被无限定查找看到，换个命名空间就失效。往 `std` 里加这种声明又是标准禁止的（[[namespace.std]]）。
 
-## 更多意外
+## 其他容易忽略的情形
 
 ```cpp run ok
 #include <iostream>
 #include <string>
 #include <iterator>
 int main() {
-    endl(std::cout);              // OK：std::cout 的类型在 std → ADL 找到 std::endl
+    endl(std::cout);        // OK：std::cout 的类型在 std，ADL 找到 std::endl
     std::string arr[3];
-    auto b = begin(arr);          // OK：数组 → 元素类型 std::string → std → std::begin
+    auto b = begin(arr);    // OK：数组元素类型 std::string 带来 std
     (void)b;
 }
 ```
 
-- `endl(std::cout)`、`begin(arr)` 无需写 `std::`，ADL 的依据是实参类型，而不是代码是否用到了标准库。
-- lambda 的闭包类型是类类型，其最内层外围命名空间就是 lambda 出现处的命名空间，所以把 lambda 作为实参传递，也会关联该命名空间。
+- lambda 的闭包类型是类类型，它的最内层外围命名空间就是 lambda 出现的地方。把 lambda 作为实参，也会把这个命名空间带进来。
 - `f(nullptr)`、`f(0)`、`f(1.0)` 永远没有 ADL。
-- 常量模板实参不贡献关联实体：`std::array<N::X, 3>` 关联 N（类型实参），但 `std::integral_constant<N::E, N::E::a>` 中的 `N::E::a` 不贡献（类型实参 `N::E` 仍然贡献 N）。
+- `std::array<N::X, 3>` 带来 `N`（类型实参）。`std::integral_constant<N::E, N::E::a>` 里的 `N::E::a` 是常量模板实参，不带来任何东西，但类型实参 `N::E` 照样带来 `N`。
 
 !!! impl "实现视角"
-    - Clang 在 `Sema::ArgumentDependentLookup` 中实现 ADL，用 `FindAssociatedClassesAndNamespaces` 按 ¶3 计算关联类与命名空间；友元则通过一种声明标记实现，表示该声明存在于命名空间中，但对普通查找不可见（¶4.2）。
-    - 模块：Clang 在实例化时依据实例化上下文计算 ADL 的可见集。¶4 要求忽略已丢弃的全局模块片段声明，因此 `#include` 进全局模块片段但未被引用的函数，在其他 TU 中对 ADL 不可见（[[temp.dep.candidate]] 例 4）。
-    - ADL 对编译时间有实际影响：大量命名空间级运算符模板会让每个 `<<` 都触发昂贵的重载决议。从 C++20 起，标准库新组件（如 ranges 的视图与迭代器类型）大量把运算符规定为隐藏友元，这是动机之一。
+    - Clang 在 `Sema::ArgumentDependentLookup` 中实现 ADL，用 `FindAssociatedClassesAndNamespaces` 按 ¶3 计算关联类和关联命名空间。隐藏友元的声明放在命名空间里，但带有一个标记，使它对普通查找不可见。
+    - 模块：Clang 在实例化时按实例化上下文计算 ADL 能看到哪些声明。`#include` 进全局模块片段、但没有被引用而被丢弃的函数，在其他翻译单元里对 ADL 不可见（[[temp.dep.candidate#5]] 的例 4）。
+    - ADL 影响编译速度：大量命名空间作用域的运算符模板会让每个 `<<` 都触发昂贵的重载决议。C++20 起，标准库的新组件（如 ranges 的视图和迭代器）大量把运算符规定为隐藏友元，这是原因之一。
 
 !!! history "历史与演进"
-    - **C++98**：ADL 进入标准（最初为运算符设计，后推广到所有无限定函数调用），俗称 Koenig 查找。
-    - **C++11**：引入内联命名空间；关联命名空间包括内联命名空间集。
-    - **C++20**：P0846R0 让 `f<T>(x)` 在找不到模板或只找到函数时也按模板名解析，从而可以借助 ADL 调用函数模板并显式指定模板实参；模块引入了 ¶4.3 与实例化上下文中的 ADL；ranges 引入了 CPO 与 niebloid。
-    - **C++23**：P1787R6 改用搜索、关联实体等概念重新表述本节，并明确只有块作用域函数声明（而不是 using 声明）才抑制 ADL。
-    - **C++26**：¶3.1 为 `std::meta::info` 关联 `std::meta`；niebloid 被规范为算法函数对象（[[alg.func.obj]]）。
+    - C++98：ADL 进入标准，最初是为运算符设计的，后来推广到所有无限定函数调用。
+    - C++11：引入内联命名空间，关联命名空间包括内联命名空间集。这时的条文明确写着，关掉 ADL 的是“不是 using 声明的块作用域函数声明”。
+    - C++20：[[P0846R0]] 让 `f<T>(x)` 在找不到模板或只找到函数时也按模板名解析，从而能借助 ADL 调用函数模板并显式给出模板实参。模块带来了 ¶4.3 和实例化上下文中的 ADL；ranges 带来了 CPO 和 niebloid。
+    - C++23：[[P1787R6]] 用搜索、关联实体等概念重写了本节。using 声明不关掉 ADL 这一点不再单独写出，改由 [[basic.lookup#3]] 的替换规则得出。
+    - C++26：¶3.1 让 `std::meta::info` 关联 `std::meta`；niebloid 被规定为算法函数对象。
 
-## 陷阱
+## 常见误解
 
-!!! pitfall "以为限定调用和无限定调用只是写法不同"
-    `std::swap(a, b)` 与 `using std::swap; swap(a, b)` 可能调用不同的函数；`std::begin(r)` 与 `std::ranges::begin(r)` 的语义也不同。在泛型代码里，选择调用形式就是在选择查找规则。
+!!! pitfall "限定调用和无限定调用只是写法不同"
+    `std::swap(a, b)` 和 `using std::swap; swap(a, b)` 可能调用不同的函数，`std::begin(r)` 和 `std::ranges::begin(r)` 的语义也不同。在泛型代码里，选择调用形式就是选择查找规则。
 
-!!! pitfall "被模板实参引入的命名空间"
-    `std::vector<mylib::Widget>` 会让 mylib 中所有同名函数参与 `std` 算法的无限定调用；反过来，`mylib::Container<std::string>` 会让 std 的函数参与你的调用。给库函数起 `distance`、`find`、`size`、`data` 这样的名字时尤其要小心。
+!!! pitfall "只有实参自己的命名空间才会被搜索"
+    模板实参也会带来命名空间。`std::vector<mylib::Widget>` 让 `mylib` 里的同名函数参与 `std` 算法内部的无限定调用；反过来，`mylib::Container<std::string>` 让 `std` 的函数参与你的调用。给库函数起 `distance`、`find`、`size`、`data` 这类名字时尤其要小心。
 
-!!! pitfall "用括号或限定名关闭 ADL，也关闭了定制"
-    `(swap)(a, b)` 确实不会被劫持，但也找不到用户的定制。需要可定制又不可劫持的调用时，应使用 CPO。
+!!! pitfall "用括号或限定名关掉 ADL 就安全了"
+    `(swap)(a, b)` 确实不会被劫持，但也找不到用户的定制。需要既可定制、又不会被劫持的调用时，用 CPO。
 
 ## 思考题
 
@@ -529,18 +542,18 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-按原样：无限定查找在 B 中找到 `B::f`（命名空间成员，不抑制 ADL），ADL 再加入 `A::f`；重载集为 `{B::f(X,long), A::f(X,int)}`，实参 `0` 是 `int`，`A::f` 精确匹配，因而胜出。
+原样时，无限定查找在 `B` 中找到 `B::f`。它是命名空间成员，不关掉 ADL，ADL 再加入 `A::f`。重载集是 `{B::f(X, long), A::f(X, int)}`，实参 `0` 是 `int`，`A::f` 精确匹配，胜出。
 
-加上块作用域声明后：无限定查找在块作用域找到函数声明，¶1.2 抑制 ADL，只剩 `B::f(A::X, long)`，于是调用它。
+加上块作用域声明后，无限定查找在块作用域找到函数声明，¶1.2 关掉 ADL，只剩 `B::f(A::X, long)`，于是调用它。本机 Clang 23 运行结果与此一致。
 </details>
 
 !!! question "思考题 2"
-    为什么 niebloid 必须在无限定查找找到它时抑制 ADL，而不能仅仅是自己不被 ADL 找到？
+    为什么 niebloid 被无限定查找找到时必须关掉 ADL，只做到自己不被 ADL 找到还不够？
 
 <details markdown="1">
 <summary>答案</summary>
 
-如果只做到不被 ADL 找到，那么在 `using namespace std::ranges; find(it, it, v)` 中，无限定查找找到 `ranges::find` 后，ADL 仍会把 `std::find`（迭代器关联 std）乃至用户命名空间的 `find` 加入重载集。由于 `std::find` 是不受约束的函数模板，它常常是同等或更好的匹配，结果 ranges 版本被绕过，或者出现二义。只有抑制 ADL，才能保证调用的就是那个受约束的 ranges 算法。用对象实现时，¶1.3 自然提供了这一点。
+如果只是不被 ADL 找到，那么在 `using namespace std::ranges; find(it, it, v)` 中，无限定查找找到 `ranges::find` 之后，ADL 仍会把 `std::find`（迭代器关联 `std`）乃至用户命名空间里的 `find` 加进重载集。`std::find` 是不受约束的函数模板，常常是同样好或更好的匹配，结果要么绕过了 ranges 版本，要么二义。只有关掉 ADL，才能保证调用的是那个受约束的 ranges 算法。用对象实现时，¶1.3 自然做到了这一点。
 </details>
 
 !!! question "思考题 3"
@@ -549,20 +562,20 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-不能。`C<N2::e>` 是全局类模板的特化，其关联实体是 `C<…>` 本身（全局命名空间）；模板实参 `N2::e` 是常量模板实参，按注 3 不贡献关联实体。所以关联命名空间只有全局命名空间，找不到 `N2::f`。
+不能。`C<N2::e>` 是全局类模板的特化，关联实体只有它自己，位于全局命名空间。`N2::e` 是常量模板实参，按注 3 不带来关联实体。所以关联命名空间只有全局命名空间，找不到 `N2::f`。本机 Clang 23 报告 `f` 未声明。
 </details>
 
 ## 小结
 
 | 问题 | 答案 |
 |---|---|
-| 何时做 | 无限定 *unqualified-id* 作函数调用，且普通查找没找到类成员、块作用域函数声明或非函数 |
-| 结果怎么用 | 与无限定查找的结果合并成重载集 |
-| 关联什么 | 实参类型的类、所属类、基类（完整时）、模板类型实参、函数类型的参数/返回类型……；基本类型无 |
-| 在哪找 | 最内层外围非内联命名空间 + 其内联命名空间集；只做搜索（忽略 using 指令）；外加关联类的友元 |
-| 只找什么 | 函数与函数模板 |
-| 隐藏友元 | 只能被 ADL 找到；重载集小、不被隐式转换误选 |
-| swap 两步法 | `using std::swap; swap(a, b);`，using 声明不抑制 ADL |
-| CPO/niebloid | 对象：抑制 ADL，内部受控地做 ADL |
-| 运算符 | 非成员候选 = 无限定查找（忽略成员）+ ADL，不能用括号关闭 |
-| `f<T>(x)` | C++20 起找不到或只找到函数时按模板名解析，ADL 可用 |
+| 何时做 | 无限定名字作函数调用，且普通查找没找到类成员、块作用域函数声明或非函数 |
+| 结果怎么用 | 与无限定查找的结果合成一个重载集 |
+| 关联什么 | 类本身、外围类、基类（完整时）、类型模板实参、函数类型的参数和返回类型；基本类型什么也没有 |
+| 在哪找 | 最内层外围非内联命名空间及其内联命名空间集，只做搜索（不跟随 using 指令）；外加关联类的友元 |
+| 只找什么 | 函数和函数模板 |
+| 隐藏友元 | 只能被 ADL 找到；重载集小，不会因隐式转换被误选 |
+| swap 两步法 | `using std::swap; swap(a, b);`，using 声明不关掉 ADL |
+| CPO / niebloid | 对象：关掉 ADL，在内部受控地做 ADL |
+| 运算符 | 非成员候选 = 无限定查找（忽略成员）+ ADL，无法关掉 |
+| `f<T>(x)` | C++20 起找不到或只找到函数时按模板名解析，可以用 ADL |
