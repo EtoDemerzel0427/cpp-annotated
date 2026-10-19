@@ -1,64 +1,70 @@
 ---
 title: 类模板 reference_wrapper
-summary: 可复制、可赋值、平凡可复制的“引用”；用 FUN(T&)/FUN(T&&) 的约束技巧拒绝绑定右值，经 INVOKE 转发调用，C++26 起可直接比较；ref/cref 会解包，并为 common_reference 提供特化
+summary: reference_wrapper<T> 是一个可复制、可赋值、平凡可复制的引用包装，ref/cref 用它告诉 bind、make_pair 等组件按引用保存实参；本页讲它的构造约束怎样拒绝右值、调用与比较的语义，以及它与 common_reference 的配合。
 status: done
 covers: *
-papers: P2944R3, P2655R3, LWG2993
+papers: P2944R3, P2655R3, P0357R3, LWG2993
 related: func.require, function.objects, func.bind, tuple, pairs, meta, class.prop, basic.types, over.match, temp.deduct.guide, dcl.init.ref
 tags: 标准库, functional, reference_wrapper, ref, cref, CTAD
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-C++ 的引用不是对象：不能重新绑定（`r = x` 是给被引用者赋值），不能放进 `std::vector`，不能默认构造。`reference_wrapper<T>` 把“对 `T` 的引用”包装成一个**真正的对象**：可以复制、可以赋值（赋值改变的是“引用谁”）、可以放进容器、可以按值传递而不复制被引用者。它的实现就是一个 `T*`。
+!!! tldr
+    - `reference_wrapper<T>` 内部就是一个 `T*`。它可以复制、放进容器；赋值让它改为引用另一个对象，而不是给被引用者赋值。它保证是平凡可复制的。
+    - 构造函数用一对说明用函数 `FUN(T&)` / `FUN(T&&) = delete` 做约束：右值、需要物化临时量的转换都被拒绝，并且是不参与重载决议，而不是可行但弃置。
+    - `std::ref(x)`、`std::cref(x)` 生成它，用来让 `bind`、`thread`、`make_pair`、`make_tuple` 等默认按值保存的组件改为按引用保存。`ref(42)` 这类右值调用是编译错误。
+    - 调用 `rw(args...)` 等于 *INVOKE*(`rw.get()`, args...)。C++26 起 `==`、`<=>` 比较的是被引用的值，不是地址。
+    - C++23 起 `common_reference_t<reference_wrapper<int>&, int&>` 是 `int&`。
 
-它在标准库里最重要的用途是**显式表达“按引用传”**：`std::bind`、`std::thread`、`std::make_pair`、`std::make_tuple` 默认按值保存实参（对实参做 decay），想让它们保存引用，就传 `std::ref(x)`。
+## 一个可以重新绑定的引用
 
-前置知识：*INVOKE*（[[func.require]]）、平凡可复制类型（[[g:trivially-copyable-type]]，[[basic.types]]、[[class.prop]]）、引用初始化（[[dcl.init.ref]]）。
+```cpp run title="refwrap_tour.cpp" ok
+#include <functional>
+#include <type_traits>
+#include <vector>
+#include <algorithm>
+#include <cstdio>
+int main() {
+  int a = 3, b = 1, c = 2;
+  std::vector<std::reference_wrapper<int>> v{a, b, c};
+  std::ranges::sort(v, std::less<int>{});      // 经 operator int& 比较被引用的值
+  v[0].get() = 100;                            // v[0] 引用的是 b
+  std::printf("%d %d %d\n", a, b, c);          // 3 100 2
 
-## 类概要与基本性质（[refwrap.general]）
+  std::reference_wrapper rw = a;               // CTAD：reference_wrapper<int>
+  std::printf("%d\n", rw == 3);                // C++26：比较被引用的值，打印 1
+  rw = c;                                      // 改为引用 c，a 不变
+  std::printf("%d %d\n", a, rw.get());         // 3 2
+}
+```
 
-成员一览（不逐字照抄概要）：
+C++ 的引用不是对象：不能重新绑定（`r = x` 是给被引用者赋值），不能放进 `std::vector`，也不能默认构造。`reference_wrapper<T>` 把对 `T` 的引用包装成一个对象。它可以复制，可以按值传递而不复制被引用者，赋值改变的是它引用谁。
+
+它在标准库里最重要的用途是明确表示按引用传递。`std::bind`、`std::thread`、`std::make_pair`、`std::make_tuple` 默认对实参做退化（decay）后按值保存，要让它们保存引用，就传 `std::ref(x)`。
+
+## 基本性质 [refwrap.general]
 
 | 成员 | 说明 |
 |---|---|
 | `using type = T;` | 被引用的类型 |
-| `template<class U> constexpr reference_wrapper(U&&) noexcept(see below);` | 唯一的“绑定”构造函数，带约束 |
-| 复制构造 / 复制赋值 | `constexpr`、`noexcept`，复制的是“引用谁” |
-| `constexpr operator T&() const noexcept;` / `constexpr T& get() const noexcept;` | 取回引用 |
-| `template<class... A> operator()(A&&...) const` | 经 *INVOKE* 调用被引用的可调用物 |
-| `friend operator==` / `operator<=>`（各三个） | C++26 新增的比较 |
-| `template<class T> reference_wrapper(T&) -> reference_wrapper<T>;` | 推导指引 |
+| `template<class U> reference_wrapper(U&&)` | 唯一的绑定构造函数，带约束（见下节） |
+| 复制构造、复制赋值 | `noexcept`，复制的是引用谁 |
+| `operator T&()`、`get()` | 取回引用 |
+| `operator()(ArgTypes&&...)` | 经 *INVOKE* 调用被引用的可调用物 |
+| `operator==`、`operator<=>` 各三个 | C++26 新增，隐藏友元 |
+| `reference_wrapper(T&) -> reference_wrapper<T>` | 推导指引 |
 
-注意**没有默认构造函数**——引用必须绑定到某个东西。所有成员都是 `constexpr`。
+所有成员都是 `constexpr`。没有默认构造函数，因为引用必须绑定到某个东西。
 
-¶1：`reference_wrapper<T>` 是 *Cpp17CopyConstructible* 且 *Cpp17CopyAssignable* 的、对 `T` 类型**对象或函数**的引用的包装。`T` 可以是函数类型：`reference_wrapper<int(int)>` 合法，调用它就调用那个函数。
+¶1 `reference_wrapper<T>` 满足 *Cpp17CopyConstructible* 和 *Cpp17CopyAssignable*，包装的是对 `T` 类型的对象或函数的引用。`T` 可以是函数类型：`reference_wrapper<int(int)>` 是合法的，调用它就是调用那个函数。
 
-!!! std
-    reference_wrapper&lt;T&gt; is a trivially copyable type.
+¶2 `reference_wrapper<T>` 是**平凡可复制**类型（[[g:trivially-copyable-type]]，[[basic.types]]），即可以用 `memcpy` 复制其对象表示的类型。所以可以 `std::bit_cast` 它、把它放进 `std::atomic`，按值传参时 ABI 上通常用寄存器传递。类概要里写出了复制构造函数和复制赋值运算符，但概要只描述接口，¶2 要求它们是平凡的。libc++ 的做法是根本不声明它们，类里只有一个 `type* __f_;` 成员。
 
-¶2 规定它是**平凡可复制类型**（[[basic.types]]）。这是一个可观察的、可移植的保证：可以 `memcpy` 它、可以放进要求平凡可复制的 `std::atomic`、`std::bit_cast` 它，按值传参时 ABI 上通常用寄存器传递。概要里**声明**了复制构造函数和复制赋值运算符，看起来像是用户提供的——但概要中的声明只描述接口，¶2 要求实现让它们平凡（通常的做法是根本不声明，让编译器隐式生成；libc++ 的 `__functional/reference_wrapper.h` 正是如此，类里只有一个 `type* __f_;` 成员）。
+¶3 `T` 可以是不完整类型，所以可以在类定义内部写 `std::vector<std::reference_wrapper<Node>> children;`。注 1 提醒，在 `T` 不完整时使用比较运算符，约束检查的结果可能在不同的实例化点不同，程序因此成为非良构、不要求诊断（[[temp.point]]、[[temp.constr.atomic]]）。
 
-¶3：`T` 可以是**不完整类型**。所以可以在类定义内部声明 `std::vector<std::reference_wrapper<Node>> children;`。注 1 提醒：在 `T` 不完整时使用比较运算符，可能因约束检查的结果在不同实例化点不同而成为 IFNDR（[[temp.point]]、[[temp.constr.atomic]]）。
+## 构造函数为什么是模板 [refwrap.const]
 
-## 构造：用 `FUN` 拒绝右值（[refwrap.const]）
-
-这是本节最有法律味道的一段。构造函数是一个**模板**，接受任意 `U&&`：
-
-!!! std
-    Let *FUN* denote the exposition-only functions `void FUN(T&) noexcept; void FUN(T&&) = delete;` Constraints: The expression *FUN*(declval&lt;U&gt;()) is well-formed and is_same_v&lt;remove_cvref_t&lt;U&gt;, reference_wrapper&gt; is false.
-
-¶2 的约束翻译成人话：**拿 `U` 类型的表达式去调用一对重载 `FUN(T&)` / `FUN(T&&) = delete`，如果重载决议选中了 `FUN(T&)` 且调用良构，构造函数才可行**。
-
-- 实参是 `T` 左值：精确匹配 `FUN(T&)`，OK。
-- 实参是右值（如字面量 `42` 对 `reference_wrapper<const int>`）：`FUN(T&&)` 更好（右值优先绑定右值引用，[[over.ics.rank]]），而它是弃置的——调用非良构，**约束不满足**，构造函数不参与重载决议。
-- 实参是能**隐式转换为 `T&`** 的类类型（例如有 `operator int&()` 的类）：`FUN(T&)` 通过用户定义转换可行，OK。这是旧设计做不到的。
-- 实参本身就是 `reference_wrapper`：第二个条件排除它，让复制构造函数接手。
-
-¶3 **Effects**：如同 `T& r = std::forward<U>(u);` 然后存下 `r` 的地址。¶4：`noexcept` 与 `FUN(declval<U>())` 一致——绑定 `T&` 时若需要调用可能抛出的转换函数，构造函数也就可能抛出。
-
-### 为什么不直接写 `reference_wrapper(T&)` + `reference_wrapper(T&&) = delete`？
-
-C++11 的原始设计正是这两个构造函数。问题在于**弃置函数照样参与重载决议**：`reference_wrapper(T&&) = delete` 的存在让编译器认为“从右值到 `reference_wrapper<T>` 存在一个用户定义转换”，于是在其他函数的重载决议里，它会和别的转换打成平手：
+直观的设计是两个构造函数：`reference_wrapper(T&)` 接受左值，`reference_wrapper(T&&) = delete` 拒绝右值。C++11 正是这样写的。问题在于弃置函数照样参与重载决议：
 
 ```cpp run title="old_design_ambiguity.cpp" error
 struct Old {             // 模拟 C++11 的设计
@@ -68,10 +74,24 @@ struct Old {             // 模拟 C++11 的设计
 struct from_int { from_int(int) {} };
 void meow(Old) {}
 void meow(from_int) {}
-int main() { meow(0); }  // error：歧义——两个都是“可行的”用户定义转换
+int main() { meow(0); }  // error: 歧义，两个用户定义转换都可行
 ```
 
-[[LWG2993]] 把构造函数改为带约束的模板，右值时构造函数**根本不可行**，歧义消失：
+对实参 `0`，`Old(int&&)` 虽然被弃置，但它让从 `0` 到 `Old` 的用户定义转换成为可行的，于是和到 `from_int` 的转换打成平手。被弃置的函数只在被选中之后才报错，选不选它由重载决议决定。
+
+¶1 当前的构造函数是一个带约束的模板 `template<class U> reference_wrapper(U&& u)`。约束借助一对说明用函数：
+
+!!! std
+    Let *FUN* denote the exposition-only functions `void FUN(T&) noexcept; void FUN(T&&) = delete;`
+
+¶2 约束要求：表达式 *FUN*(declval&lt;U&gt;()) 良构，并且 `remove_cvref_t<U>` 不是 `reference_wrapper` 本身。换句话说，拿实参去调用这对重载，只有选中 `FUN(T&)` 时构造函数才参与重载决议：
+
+- 实参是 `T` 左值：精确匹配 `FUN(T&)`，可行。
+- 实参是右值：`FUN(T&&)` 更好（右值优先绑定右值引用，[[over.ics.rank]]），它被弃置，调用非良构，约束不满足。构造函数根本不是候选。
+- 实参是能隐式转换为 `T&` 的类类型（例如有 `operator int&()` 的类）：`FUN(T&)` 经用户定义转换可行。旧设计做不到这一点。
+- 实参本身是 `reference_wrapper`：第二个条件排除它，交给复制构造函数。
+
+[[LWG2993]] 把构造函数改成了这种形式，开头的歧义随之消失：
 
 ```cpp run title="fun_trick.cpp" ok
 #include <functional>
@@ -85,11 +105,10 @@ struct Holder {
   int value = 7;
   operator int&() { return value; }   // 能产生 int 左值
 };
-static_assert(!std::is_constructible_v<std::reference_wrapper<const int>, int>);   // 右值：被约束挡掉
+static_assert(!std::is_constructible_v<std::reference_wrapper<const int>, int>);  // 右值：被约束挡掉
 static_assert(std::is_constructible_v<std::reference_wrapper<const int>, const int&>);
-static_assert(!std::is_convertible_v<int, std::reference_wrapper<int>>);           // trait 也如实回答
 int main() {
-  meow(0);                            // from_int：无歧义
+  meow(0);                            // 打印 from_int，没有歧义
   Holder h;
   std::reference_wrapper<int> r = h;  // OK：FUN(h) 经转换函数选中 FUN(int&)
   r.get() = 8;
@@ -97,37 +116,37 @@ int main() {
 }
 ```
 
-顺带，`is_convertible_v<int, reference_wrapper<int>>` 在旧设计下是 `false`（弃置函数让转换非良构），但“存在一个被弃置的候选”这件事仍会污染重载决议——这正是“trait 说不行、重载决议却当它可行”的不一致。约束模板让两者口径统一。
+第二个约束也不能省。从一个非 const 左值 `reference_wrapper` 复制时，模板构造函数（`U = reference_wrapper&`）比复制构造函数（形参 `const reference_wrapper&`）匹配得更好，而 `FUN(rw)` 又能经 `operator T&` 成立。没有这个约束，复制就会被模板接管，变成先转换成 `T&` 再取地址。
 
-!!! note "为什么第二个约束必不可少"
-    若没有 `!is_same_v<remove_cvref_t<U>, reference_wrapper>`，从一个**非 const 左值** `reference_wrapper` 复制时，模板构造函数（`U = reference_wrapper&`，绑定不加 const）会比复制构造函数（`const reference_wrapper&`）更匹配，而 `FUN(rw)` 又能经 `operator T&` 成立——复制就会被这个模板“劫持”，变成“先转换成 `T&` 再取地址”。第二个约束保证复制永远走那个平凡、`noexcept` 的复制构造函数。
+¶3 构造的效果如同先写 `T& r = std::forward<U>(u);`，再保存对 `r` 的引用。¶4 它的 `noexcept` 与 `FUN(declval<U>())` 一致：如果绑定 `T&` 需要调用一个可能抛异常的转换函数，构造函数也可能抛异常。¶5 复制构造函数保存对 `x.get()` 的引用。
 
-¶5 复制构造函数：存储对 `x.get()` 的引用。
+## 赋值、访问与调用
 
-## 赋值、访问与调用（[refwrap.assign]、[refwrap.access]、[refwrap.invoke]）
+赋值（[refwrap.assign]）。复制赋值之后，`*this` 保存对 `x.get()` 的引用。也就是重新绑定，而不是给被引用者赋值，这是它与 `T&` 的根本区别。
 
-- [refwrap.assign]/1：复制赋值的后置条件是 `*this` 存储对 `x.get()` 的引用——**重新绑定**，而不是给被引用者赋值。这是它与 `T&` 的根本差别。
-- [refwrap.access]：`operator T&()` 与 `get()` 都返回存储的引用。隐式转换让 `reference_wrapper<int>` 能直接传给接受 `int&`/`int` 的函数；但成员访问（`rw.member`）不会触发隐式转换，得写 `rw.get().member`。
-- [refwrap.invoke]：`operator()` 的返回值是 `INVOKE(get(), std::forward<ArgTypes>(args)...)`，¶1 **Mandates** `T` 是完整类型。返回类型 `invoke_result_t<T&, ArgTypes...>`、`noexcept(is_nothrow_invocable_v<T&, ArgTypes...>)`。因为走 *INVOKE*，`reference_wrapper<int (S::*)()>` 之类也能被调用。
+访问（[refwrap.access]）。`operator T&()` 和 `get()` 都返回保存的引用。隐式转换让 `reference_wrapper<int>` 能直接传给接受 `int&` 或 `int` 的函数。成员访问不会触发隐式转换，`rw.member` 不合法，要写 `rw.get().member`。
 
-`operator()` 让 `std::ref(functor)` 本身就是一个可调用物：把一个**有状态、不可复制或复制代价高**的函数对象交给按值接收的算法（`std::for_each`、`std::thread`、`std::function`）时，传 `std::ref(f)` 可以避免复制，并让状态的修改反映在原对象上。
+调用（[refwrap.invoke]）。`operator()` 返回 *INVOKE*(`get()`, `std::forward<ArgTypes>(args)...`)（[[func.require]]），返回类型是 `invoke_result_t<T&, ArgTypes...>`。它要求（Mandates）`T` 是完整类型。因为走 *INVOKE*，`reference_wrapper<int (S::*)()>` 这样包装成员指针的也能调用。
 
-## 比较（[refwrap.comparisons]）{{c++26}}
+`operator()` 让 `std::ref(f)` 本身成为一个可调用物。把一个有状态、不可复制或复制代价高的函数对象交给按值接收的 `std::for_each`、`std::thread`、`std::function` 时，传 `std::ref(f)` 可以避免复制，状态的修改也会反映在原对象上。
 
-C++26 之前，`rw1 == rw2` 能否编译取决于 `T` 的 `operator==` 是否是可以经隐式转换找到的非模板函数——对 `int` 能工作（内建 `==` 经 `operator int&` 转换），对 `std::string` 就不行（`operator==` 是模板，模板实参推导不考虑用户定义转换）。[[P2944R3]] 为它加上了三对隐藏友元：
+## 比较 [refwrap.comparisons] {{c++26}}
 
-| 运算符 | 形参 | Constraints |
+C++26 之前，`rw1 == rw2` 能否编译取决于 `T` 的 `operator==` 能不能经隐式转换找到。对 `int` 可以，内建的 `==` 经 `operator int&` 转换就能用；对 `std::string` 不行，它的 `operator==` 是模板，而模板实参推导不考虑用户定义转换。[[P2944R3]] 加上了三对隐藏友元（[[g:hidden-friend]]，只能经 ADL 找到的友元函数）：
+
+| 运算符 | 形参 | 约束 |
 |---|---|---|
-| `==` / `<=>` | `(reference_wrapper, reference_wrapper)` | `x.get() == y.get()` 良构且可转 `bool` / *synth-three-way* 良构 |
-| `==` / `<=>` | `(reference_wrapper, const T&)` | 同上，右侧为 `y` |
-| `==` / `<=>` | `(reference_wrapper, reference_wrapper<const T>)` | 另要求 `!is_const_v<T>` |
+| `==`、`<=>` | `(reference_wrapper, reference_wrapper)` | `x.get() == y.get()` 良构且可转为 `bool`；*synth-three-way*(x.get(), y.get()) 良构 |
+| `==`、`<=>` | `(reference_wrapper, const T&)` | 同上，右侧换成 `y` |
+| `==`、`<=>` | `(reference_wrapper, reference_wrapper<const T>)` | 同上，另要求 `is_const_v<T>` 为 false |
 
-- 比较的是**被引用的值**，不是地址。想比较“是否引用同一个对象”，写 `&a.get() == &b.get()`。
-- `<=>` 使用 *synth-three-way*（库在 [[expos.only.entity]] 中定义的说明用工具：有 `<=>` 用 `<=>`，否则用 `<` 合成 `weak_ordering`），所以只有 `<` 的旧类型也能用。
-- 第三对的 `!is_const_v<T>` 是为了避免 `reference_wrapper<const T>` 与自己比较时与第一对重载重复。
-- 它们都是隐藏友元（[[g:hidden-friend]]），只能经 ADL 找到，不会污染命名空间。
+比较的是被引用的值，不是地址。想知道两个包装是否引用同一个对象，写 `&a.get() == &b.get()`。
 
-## `ref` 与 `cref`（[refwrap.helpers]）
+`<=>` 用的 *synth-three-way* 是库内部的说明用工具（[[expos.only.entity]]）：类型有 `<=>` 就用它，否则用 `<` 合成一个 `weak_ordering`。所以只定义了 `<` 的旧类型也能用 `<=>` 比较。
+
+第三对要求 `T` 不是 const。`T` 本身是 const 时，`reference_wrapper<const T>` 就是 `reference_wrapper<T>`，这对重载会和第一对签名相同。
+
+## `ref` 与 `cref` [refwrap.helpers]
 
 ```cpp
 template<class T> constexpr reference_wrapper<T>       ref(T&) noexcept;
@@ -138,117 +157,75 @@ template<class T> constexpr reference_wrapper<T>       ref(reference_wrapper<T>)
 template<class T> constexpr reference_wrapper<const T> cref(reference_wrapper<T>) noexcept;
 ```
 
-- 对左值返回包装；对右值，`const T&&` 版本更匹配，而它被弃置——`std::ref(42)`、`std::cref(std::string("x"))` 都是编译期错误，防住了“包装一个马上要死的临时量”。（这里用 `const T&&` 而不是 `T&&`，是因为 `T&&` 在模板里是转发引用，会把左值也吃掉。）
-- 对 `reference_wrapper` 实参，**不再套一层**：`ref(ref(x))` 仍是 `reference_wrapper<T>`，`cref(ref(x))` 是 `reference_wrapper<const T>`。
-- ¶1：这些函数模板的 `T` 可以是不完整类型。
+对左值，它们返回包装。对右值，`const T&&` 版本匹配得更好而它被弃置，所以 `std::ref(42)`、`std::cref(std::string("x"))` 都是编译错误，避免了包装一个马上销毁的临时量。这里写 `const T&&` 而不是 `T&&`，是因为模板里的 `T&&` 是转发引用，会把左值也接过去。弃置的两个声明在 `<functional>` 的概要里（[[functional.syn]]）。
+
+实参已经是 `reference_wrapper` 时不再套一层：`ref(ref(x))` 仍是 `reference_wrapper<T>`，`cref(ref(x))` 是 `reference_wrapper<const T>`。¶1 这些函数模板的 `T` 同样可以是不完整类型。
 
 ```cpp run title="ref_rvalue.cpp" error
 #include <functional>
 int main() {
-  auto r = std::ref(42);                     // error：调用了被弃置的 ref(const T&&)
-  std::reference_wrapper<const int> c(42);   // error：FUN 约束不满足，没有可行构造函数
+  auto r = std::ref(42);                     // error: 调用了被弃置的 ref(const T&&)
+  std::reference_wrapper<const int> c(42);   // error: FUN 约束不满足，没有可行的构造函数
 }
 ```
 
-### 被库“解包”的地方
+### 哪些组件认得 `reference_wrapper`
 
-`reference_wrapper` 作为“我要引用”的信号，在多处被识别并解包为 `T&`：
+有几处库规则会把 `reference_wrapper<T>` 识别出来，当作 `T&` 处理：
 
-- `make_pair`、`make_tuple` 用 `unwrap_ref_decay_t`：`make_pair(std::ref(x), 1)` 得到 `pair<int&, int>`（[[pairs]]、[[tuple]]）；
-- `bind` 的绑定实参若是 `reference_wrapper<T>`，调用时作为 `T&` 传出（[[func.bind]] ¶7.1）；
-- *INVOKE* 的 ¶1.2、¶1.5 直接对 `reference_wrapper` 调用 `.get()`（[[func.require]]）。
+- `make_pair`、`make_tuple` 用 `unwrap_ref_decay_t` 计算元素类型：`make_pair(std::ref(x), 1)` 得到 `pair<int&, int>`（[[pairs]]、[[tuple]]）。
+- `bind` 的绑定实参是 `reference_wrapper<T>` 时，调用时作为 `T&` 传出（[[func.bind.bind#7]]）。
+- *INVOKE* 的 ¶1.2、¶1.5 分支对 `reference_wrapper` 直接调用 `.get()`（[[func.require]]）。
 
-而 `std::thread`、`bind_front` 没有专门的解包规则——它们存储 `reference_wrapper` 本身，调用时交出 `reference_wrapper` 对象，靠它的 `operator T&` 隐式转换为 `T&`。
+`std::thread` 和 `bind_front` 没有专门的解包规则。它们保存 `reference_wrapper` 本身，调用时把它交出去，再靠 `operator T&` 隐式转换为 `T&`。
 
-## 与 `common_reference` 的配合（[refwrap.common.ref]）
+## 与 `common_reference` 的配合 [refwrap.common.ref]
 
-C++20 的 `common_reference_t<reference_wrapper<int>&, int&>` 原本是 `int`（一个值类型），导致 `vector<reference_wrapper<int>>` 与 `vector<int>` 之类的范围组合在 `common_reference_with` 等概念下表现别扭。[[P2655R3]] 为 `basic_common_reference` 增加了两个偏特化：
+C++20 里 `common_reference_t<reference_wrapper<int>&, int&>` 是 `int`，一个值类型。这让 `reference_wrapper` 的范围与普通范围组合时，在 `common_reference_with` 之类的概念下表现别扭。C++23 的 [[P2655R3]] 为 `basic_common_reference` 增加了两个偏特化，结果变成了 `int&`：
 
-- 说明用变量模板 *is-ref-wrapper* 识别 `reference_wrapper` 特化；
-- 概念 *ref-wrap-common-reference-exists-with*&lt;R, T, RQ, TQ&gt; 要求 `R` 是 `reference_wrapper`、`common_reference_t<typename R::type&, TQ>` 存在、且 `RQ` 可转换为它；
-- 当这一关系**只在一个方向**成立时（`requires (... && !...)`，避免两个参数都是 `reference_wrapper` 时两个偏特化同时匹配而歧义），`type` 就是 `common_reference_t<typename R::type&, TQual<T>>`。
-
-效果：`common_reference_t<reference_wrapper<int>&, int&>` 是 `int&`。
-
-## CTAD
-
-推导指引 `reference_wrapper(T&) -> reference_wrapper<T>;` 让 `std::reference_wrapper rw = x;` 推导为 `reference_wrapper<int>`（[[temp.deduct.guide]]）。没有它，构造函数模板 `reference_wrapper(U&&)` 中的 `U` 与类模板形参 `T` 无关，隐式推导指引推不出 `T`。
-
-## 综合示例
-
-```cpp run title="refwrap_tour.cpp" ok
+```cpp run ok
 #include <functional>
 #include <type_traits>
-#include <vector>
-#include <algorithm>
-#include <cstdio>
-static_assert(std::is_trivially_copyable_v<std::reference_wrapper<int>>);   // ¶2
-int main() {
-  int a = 3, b = 1, c = 2;
-  std::vector<std::reference_wrapper<int>> v{a, b, c};
-  std::ranges::sort(v, std::less<int>{});      // 经 operator int& 比较被引用的值
-  v[0].get() = 100;                            // v[0] 引用的是 b
-  std::printf("%d %d %d\n", a, b, c);          // 3 100 2
-
-  std::reference_wrapper rw = a;               // CTAD：reference_wrapper<int>
-  static_assert(std::is_same_v<decltype(rw), std::reference_wrapper<int>>);
-  std::printf("%d\n", rw == 3);                // C++26：比较被引用的值
-  rw = c;                                      // 重新绑定，a 不变
-  std::printf("%d %d\n", a, rw.get());         // 3 2
-
-  static_assert(std::is_same_v<std::common_reference_t<std::reference_wrapper<int>&, int&>, int&>);
-}
+static_assert(std::is_same_v<
+    std::common_reference_t<std::reference_wrapper<int>&, int&>, int&>);
+int main() {}
 ```
 
-## libc++ 实现笔记
+偏特化的条件是：一侧 `R` 是 `reference_wrapper`，`common_reference_t<typename R::type&, TQ>` 存在，并且 `R`（带上原来的限定）能转换成它。这时 `type` 就是 `common_reference_t<typename R::type&, TQual<T>>`。条件还要求这一关系只在一个方向上成立，否则两个参数都是 `reference_wrapper` 时，两个偏特化会同时匹配而产生歧义。
 
-`__functional/reference_wrapper.h`：
+## 类模板实参推导
 
-- 唯一数据成员 `type* __f_;`，复制操作全部隐式生成，因而平凡。
-- `FUN` 被实现为私有静态成员 `static void __fun(_Tp&) _NOEXCEPT; static void __fun(_Tp&&) = delete;`，构造函数模板用 `__void_t<decltype(__fun(std::declval<_Up>()))>` 加 `enable_if` 做约束——一个条文里的说明用函数，几乎原样落地。
-- 存储时用 `std::addressof`，所以被引用类型重载了 `operator&` 也无妨。
-- C++26 的比较运算符用 `requires` 子句实现，`<=>` 走 `__synth_three_way`。
-- 基类 `__weak_result_type<_Tp>` 是为 C++17 之前的 `result_type`、`argument_type` 等成员类型准备的遗留设施（这些成员在 C++20 被移除）。
+推导指引 `reference_wrapper(T&) -> reference_wrapper<T>` 让 `std::reference_wrapper rw = x;` 推导为 `reference_wrapper<int>`（[[temp.deduct.guide]]）。没有它就推不出来：构造函数模板 `reference_wrapper(U&&)` 里的 `U` 与类模板形参 `T` 无关。
 
-## 历史演进
+## 历史与演进
 
 !!! history
-    - **C++11**：从 TR1 引入，带 `reference_wrapper(T&)` + 弃置的 `reference_wrapper(T&&)`。
-    - **C++17**：增加推导指引；*INVOKE* 直接识别 `reference_wrapper`。
-    - **C++20**：全面 `constexpr`；构造函数改为 `FUN` 约束模板（[[LWG2993]]）；`T` 允许不完整（`ref`/`cref` 同样）。
-    - **C++23**：`basic_common_reference` 特化（[[P2655R3]]）。
-    - **C++26**：`==` / `<=>`（[[P2944R3]]）。
+    - C++11：从 TR1 引入，构造函数是 `reference_wrapper(T&)` 加弃置的 `reference_wrapper(T&&)`。
+    - C++17：增加推导指引；*INVOKE* 直接识别 `reference_wrapper`。
+    - C++20：成为 `constexpr`；构造函数改为 `FUN` 约束的模板（[[LWG2993]]）；`T` 允许是不完整类型（[[P0357R3]]）。
+    - C++23：`basic_common_reference` 的偏特化（[[P2655R3]]）。
+    - C++26：`==` 与 `<=>`（[[P2944R3]]）。
 
 ## 思考题
 
 !!! question "思考题 1"
-    `std::reference_wrapper<const std::string> r = "hello";` 能编译吗？`std::reference_wrapper<const std::string> r = some_std_string_view;` 呢？
+    `std::reference_wrapper<const std::string> r = "hello";` 能编译吗？用一个 `std::string_view` 左值来初始化呢？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-都不能。`FUN(declval<const char(&)[6]>())`：`FUN(const string&)` 需要先构造一个临时 `std::string`——即实参转换后成为右值，而 `FUN(const string&&)` 对这个转换结果同样可行且更好（绑定右值），它是弃置的，调用非良构，约束不满足。`string_view` 到 `string` 是 `explicit` 转换，`FUN` 两个重载都不可行，同样不满足约束。这正是 `FUN` 设计的目的：凡是需要物化临时量才能绑定的情形一律拒绝。
+都不能。对 `"hello"`，`FUN(const string&)` 和 `FUN(const string&&)` 都要先经用户定义转换构造一个临时 `std::string`；两个转换序列用同一个转换函数，再比较后面的引用绑定，右值绑定到右值引用更好，于是选中被弃置的 `FUN(T&&)`，约束不满足。
+
+`string_view` 到 `string` 的转换是 `explicit` 的，`FUN` 的两个重载都不可行，同样不满足约束。凡是需要物化临时量才能绑定的情形，`FUN` 都会拒绝。
 </details>
 
 !!! question "思考题 2"
-    为什么 `std::function<void()> f = std::ref(callable);` 是一个常见的优化手法？它有什么风险？
+    为什么 `std::function<void()> f = std::ref(callable);` 是一种常见的优化写法？它有什么风险？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-`reference_wrapper` 只有一个指针大小，且是平凡可复制的，`std::function` 的实现通常能把它放进小缓冲区（SBO）而不做堆分配；复制 `f` 也只是复制指针，而不是复制可能很大的 `callable`。风险是生命周期：`f` 不拥有 `callable`，`callable` 先销毁就成了悬垂引用。C++26 的 `std::function_ref` 把这种“非拥有调用”做成了专门的类型（[[func.wrap.ref]]）。
+`reference_wrapper` 只有一个指针大小并且平凡可复制，`std::function` 的实现通常能把它放进内部的小缓冲区而不做堆分配；复制 `f` 也只复制一个指针，而不是复制可能很大的 `callable`。
+
+风险在生命周期：`f` 不拥有 `callable`，`callable` 先销毁，`f` 就悬垂了。C++26 的 `std::function_ref` 把这种不拥有目标的调用做成了专门的类型（[[func.wrap.ref]]）。
 </details>
-
-## 小结
-
-!!! summary
-    | 要点 | 内容 |
-    |---|---|
-    | 本质 | 一个 `T*`；可复制、可赋值（重新绑定）、平凡可复制；`T` 可不完整 |
-    | 构造约束 | `FUN(T&)` / `FUN(T&&) = delete`：拒绝右值与需要临时量的转换，允许经转换函数得到的左值；不参与重载决议而非“可行但弃置” |
-    | 访问 | `get()`、`operator T&`；成员访问不会隐式转换 |
-    | 调用 | `operator()` = *INVOKE*(`get()`, args...)，Mandates `T` 完整 |
-    | 比较（C++26） | 比较被引用的值；`<=>` 用 *synth-three-way*；隐藏友元 |
-    | `ref`/`cref` | 右值版本弃置；对 `reference_wrapper` 不再嵌套 |
-    | 解包 | `make_pair`/`make_tuple`、`bind`、*INVOKE* 识别它 |
-    | `common_reference` | `common_reference_t<reference_wrapper<int>&, int&>` 为 `int&`（C++23） |
