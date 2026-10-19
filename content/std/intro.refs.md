@@ -1,43 +1,47 @@
 ---
 title: 规范性引用文件
-summary: C++ 标准把 C 标准、POSIX、IEEE 754、Unicode、ECMAScript 等文件的部分内容纳入，作为自己的要求；这一节列出它们，并区分有日期和无日期引用。
+summary: C++ 标准没有写出、却必须遵守的那部分规则来自哪里：C 标准库来自 C23，浮点来自 IEEE 754，std::regex 的默认语法来自 ECMAScript，文件系统来自 POSIX，字符来自 Unicode。
 status: done
 related: intro.defs, intro.compliance, library.c, topics/how-to-read-the-standard
 tags: 总则, C 兼容, Unicode
-updated: 2026-10-17
+updated: 2026-10-18
 ---
 
-第 2 章列出标准的**规范性引用文件**（normative references）。这一节很短，但回答了一个问题：C++ 标准里有大量内容并没有在 C++ 标准里写出来，例如 `printf` 的格式说明符、`<cmath>` 函数的语义、正则表达式的默认语法、什么是合法的 Unicode 标识符。它们的定义就在这里列出的文件里。
+!!! tldr
+    - C++ 标准库建立在 C23（ISO/IEC 9899:2024）的标准库之上。`<cstdio>`、`<cmath>` 等头文件的含义由 C 标准规定，其中的未定义行为也一并带了过来。
+    - 浮点算术引用的是 ISO/IEC 60559，也就是 IEEE 754。但 C++ 不要求 `float`、`double` 采用它，要用 `numeric_limits<T>::is_iec559` 查询。
+    - `std::regex` 的默认语法是 1999 年的 ECMAScript 第 3 版；文件系统库和 POSIX 风格的正则语法按 POSIX 规定。
+    - 标识符能用哪些字符、`std::format` 怎样估计宽度，按 Unicode 15.1，实现也可以用更新的版本。
 
-## 规范性引用是什么意思（¶1）
+## printf 的规则写在哪里
 
-¶1 正文引用下列文件的方式，使得它们的部分或全部内容构成本文档的要求。对有日期的引用，只适用所引用的那一版；对无日期的引用，适用最新版（包括所有修订）。
+```cpp run ub
+#include <cstdio>
+int main() {
+  long n = 42;
+  std::printf("%d\n", n);   // UB: %d 要求 int，实参是 long
+}
+```
+
+C++ 标准里找不到 `%d` 的含义。[[cstdio.syn]] 只说 `<cstdio>` 的内容和含义与 C 标准库头文件 `<stdio.h>` 相同，于是 C 标准对 `printf` 的全部规定都成了 C++ 的规定。C 标准说格式与实参类型不匹配是未定义行为，所以这段 C++ 代码也是。本机 Clang 23 对此给出 `-Wformat` 警告。
+
+¶1 [intro.refs] 列出的就是这样的文件。正文引用它们的方式，使得它们的部分或全部内容成为本标准的要求。
 
 !!! std
     The following documents are referred to in the text in such a way that some or all of their content constitutes requirements of this document.
 
-这里有三个要点。
+## 引用了哪些文件
 
-**1. 被引用的内容具有和标准正文同等的效力。** [[cstdio.syn]] 说 `<cstdio>` 的内容和含义与 C 标准库头文件 `<stdio.h>` 相同，于是 C 标准第 7.23 节关于 `printf` 的全部规定都成了 C++ 的要求，其中的未定义行为也包括在内（例如格式说明符与实参类型不匹配是 UB）。
+| 引用 | 对 C++ 程序员意味着什么 |
+|---|---|
+| ISO/IEC 9899:2024（C23） | C 标准库头文件（`<cstdio>`、`<cmath>`、`<cstring>` 等）的语义，库条款里大量 "See also: ISO/IEC 9899:2024" 都指向它 |
+| ISO/IEC 60559:2020（IEEE 754） | `numeric_limits::is_iec559`；`std::float32_t`、`std::float64_t` 等扩展浮点类型的格式（[[basic.extended.fp]]） |
+| ISO/IEC/IEEE 9945（POSIX，Issue 7 及两份勘误） | 文件系统库的语义（[[fs.conform.9945]]）；`std::regex` 的 basic、extended、awk、grep、egrep 语法；`std::errc` 的错误码 |
+| ECMA-262 第 3 版（1999，ECMAScript） | `std::regex` 的默认语法，经过修改（[[re.grammar]]） |
+| Unicode 15.1 | 字符集、标识符语法（Annex E [[uaxid]]）、字面量编码、`std::format` 的宽度估计 |
+| ISO 8601-1:2019 | `<chrono>` 格式化中的日期表示和基于周的年份（[[time.format]]） |
 
-**2. 并非整份文件都适用。** 原文说的是"部分或全部内容"，只有正文实际引用到的那部分才构成要求。C++ 引用了 C 标准，但 C 的语言规则（比如 C 的隐式 `int`、VLA）当然不适用于 C++；适用的主要是 C 标准库（第 7 章），而且还要经过 C++ 的修改（[[library.c]]、[[diff.library]]）。
-
-**3. 有日期与无日期。** 例如引用 ISO/IEC 9899:2024，就锁定了 C23 这一版；引用 ISO/IEC 2382（没有年份），则自动跟随最新版。C++ 对实质性的技术引用几乎都带日期，这样，C 或 POSIX 出了新版本，也不会在 C++ 标准不知情的情况下改变 C++ 的要求。Unicode 引用了具体版本，但 [[intro.compliance]] ¶10 额外允许实现使用更新的版本。
-
-与之相对的是参考文献（Bibliography）。草案最后的参考文献列出了历届 C++ 标准、IANA 字符集与时区数据库、BLAS 相关论文等，它们是资料性的，不构成要求。
-
-## 引用了哪些文件、各自用来做什么
-
-| 引用 | 是什么 | C++ 用它来规定什么 |
-|---|---|---|
-| ISO/IEC 2382 | 信息技术词汇 | 基础术语（[[intro.defs]] ¶1） |
-| ISO 8601-1:2019 | 日期和时间的表示 | `<chrono>` 格式化中基于周的年份等（[[time.format]]） |
-| ISO/IEC 9899:2024 | C 编程语言（C23） | C 标准库头文件的内容与语义（`<cstdio>`、`<cmath>`、`<cstring>` …），大量 "See also: ISO/IEC 9899:2024, 7.x" 式的引注 |
-| ISO/IEC/IEEE 9945:2009 及两份技术勘误 | POSIX Base Specifications, Issue 7 | 文件系统库的语义（[[fs.conform.9945]]）、正则表达式的 basic/extended/awk/grep/egrep 语法、`errc` 错误码 |
-| ISO/IEC 60559:2020 | 浮点算术（即 IEEE 754） | `numeric_limits::is_iec559`、扩展浮点类型 `std::float32_t` 等（[[basic.extended.fp]]） |
-| ISO 80000-2:2019 | 数学符号与术语 | 数学术语和记号（[[intro.defs]] ¶1 把它的定义纳入标准词汇） |
-| ECMA-262 第 3 版（1999） | ECMAScript 语言规范 | `std::regex` 的默认语法（修改过的 ECMAScript，[[re.grammar]]） |
-| The Unicode Standard 15.1 | Unicode | 字符集、标识符语法（UAX #31，见 Annex E [[uaxid]]）、`std::format` 的宽度估计、字面量编码 |
+下面的程序各用到了其中一项：
 
 ```cpp run ok
 #include <chrono>
@@ -47,38 +51,39 @@ updated: 2026-10-17
 #include <regex>
 int main() {
   // ISO/IEC 60559（IEEE 754）：double 是否采用它由实现报告
-  std::printf("double is IEC 60559: %d\n", std::numeric_limits<double>::is_iec559);
-  // ISO 8601：%F 是日历日期，%G-W%V-%u 是"基于周的年 - 周 - 星期"
+  std::printf("%d\n", std::numeric_limits<double>::is_iec559);   // 1
+
+  // ISO 8601：%F 是日历日期，%G-W%V-%u 是基于周的年份、周数和星期
+  // 输出 2027-01-01 = 2026-W53-5
   using namespace std::chrono;
   sys_days d = 2027y / January / 1;
-  std::puts(std::format("{:%F} = {:%G-W%V-%u}", d, d).c_str());   // 2027-01-01 = 2026-W53-5
-  // ECMAScript 第 3 版：std::regex 的默认语法，支持前瞻断言
-  std::printf("%d\n", std::regex_search("ab", std::regex("a(?=b)")));   // 1
-  // POSIX：同样的模式在 extended（POSIX ERE）语法下非法
+  std::puts(std::format("{:%F} = {:%G-W%V-%u}", d, d).c_str());
+
+  // ECMAScript 第 3 版：默认语法支持前瞻断言
+  std::printf("%d\n", std::regex_search("ab", std::regex("a(?=b)")));  // 1
+
+  // POSIX：同样的模式不是合法的扩展正则表达式（ERE）
   try { std::regex("a(?=b)", std::regex::extended); }
   catch (const std::regex_error&) { std::puts("not valid POSIX ERE"); }
 }
 ```
 
-本机 Clang 23 + libc++ 上输出 `1`、`2027-01-01 = 2026-W53-5`、`1`、`not valid POSIX ERE`。2027 年 1 月 1 日是星期五，按 ISO 8601 的规则它属于 2026 年的第 53 周，这正是基于周的年与日历年的区别。
+本机 Clang 23 + libc++ 的输出与注释一致。2027 年 1 月 1 日是星期五，按 ISO 8601 的规则它属于 2026 年的第 53 周，这就是基于周的年份与日历年份的区别。
 
-## 为什么要引用而不是照抄
+## 与 C 标准库的关系
 
-- **与 C 兼容是 C++ 的根本。** C++ 标准库包含 C 标准库，并承诺与之兼容。如果照抄 C 的条文，两份文件迟早会出现差异；引用则保证两边说的是同一个 `printf`。代价是 C++ 读者有时要去翻 C 标准才能得到完整答案。
-- **专业领域交给专业标准。** 浮点运算的精确语义、Unicode 的字符属性、POSIX 文件系统的行为，都有各自的标准组织在维护。C++ 委员会不必（也没有能力）重新规定它们。
-- **ISO 的规则。** ISO 的起草规则要求所有规范性引用集中列在"规范性引用文件"一章，并注明版本，所以 ECMAScript、Unicode 这类非 ISO 文件也要在这里列明出处和版本。
+C++ 引用 C 标准，主要是为了它的标准库（C 标准第 7 章）。C 的语言规则并不适用于 C++：引用的只是正文实际用到的那部分。而且这部分还要经过 C++ 的修改（[[library.c]]、[[diff.library]]）。例如 C 的 `strchr` 接受 `const char*`、返回 `char*`，C++ 的 `<cstring>` 则提供 const 正确的两个重载（[[cstring.syn]]）；C 的 `<tgmath.h>` 宏在 C++ 中由函数重载代替。
 
-## 历史与演进
+引用的 C 标准版本随 C++ 一起推进：C++98/03 引用 C90，C++11/14 引用 C99，C++17 引用 C11，C++20 和 C++23 引用 C17，当前草案引用 C23。每升级一次，C 库的一批变化就会带进 C++。
 
-!!! history
-    - C++ 引用的 C 标准版本随时间推进：C++98/03 引用 C90，C++11/14 引用 C99，C++17 引用 C11，C++20 和 C++23 引用 C17（ISO/IEC 9899:2018），当前草案引用 C23（ISO/IEC 9899:2024）。每次升级都意味着一批 C 库变化被带入 C++（例如 C23 的 `<stdbit.h>` 进入了 C++26 的头文件列表）。
-    - Unicode 和 ISO 8601 的引用是随着 `char8_t`/Unicode 标识符和 `<chrono>` 日历、格式化等特性加入的；Unicode 引用的版本也在不断更新。
-    - ECMAScript 的引用自 C++11 引入 `<regex>` 起就固定在 1999 年的第 3 版，因为 `std::regex` 的默认语法正是以它为基础修改而来。
+!!! pitfall "std::regex 就是 JavaScript 的正则"
+    它基于 1999 年的 ECMAScript 第 3 版，并做过修改。后来 JavaScript 加入的命名捕获组、后行断言、`u` 标志等，`std::regex` 都不支持。
 
-## 陷阱
+<details class="fine" markdown="1"><summary>其余条文</summary>
 
-!!! pitfall "“C 标准里定义的行为在 C++ 里也一样”"
-    只对被引用的部分成立，而且要经过 C++ 的修改。例如 C 的 `<string.h>` 中 `strchr` 接受 `const char*` 返回 `char*`，而 C++ 的 `<cstring>` 提供 `const` 正确的两个重载（[[cstring.syn]]）；C 的 `<tgmath.h>` 宏在 C++ 中由重载代替。C 的核心语言规则（如联合体的类型双关）则完全不适用。
+- 有日期的引用（如 ISO/IEC 9899:2024）只适用所引的那一版；无日期的引用适用最新版，包括所有修订。C++ 对实质性的技术文件几乎都带日期，这样 C 或 POSIX 出了新版，不会在 C++ 不知情的情况下改变 C++ 的要求。Unicode 虽然引用了具体版本，但 [[intro.compliance]] 的 ¶10 允许实现使用更新的版本。
+- ISO/IEC 2382（信息技术词汇）和 ISO 80000-2:2019（数学符号）提供基础术语和数学记号，[[intro.defs]] 把它们的定义纳入标准词汇。
+- POSIX 和 ECMAScript 的脚注是商标声明。
+- 草案末尾的参考文献（Bibliography）列出了历届 C++ 标准、IANA 时区数据库等，它们只是参考资料，不构成要求。
 
-!!! pitfall "“`std::regex` 就是 JavaScript 的正则”"
-    它基于 1999 年的 ECMAScript 第 3 版，而且做过修改（[[re.grammar]] 增加了一些 POSIX 风格的字符类等）。后来 JavaScript 正则新增的命名捕获组、后行断言、`u` 标志等，`std::regex` 都不支持。
+</details>

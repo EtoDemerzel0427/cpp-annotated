@@ -1,98 +1,94 @@
 ---
 title: 本文档的结构
-summary: 标准的全局地图：第 5–15 章是语言，第 16–33 章和 Annex D 是库，其余附录各司其职；以及库条款统一的描述方式。
+summary: 标准的全局地图：第 5–15 章是语言，第 16–33 章和 Annex D 是库，其余附录只是说明性的汇总；遇到一个问题该去哪一部分找答案。
 status: done
 related: syntax, intro.compliance, library, topics/how-to-read-the-standard
 tags: 总则, 导读
-updated: 2026-10-17
+updated: 2026-10-18
 ---
 
-[intro.structure] 相当于标准自带的阅读指南，用四段话勾勒出全书的结构。读懂它，就知道一个问题该去哪一部分找答案。
+!!! tldr
+    - 第 5–15 章描述语言，第 16–33 章和 Annex D 描述标准库。
+    - 附录中只有 Annex D（弃用的特性）是规范性的。语法汇总、实现限制、兼容性差异、UB 和 IFNDR 汇总都只是说明性的，引用时要回到正文。
+    - 想知道升级标准版本后代码为什么不能编译了、或者含义变了，查 Annex C。
+    - 引用条款时用 stable name（如 `[basic.life]`），不用章节号，章节号在各版之间经常变。
+
+## 遇到问题去哪里找
+
+| 问题 | 去哪里 |
+|---|---|
+| 这段代码合法吗？是什么意思？ | 第 5–15 章，先看语法（[[syntax]]），再看相应条款的语义规则 |
+| 这个库函数保证什么？ | 先在第 16 章 [[structure.specifications]] 弄清 *Preconditions*、*Effects* 等要素的含义，再读对应章节 |
+| 为什么换了 `-std=` 之后代码变了？ | Annex C [[diff]]，按版本列出了会改变已有代码的变更 |
+| 这种情况是不是 UB 或 IFNDR？ | Annex F [[ub]] 和 Annex G [[ifndr]] 是索引，结论要落到正文段落上 |
 
 ## 语言部分（¶1）
 
-¶1 第 5 章 [[lex]] 到第 15 章 [[cpp]] 描述 C++ 编程语言。这部分描述包括按 [[syntax]] 所述形式给出的详细语法规范。为了方便，Annex A [[gram]] 重复了所有这些语法规范。
+¶1 第 5 章 [[lex]] 到第 15 章 [[cpp]] 描述 C++ 语言，其中的语法按 [[syntax]] 所述的记法给出。为了方便，Annex A [[gram]] 把所有产生式重复汇总了一遍。
 
-| 章 | stable name | 内容 |
-|---|---|---|
-| 5 | [[lex]] | 词法：翻译阶段、字符集、记号、字面量 |
-| 6 | [[basic]] | 基础：声明与定义、ODR、作用域、名字查找、链接、对象模型、类型、程序执行、内存模型、契约断言 |
-| 7 | [[expr]] | 表达式：值类别、转换、各运算符、常量求值 |
-| 8 | [[stmt]] | 语句 |
-| 9 | [[dcl]] | 声明：说明符、声明符、初始化、函数定义、结构化绑定、枚举、命名空间、属性 |
-| 10 | [[module]] | 模块 |
-| 11 | [[class]] | 类 |
-| 12 | [[over]] | 重载 |
-| 13 | [[temp]] | 模板 |
-| 14 | [[except]] | 异常处理 |
-| 15 | [[cpp]] | 预处理指令 |
+| 章 | 内容 |
+|---|---|
+| 5 [[lex]] | 词法：翻译阶段、字符集、记号、字面量 |
+| 6 [[basic]] | 基础：声明与定义、ODR、作用域、名字查找、链接、对象模型、类型、程序执行、内存模型、契约断言 |
+| 7 [[expr]] | 表达式：值类别、转换、各运算符、常量求值 |
+| 8 [[stmt]] | 语句 |
+| 9 [[dcl]] | 声明：说明符、声明符、初始化、函数定义、结构化绑定、枚举、命名空间、属性 |
+| 10 [[module]] | 模块 |
+| 11 [[class]] | 类 |
+| 12 [[over]] | 重载 |
+| 13 [[temp]] | 模板 |
+| 14 [[except]] | 异常处理 |
+| 15 [[cpp]] | 预处理 |
 
-注意，第 4 章总则（本章）和第 1–3 章不属于语言描述。[[intro.compliance]] ¶7 说独立实现要支持"第 5 章到第 15 章描述的全部语言"，指的就是这个范围。
-
-Annex A 只是语法的汇总，而且 [[gram.general]] 明说它"不是对语言的精确陈述"。它接受的是合法 C++ 构造的超集，语法上合法但没有意义的构造，要靠歧义消解规则（[[stmt.ambig]]、[[dcl.spec]]、[[class.member.lookup]]）、访问控制和类型规则才能筛掉。所以**单靠语法永远无法判断一段代码是否良构**。
+第 1–4 章不属于语言描述。[[intro.compliance]] 说独立实现要支持"第 5 章到第 15 章描述的全部语言"，指的就是上表这个范围。
 
 ## 库部分（¶2）
 
-¶2 第 17 章 [[support]] 到第 33 章 [[exec]] 以及 Annex D [[depr]]（合称**库条款**，*library clauses*）描述 C++ 标准库，包括构成标准库的实体和宏的详细描述，其形式由第 16 章 [[library]] 规定。
+¶2 第 17 章 [[support]] 到第 33 章 [[exec]]，加上 Annex D [[depr]]，合称**库条款**（library clauses），描述标准库。它们的写法由第 16 章 [[library]] 规定。
 
-第 16 章库引言本身不定义任何库设施，而是规定如何读库条款，以及库与程序之间的契约：
+第 16 章本身不定义任何库设施。它规定怎样读库条款：头文件概要（synopsis）怎么读，*Constraints*、*Mandates*、*Preconditions*、*Effects*、*Returns*、*Throws*、*Complexity* 等要素各是什么意思（[[structure.specifications]]）。它还规定程序与库之间的约定，例如哪些名字保留给实现（[[reserved.names]]）、程序能不能往 `namespace std` 里加东西（[[namespace.std]]）。
 
-- [[description]]：描述方法。包括每个库条款的结构（[[structure]]），即概要表、头文件概要（synopsis）、要求、详细规范；详细规范中的各个要素 *Constraints*、*Mandates*、*Constant When*、*Preconditions*、*Hardened preconditions*、*Effects*、*Synchronization*、*Postconditions*、*Result*、*Returns*、*Throws*、*Complexity*、*Remarks*、*Error conditions* 的确切含义（[[structure.specifications]]）；以及仅用于说明（exposition only）的成员、"see below"、"unspecified" 类型等约定（[[conventions]]）。
-- [[requirements]]：库的整体要求。头文件清单、独立实现的子集（[[compliance]]）、程序使用库的规则（[[using]]）、保留名字（[[reserved.names]]）、对程序提供的函数与类型的要求（[[res.on.functions]]）、对实现的约束（[[conforming]]）。
+| 章 | 内容 |
+|---|---|
+| 17 [[support]] | 语言支持：`<cstddef>`、`<limits>`、`<new>`、`<exception>`、`<contracts>`、`<compare>`、`<coroutine>` 等 |
+| 18 [[concepts]] | 概念 |
+| 19 [[diagnostics]] | 异常类、`<system_error>`、`<stacktrace>`、`<debugging>` |
+| 20 [[mem]] | 智能指针、分配器、`<memory_resource>` |
+| 21 [[meta]] | 类型特征、`<ratio>`、反射 `<meta>` |
+| 22 [[utilities]] | `pair`、`tuple`、`optional`、`variant`、`expected`、函数对象、`<bit>` 等 |
+| 23 [[containers]] | 容器，以及 `span`、`mdspan` |
+| 24 [[iterators]] | 迭代器 |
+| 25 [[ranges]] | 范围 |
+| 26 [[algorithms]] | 算法 |
+| 27 [[strings]] | 字符串 |
+| 28 [[text]] | `<charconv>`、本地化、`<format>`、正则表达式 |
+| 29 [[numerics]] | 数值 |
+| 30 [[time]] | 时间 |
+| 31 [[input.output]] | 输入输出 |
+| 32 [[thread]] | 并发 |
+| 33 [[exec]] | 执行控制（`std::execution`） |
 
-| 章 | stable name | 内容 |
+Annex D 列在库条款里，是因为弃用的特性仍然是标准的一部分，实现必须支持。弃用只表示它将来可能被移除，不建议再用。
+
+## 附录（¶3–¶4）
+
+¶3 Annex B 建议了实现在容量上的下限。
+
+¶4 Annex C 概述 C++ 自首次发布以来的演进，详细说明 C++ 与 C 的区别；某些只为兼容而存在的特性放在 Annex D。
+
+当前草案的全部附录如下，[intro.structure] 没有提到 E、F、G：
+
+| 附录 | 性质 | 内容 |
 |---|---|---|
-| 17 | [[support]] | 语言支持：`<cstddef>`、`<limits>`、`<new>`、`<typeinfo>`、`<exception>`、`<contracts>`、`<compare>`、`<coroutine>` … |
-| 18 | [[concepts]] | 概念库 |
-| 19 | [[diagnostics]] | 诊断：异常类、`<system_error>`、`<stacktrace>`、`<debugging>` |
-| 20 | [[mem]] | 内存管理：智能指针、分配器、`<memory_resource>` |
-| 21 | [[meta]] | 元编程：类型特征、`<ratio>`、反射 `<meta>` |
-| 22 | [[utilities]] | 通用工具：`pair`、`tuple`、`optional`、`variant`、`expected`、函数对象、`<bit>` … |
-| 23 | [[containers]] | 容器与视图（`span`、`mdspan`） |
-| 24 | [[iterators]] | 迭代器 |
-| 25 | [[ranges]] | 范围 |
-| 26 | [[algorithms]] | 算法 |
-| 27 | [[strings]] | 字符串 |
-| 28 | [[text]] | 文本处理：`<charconv>`、本地化、`<text_encoding>`、`<format>`、正则表达式 |
-| 29 | [[numerics]] | 数值 |
-| 30 | [[time]] | 时间 |
-| 31 | [[input.output]] | 输入输出 |
-| 32 | [[thread]] | 并发支持 |
-| 33 | [[exec]] | 执行控制（`std::execution`） |
+| A [[gram]] | 说明性 | 语法汇总，接受的是合法代码的超集 |
+| B [[implimits]] | 说明性 | 嵌套深度、模板递归深度等量的建议最小值 |
+| C [[diff]] | 说明性 | 与 C 及与各个旧版本 C++ 的差异 |
+| D [[depr]] | 规范性 | 弃用的特性 |
+| E [[uaxid]] | 说明性 | 与 Unicode UAX #31（标识符）的符合情况 |
+| F [[ub]] | 说明性 | 核心语言未定义行为汇总 |
+| G [[ifndr]] | 说明性 | 非良构、不要求诊断的规则汇总 |
 
-Annex D 是唯一一个**规范性**的附录。被弃用的特性仍然是标准的一部分，实现必须支持（[[intro.compliance]] ¶2.1 把它与第 5–33 章并列）。弃用只表示这项特性将来可能被移除，不建议再用。
-
-## 其余附录（¶3–¶4）
-
-¶3 Annex B [[implimits]] 建议了符合标准的实现在容量上的下限。
-
-¶4 Annex C [[diff]] 概述了 C++ 自首次发布以来的演进，并详细解释了 C++ 与 C 的区别。C++ 的某些特性仅为兼容目的而存在，Annex D [[depr]] 描述了这些特性。
-
-Annex C 对 language lawyer 特别有用。它按版本列出了每次修订中会改变已有合法代码的含义、或使其变为非法的变更（例如 [[diff.cpp23]]、[[diff.cpp20]]……），每条都写明受影响的条款、变化、理由、对原有特性的影响，并附有例子。如果想知道为什么一段代码在 C++20 能编译、在 C++23 不行，先查这里。
-
-当前草案中另有几份附录，[intro.structure] 尚未提及：
-
-| 附录 | stable name | 性质 | 内容 |
-|---|---|---|---|
-| A | [[gram]] | 资料性 | 语法汇总 |
-| B | [[implimits]] | 资料性 | 实现的容量建议值 |
-| C | [[diff]] | 资料性 | 兼容性差异 |
-| D | [[depr]] | **规范性** | 兼容性特性（弃用） |
-| E | [[uaxid]] | 资料性 | 与 Unicode UAX #31（标识符）的符合情况 |
-| F | [[ub]] | 资料性 | 核心语言未定义行为汇总 |
-| G | [[ifndr]] | 资料性 | 非良构、不要求诊断的规则汇总 |
-
-Annex F 和 Annex G 是较新加入的。它们只汇总散布在正文中的规则，每条都链接回正文并附上例子；它们本身不是规范依据，引用时应引用正文条款。
-
-## 怎么用这张地图
-
-- 想知道一段代码是否合法，去第 5–15 章，从语法（[[syntax]]、[[gram]]）开始，再看相应条款的语义规则。
-- 想知道一个库函数保证什么，先去第 16 章弄清各规范要素的含义，再去对应章节读详细规范。
-- 想知道升级标准版本后代码的行为为什么变了，去 Annex C。
-- 想判断某种情况算不算 UB 或 IFNDR，Annex F、G 是很好的索引，但结论要落到正文段落上。
-
-更完整的阅读方法见 [[topics/how-to-read-the-standard]]。
+Annex C 的每一条都写明受影响的条款、变化、理由、对原有代码的影响，并附有例子。例如 [[diff.cpp23]] 列出的是 C++26 中会让 C++23 代码改变含义或变得非法的变更。
 
 !!! history
-    - 第 33 章 [exec]（执行控制库，`std::execution`）是 C++26 新增的。库条款的划分在历次修订中多次调整（例如 [mem]、[meta]、[text] 都是从更大的章节中拆分或重组出来的），同一条款在不同版本中的章节号经常不同，所以引用条款时请使用 stable name，而不是章节号。
-    - 条文内部用 "Clause [support] through Clause [exec]" 这样的 stable name 区间来指称范围，而不写章节号，所以增删章节时 [intro.structure] 本身几乎不用改。
+    条文用 "Clause [support] through Clause [exec]" 这样的 stable name 区间指称范围，不写章节号，所以增删章节时 [intro.structure] 几乎不用改。第 33 章 [exec] 是 C++26 新增的；[mem]、[meta]、[text] 等章都是在历次修订中从更大的章节拆分或重组出来的。
