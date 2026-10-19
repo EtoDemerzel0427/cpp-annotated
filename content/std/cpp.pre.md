@@ -1,21 +1,124 @@
 ---
 title: 序言
-summary: 预处理指令的总文法；什么样的一行才算"指令"（# / import / module / export 四种引导记号）；条件支持的指令；跳过组中的宽松语法；指令内的空白限制；指令内的记号默认不做宏展开。
-status: draft
+summary: 预处理的总文法；一行在什么条件下是预处理指令（以 #、import、module、export 开头的四种情形）；有条件支持的指令；全局模块片段的限制；被跳过的组里语法放宽；指令内的空白限制；指令里的记号默认不做宏展开。
+status: done
 related: lex.phases, lex.pptoken, cpp.cond, cpp.replace, cpp.module, cpp.import, module.unit
 tags: 预处理, 文法, 模块
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[[cpp.pre]] 是第 15 章的"总则"：它给出整个预处理文法（*preprocessing-file*），并回答一个看似简单、其实暗藏玄机的问题——**哪些行是[[g:preprocessing-directive|预处理指令]]？**
+!!! tldr
+    - 一行是不是预处理指令，在翻译阶段 4 开始时按词法决定：行首是 `#`，或者是后面跟着特定记号的 `import`、`module`、`export`。宏展开造不出指令。
+    - 行首的 `import<...>`、`module m;` 会被当成模块相关的指令，所以名为 `import` 或 `module` 的旧代码可能突然无法编译。
+    - `#` 后面跟一个非标准名字，是有条件支持的指令，例如 `#ident`；不支持它的实现必须诊断。
+    - 被 `#if 0` 跳过的组里，指令名之后可以写任何记号，但整段仍要能切分成预处理记号。
+    - 指令里的记号默认不做宏展开；`#if`、`#elif`、`import`，以及宏形式的 `#include`、`#embed`、`#line` 是例外。
 
-在 C++17 之前，答案只有一句话："以 `#` 开头的行"。C++20 引入模块之后，`import`、`module`、`export` 开头的某些行也成了指令，于是这一节被重写成一个相当精细的判定规则。理解它，才能理解为什么 `import<int> x;` 会去找一个叫 `int` 的头文件，以及为什么构建系统可以只靠"轻量预处理"就扫描出模块依赖。
+**预处理**（[[g:preprocessing]]）指在翻译之前有条件地跳过部分源码、包含其他文件、从头文件单元导入宏，以及替换宏（¶1）。它发生在翻译阶段 4，操作的对象是阶段 3 切分出的**预处理记号**（[[g:preprocessing-token]]）。本页的核心问题是：哪些行是**预处理指令**（[[g:preprocessing-directive]]）？
 
-前置知识：翻译阶段 3 产生预处理记号、阶段 4 执行指令（[[lex.phases]]）；*header-name* 何时被识别（[[lex.pptoken#5]]）。
+## 什么算预处理指令（¶2）
 
-## 总文法速览
+C++17 及以前，答案很简单：以 `#` 开头的行。C++20 引入模块之后，以 `import`、`module`、`export` 开头的某些行也成了指令。先看标准的例 1：
 
-预处理文法的顶层是：
+```cpp
+#                       // 指令
+module ;                // 指令
+export module leftpad;  // 指令
+import <string>;        // 指令
+export import "squee";  // 指令
+import rightpad;        // 指令
+import :part;           // 指令
+
+module                  // 不是指令
+;                       // 不是指令
+
+export                  // 不是指令
+import                  // 不是指令
+foo;                    // 不是指令
+
+export                  // 不是指令
+import foo;             // 指令（但在阶段 7 非良构）
+
+import ::               // 不是指令
+import ->               // 不是指令
+```
+
+¶2 规定，预处理指令是满足下列条件的一串预处理记号。在翻译阶段 4 开始时，它的第一个记号，即**指令引导记号**（[[g:directive-introducing-token]]），位于源文件开头或者紧跟在含换行的空白之后，也就是位于行首，而且是下面四种之一：
+
+- ¶2.1 `#`；
+- ¶2.2 `import`，在同一逻辑行上紧跟 *header-name*、`<`、标识符或 `:`；
+- ¶2.3 `module`，在同一逻辑行上紧跟标识符、`:` 或 `;`；
+- ¶2.4 `export`，在同一逻辑行上紧跟上面两种形式之一。
+
+指令到行尾结束：它的最后一个记号，是其中第一个后面紧跟着含换行空白的记号。
+
+回到例 1。单独一行的 `module` 后面紧跟换行，不满足 ¶2.3。倒数第二组里，`export` 单独一行不是指令，但下一行的 `import foo;` 自己就满足 ¶2.2，所以是指令。到了阶段 7，悬空的 `export` 后面跟着一个导入声明，语法错误。`import ::` 和 `import ->` 的下一个记号不在 ¶2.2 的列表里，所以不是指令。
+
+### 宏展开造不出指令
+
+判断一行是不是指令，看的是阶段 4 开始时的状态，宏展开发生在这之后。¶8 的例 3 说明了这一点：
+
+```cpp run title="empty-hash.cpp" error
+#define EMPTY
+EMPTY # include <cstdio>   // 不是指令：阶段 4 开始时这一行以 EMPTY 开头
+int main() {}
+```
+
+`EMPTY` 展开后，这一行变成 `# include <cstdio>`，但它不会被执行，而是作为普通记号进入阶段 7，那里的 `#` 是语法错误。Clang 报 `expected unqualified-id`。
+
+如果宏展开能造出指令，判断一行是不是指令就得先展开宏，而宏的定义又取决于之前的指令，形成循环。所以宏展开的结果即使看起来像指令，也不会被当作指令处理（[[cpp.rescan#4]]）。宏造不出 `#include`、`#define`，也造不出 `#pragma`，这正是 `_Pragma` 运算符存在的理由（[[cpp.pragma.op]]）。
+
+### import 和 module 何时是指令
+
+在阶段 4，`import` 和 `module` 只是普通的标识符，`export` 也还不是关键字。¶2.2 和 ¶2.3 用行首加下一个记号来识别它们，选择这些后继记号是为了尽量不影响把 `import`、`module` 当普通名字用的旧代码：
+
+```cpp run title="import-as-identifier.cpp" ok
+int module = 1;            // 行首是 int，不是指令
+int import = 2;
+int f() {
+  return module + import;  // 不在行首
+}
+int main() { return f() - 3; }
+```
+
+但只要碰上规则，普通代码就会被当成指令：
+
+<div class="compare" markdown="1">
+
+```cpp error
+template<class> struct import {};
+import<int> x;
+// error: 'int' file not found
+```
+
+```cpp error
+using module = int;
+module i;
+// error: 不是合法的模块声明
+```
+
+</div>
+
+左边，行首 `import` 后跟 `<`，这是一条导入指令，`<int>` 被词法分析为 *header-name*（[[lex.pptoken]]），Clang 真的去找名为 `int` 的头文件。右边是 ¶3 的例 2：`module i;` 满足 ¶2.3，是指令，但它不在文件开头，不符合任何指令文法，整个文件不是合法的 *preprocessing-file*。Clang 报 `module declaration must occur at the start of the translation unit`。
+
+修复办法是让这些名字不出现在行首，或者在前面加限定，例如 `::module i;`。
+
+### 换行结束指令，即使在宏调用中间（注 1）
+
+在普通文本里，函数式宏的调用可以跨越多行。在指令里不行，换行总是结束指令：
+
+```cpp error
+#define F(x) x
+#if F(1     // 指令在这里结束，F( 没有配对的 )
+)
+#endif
+```
+
+Clang 报 `unterminated function-like macro invocation`。
+
+## 总文法
+
+¶2 之前是整个预处理的文法。顶层的 *preprocessing-file* 要么是普通的一组行（*group*），要么是一个模块文件：
 
 ```text
 preprocessing-file:
@@ -26,163 +129,49 @@ module-file:
     line-directives(opt) pp-global-module-fragment(opt) pp-module group(opt) pp-private-module-fragment(opt)
 ```
 
-也就是说，一个预处理翻译单元要么是普通的"一组行"（*group*），要么是一个**模块文件**：可选的 `#line` 指令、可选的全局模块片段 `module;`、一条模块指令 `export(opt) module 名字 ...;`、正文，以及可选的私有模块片段 `module :private;`。
+模块文件依次是：可选的 `#line` 指令，可选的全局模块片段 `module;`，一条模块指令 `export(opt) module 名字;`，正文，以及可选的私有模块片段 `module :private;`。
 
-*group* 由四种 *group-part* 组成：
+*group* 由四种部分组成：
 
-| group-part | 是什么 | 例 |
+| 部分 | 是什么 | 例 |
 |---|---|---|
-| *control-line* | 普通指令 | `#include`、`#embed`、`#define`、`#undef`、`#line`、`#error`、`#warning`、`#pragma`、空指令 `#`、以及 *pp-import* |
-| *if-section* | 条件编译块 | `#if`/`#ifdef`/`#ifndef` … `#elif`/`#elifdef`/`#elifndef` … `#else` … `#endif` |
+| *control-line* | 普通指令 | `#include`、`#embed`、`#define`、`#undef`、`#line`、`#error`、`#warning`、`#pragma`、空指令 `#`、导入指令 |
+| *if-section* | 条件编译块 | `#if`、`#ifdef`、`#ifndef` … `#elif` … `#else` … `#endif` |
 | *text-line* | 普通源码行 | `int x = N;` |
-| `#` *conditionally-supported-directive* | `#` 后跟一个**不是**标准指令名的东西 | `#ident "v1"`、`#assert` |
+| `#` *conditionally-supported-directive* | `#` 后跟一个不是标准指令名的东西 | `#ident "v1"` |
 
-几处值得注意的细节：
+文法里有两处细节值得注意。
 
-- `#define` 的四种形式中，函数式宏要求宏名后紧跟 *lparen*——"**前面没有空白**的 `(`"。所以 `#define F (x) [x]` 定义的是对象式宏，替换列表是 `(x) [x]`。
-- *pp-tokens* 是"一个或多个预处理记号"，所以 `#error` 和 `#pragma` 后面可以什么都没有（`opt`），而 `#include` 后面必须有东西。
-- *embed-parameter-seq* 和 *pp-balanced-token-seq* 也定义在这里：后者是"括号、方括号、花括号都配平"的记号序列，供 `#embed` 参数和 `__has_embed` 使用（[[cpp.embed]]）。
+函数式宏的定义要求宏名后紧跟 *lparen*，即前面没有空白的 `(`。所以 `#define F (x) [x]` 定义的是对象式宏，替换列表是 `(x) [x]`。这只约束定义；调用函数式宏时，宏名和 `(` 之间可以有空白甚至换行（[[cpp.replace.general#13]]）。
 
 ```cpp run title="lparen.cpp" ok
 #define F (x) [x]   // 对象式宏：F 后有空格
 #define G(x) [x]    // 函数式宏
 // F(1)  展开为  (x) [x](1)
-// G (2) 展开为  [2]      —— 调用时宏名与 ( 之间可以有空白
+// G (2) 展开为  [2]
 int main() {}
 ```
 
-!!! note "调用处可以有空白，定义处不行"
-    *lparen* 只约束**定义**。调用函数式宏时，宏名之后"下一个预处理记号是 `(`"即可，中间的空白甚至换行都无所谓（[[cpp.replace.general#13]]）。
+*pp-balanced-token-seq* 是圆括号、方括号、花括号都配对的记号序列，供 `#embed` 的参数和 `__has_embed` 使用（[[cpp.embed]]）。
 
-## 预处理是什么（¶1）
+## text-line 与有条件支持的指令（¶3）
 
-¶1 列出[[g:preprocessing|预处理]]的四种能力：有条件地处理或跳过源码片段、包含其他源文件、**从头文件单元导入宏**、宏替换。之所以叫"预"处理，是因为**概念上**它们发生在"翻译结果翻译单元"之前。
+¶3 第一句规定，一串预处理记号只有在不以指令引导记号开头时，才是 *text-line*。上面的 `module i;` 正是靠这一句被排除的：它以指令引导记号开头，不能作为普通文本行，又不是合法的指令，于是文件非良构。
 
-"从头文件单元导入宏"是 C++20 加进来的第四项：`import "foo.h";` 不仅导入声明，还会把 `foo.h` 末尾处于定义状态的宏带进来（[[cpp.import]]）。这是模块体系中唯一一种跨翻译单元传递宏的方式——命名模块（`import foo;`）**不导出宏**。
-
-## 什么算预处理指令（¶2）
-
-¶2 是全节核心。一个预处理指令是满足下列约束的预处理记号序列：
-
-**在翻译阶段 4 开始时**，序列的第一个记号——称为[[g:directive-introducing-token|指令引导记号]]（*directive-introducing token*）——要么是源文件的第一个字符（前面可以有不含换行的空白），要么紧跟在**含换行的空白**之后；并且它是：
-
-- ¶2.1 一个 `#` 预处理记号；或
-- ¶2.2 一个 `import` 预处理记号，**同一逻辑行**上紧跟 *header-name*、`<`、*identifier* 或 `:`；或
-- ¶2.3 一个 `module` 预处理记号，同一逻辑行上紧跟 *identifier*、`:` 或 `;`；或
-- ¶2.4 一个 `export` 预处理记号，同一逻辑行上紧跟上面两种形式之一。
-
-序列的**最后一个**记号是其中第一个"后面紧跟含换行空白"的记号——即指令在行尾结束。
-
-!!! std
-    At the start of translation phase 4, the first preprocessing token in the sequence, referred to as a directive-introducing token, begins with the first character in the source file ... or follows whitespace containing at least one new-line character
-
-    "在阶段 4 开始时"、"位于行首"——这两个条件是**纯词法**的：判断一行是不是指令，不需要做宏展开，也不需要知道任何声明。
-
-### 为什么强调"阶段 4 开始时"
-
-因为宏展开发生在阶段 4 **之中**。如果宏展开能"造出"指令，那么判断某行是不是指令就得先做宏展开，而宏展开又依赖之前的指令——循环依赖。¶8 的例子正是这一点：
-
-```cpp run title="empty-hash.cpp" error
-#define EMPTY
-EMPTY # include <cstdio>   // 不是指令：阶段 4 开始时这一行以 EMPTY 开头
-int main() {}
-```
-
-展开后这一行变成 `# include <cstdio>` 出现在普通文本里——它不会被执行，而是作为普通记号流进入阶段 7，那里的 `#` 是语法错误。Clang 报 `expected unqualified-id`。
-
-同理，宏展开的结果"不会作为预处理指令处理，即使它看起来像一个"（[[cpp.rescan#4]]）。宏造不出 `#include`、`#define`，也造不出 `#pragma`——后者正是 `_Pragma` 运算符存在的理由（[[cpp.pragma.op]]）。
-
-### `import`/`module`/`export` 何时是指令
-
-`import`、`module`、`export` 在阶段 4 都只是普通的 *identifier* 预处理记号（`export` 例外：它是关键字，但在阶段 4 还没有"关键字"的概念）。¶2.2–¶2.4 用"行首 + 后继记号"来识别它们：
-
-| 行首 | 下一个记号 | 是指令吗 | 理由 |
-|---|---|---|---|
-| `import` | *header-name*、`<`、标识符、`:` | 是 | ¶2.2 |
-| `import` | `::`、`->`、`(`、`=` … | 否 | 后继不在列表里 |
-| `import` | 换行 | 否 | 必须在**同一逻辑行** |
-| `module` | 标识符、`:`、`;` | 是 | ¶2.3 |
-| `module` | 换行 | 否 | 同上 |
-| `export` | `import …`/`module …`（且其本身满足上面条件） | 是 | ¶2.4 |
-| `export` | 换行，下一行 `import foo;` | 第二行是指令 | 第二行的 `import` 自己就在行首 |
-
-标准的例 1 把这些情形都列了一遍，其中最后两组最有教育意义：
-
-```cpp
-export                  // 不是指令
-import foo;             // 是指令（但在阶段 7 非良构：export 与 import 被拆开了）
-
-import ::               // 不是指令
-import ->               // 不是指令
-```
-
-第一组里，`export` 单独一行不是指令（它后面紧跟换行）；而下一行的 `import foo;` **自己**满足 ¶2.2，所以是指令。到了阶段 7，`export` 成了一个悬空的关键字，后面跟着一个 *module-import-declaration*，语法错误。
-
-规则中的后继记号集合是精心挑选的，目的是让旧代码中 `import`/`module` 作为普通标识符的用法尽量不受影响：
-
-```cpp run title="import-as-identifier.cpp" ok
-int module = 1;          // 行首是 int，不是指令
-int import = 2;
-int f() {
-  return module + import;   // OK：不在行首
-}
-int main() { return f() - 3; }
-```
-
-但是只要撞上规则，就会被当成指令，哪怕程序员的本意是普通代码：
-
-```cpp run title="import-template.cpp" error
-template<class> struct import {};
-import<int> x;   // error: 行首 import 后跟 <，这是一条 import 指令，<int> 被当成 header-name
-int main() {}
-```
-
-Clang 报 `'int' file not found`——它确实去找名为 `int` 的头文件了。这正是 [[lex.pptoken#5.4.2.2]] 的推论：行首 `import` 之后的 `<...>` 会被词法分析为 *header-name*。
-
-!!! pitfall "旧代码迁移"
-    名为 `import` 或 `module` 的变量、函数、类型，只要出现在行首且后面跟着标识符、`<`、`:`、`;` 之一，就会被劫持成指令。最常见的事故是 `module m;`（声明一个类型为 `module` 的变量 `m`）——见下面的例 2。修复办法很简单：换行位置或加限定，如 `::module m;`。
-
-### 指令以换行结束，即使在宏调用中间（注 1）
-
-注 1：换行结束预处理指令，**即使**换行出现在本来会构成函数式宏调用的位置。
-
-```cpp
-#define F(x) x
-#if F(1     // 指令在这里结束；F( 没有配对的 )，非良构
-)
-#endif
-```
-
-这和普通文本形成对比：在普通文本中，函数式宏调用可以跨越多行（[[cpp.replace.general#13]] 说调用内部的换行"被视为普通空白"）。
-
-## text-line 与条件支持的指令（¶3）
-
-¶3 第一句：一个预处理记号序列只有在**不以指令引导记号开头**时才是 *text-line*。这条规则把"不是 *text-line*"和"不是合法的 *control-line*"之间的缝隙堵死了。例 2：
-
-```cpp
-using module = int;
-module i;               // 既不是 text-line，也不是 control-line
-int foo() {
-  return i;
-}
-```
-
-第 2 行以 `module` + 标识符开头，满足 ¶2.3，所以它**是**指令序列，因而不可能是 *text-line*；但它又不匹配任何指令文法（不在 *module-file* 的开头位置），于是整个文件不是合法的 *preprocessing-file*，即非良构。Clang 报 `module declaration must occur at the start of the translation unit`。
-
-¶3 第二句定义[[g:conditionally-supported-directive|条件支持的指令]]（*conditionally-supported-directive*）：`#` 后跟的记号序列不以任何标准指令名开头。它是有条件支持的，语义由实现定义（[[intro.compliance]] 中"有条件支持"意味着：不支持的实现必须给出诊断）。
+¶3 第二句定义**有条件支持的指令**（[[g:conditionally-supported-directive]]）：`#` 后面的记号不以任何标准指令名开头。它的语义由实现定义；有条件支持意味着不支持它的实现必须给出诊断（[[intro.compliance]]）。
 
 ```cpp run title="cond-directive.cpp" impl
-#ident "build 42"   // GCC、Clang 都支持：把字符串写进目标文件的注释段
+#ident "build 42"   // GCC、Clang 都支持：把字符串写进目标文件
 int main() {}
 ```
 
-GCC 还支持 `#assert`、`#unassert`、`#include_next`、`#import`（后两者 Clang 也支持）。Clang 不支持 `#assert`，遇到它报 `invalid preprocessing directive`——这就是"不支持则诊断"。
+Clang 支持 `#ident`（加 `-pedantic` 时警告它是扩展），不支持 GCC 的 `#assert`，遇到时报 `invalid preprocessing directive`，这就是不支持则诊断。
 
-脚注 118 补充：条件支持的指令**无论实现是否支持**都是预处理指令。这对 [[cpp.replace.general#14]] 很重要：宏调用的实参中出现"本来会作为指令"的行是非良构的，`#ident` 这类行也算。
+无论实现是否支持，有条件支持的指令都算预处理指令。这对 [[cpp.replace.general#14]] 有影响：宏实参里出现本来会作为指令的行是非良构的，`#ident` 这样的行也算。
 
-## #embed 参数名不能是宏（¶4）
+## `#embed` 的参数名不能是宏（¶4）
 
-如果 `#embed` 的 *pp-tokens*（宏替换**之前**）中出现标识符 `limit`、`prefix`、`suffix` 或 `if_empty`，而它恰好被定义为宏，程序非良构。原因：`#embed` 的参数部分要做宏展开（[[cpp.embed.gen#8]]），如果参数名本身被替换，参数就无从识别。与其让 `#define limit 1` 静悄悄地改变 `#embed` 的含义，不如直接报错。[[cpp.cond#9]] 对 `__has_embed` 有同样的规定。
+¶4 `#embed` 的记号在宏替换之前如果包含标识符 `limit`、`prefix`、`suffix` 或 `if_empty`，而这个标识符被定义成了宏，程序非良构。`#embed` 的参数部分会做宏展开（[[cpp.embed]]），参数名一旦被替换就无法识别了。与其让 `#define limit 1` 悄悄改变 `#embed` 的含义，不如直接报错。[[cpp.cond#9]] 对 `__has_embed` 有同样的规定。
 
 ```cpp title="embed-macro-param.cpp" error
 #define limit 1
@@ -191,41 +180,39 @@ const unsigned char d[] = {
 };
 ```
 
-Clang 23 在这里报的是 `expected identifier`（宏展开后参数名变成了 `1`），结论相同。
+Clang 23 在这里报的是 `expected identifier`，因为参数名已经展开成了 `1`，结论相同。在 `-std=c++2c -pedantic` 下，Clang 还会警告 `#embed is a Clang extension`。
 
 !!! lawyer "offset 不在列表里"
-    当前草案 ¶4 和 [[cpp.cond#9]] 列出的名字只有 `limit`、`prefix`、`suffix`、`if_empty`，**没有** `offset`，尽管 `offset` 已是标准参数（[[cpp.embed.param.offset]]）。这看起来是 `offset` 加入时漏改的措辞；按字面读，`#define offset 2` 之后再写 `#embed ... offset(1)` 并不触发 ¶4，而是参数展开成 `2(1)`，不符合 *embed-parameter-seq*，由 [[cpp.embed.gen#8]] 判非良构——结论一样，只是理由不同。
+    ¶4 和 [[cpp.cond#9]] 列出的名字都没有 `offset`，尽管它也是标准参数（[[cpp.embed.param.offset]]）。按字面读，`#define offset 2` 之后写 `offset(1)` 不触发 ¶4，参数展开成 `2(1)`，不符合参数文法，仍然非良构，只是理由不同。看起来是加入 `offset` 时漏改了这里。本机 Clang 23 还不认识标准的 `offset`，报 `unknown embed preprocessor parameter 'offset'`。
 
-带前缀的参数（*embed-prefixed-parameter*，形如 `vendor::name(...)`）是有条件支持的、实现定义的。Clang 的 `clang::offset(n)` 就是这一类（Clang 23 尚未支持标准的 `offset`）。
+¶4 第二句：带前缀的参数（*embed-prefixed-parameter*，形如 `vendor::name(...)`）是有条件支持的，语义由实现定义，例如 Clang 的 `clang::offset(n)`。
 
 ## 全局模块片段里只能有指令（¶5）
 
-¶5：在阶段 4 **开始时**，*pp-global-module-fragment*（`module;` 与模块声明之间的部分）的 *group* 中既不能有 *text-line*，也不能有 *pp-import*。
+¶5 在阶段 4 开始时，全局模块片段（`module;` 与模块声明之间的部分）里既不能有 *text-line*，也不能有导入指令。
 
-```cpp title="gmf.cppm"
+```cpp title="gmf.cppm" error
 module;
-#include <cstdio>        // OK：#include 是 control-line
+#include <cstdio>        // OK：#include 是指令
 #define NDEBUG           // OK
-int helper();            // error: GMF 中出现 text-line
+int helper();            // error: 全局模块片段里出现 text-line
 export module m;
 ```
 
-注意"阶段 4 开始时"：`#include` 引入的头文件内容当然有大量声明，但那是 `#include` 执行**之后**的事。¶5 约束的是**你直接写在 GMF 里的东西**。目的是让 GMF 只做一件事——用 `#include` 把传统头文件带进来——让构建工具能够不做完整解析就理解它。
+`#include` 进来的头文件里当然有大量声明，但那是 `#include` 执行之后的事；¶5 只约束直接写在全局模块片段里的东西。全局模块片段的用途就是用 `#include` 引入传统头文件，这样构建工具不做完整解析也能理解它。
 
-!!! impl "实现现状"
-    Clang 23 对 GMF 中直接写出的声明（如上例的 `int helper();`）**不给诊断**，即使加 `-pedantic`。这不符合 ¶5 的"shall"。
+!!! impl "Clang 不检查"
+    本机 Clang 23 对全局模块片段里直接写出的 `int helper();` 不给任何诊断，加 `-pedantic` 也一样。这不符合 ¶5。
 
-## 被跳过的组：语法放宽（¶6）
+## 被跳过的组里语法放宽（¶6）
 
-¶6：在被跳过的组（[[cpp.cond#13]]）中，指令名与换行之间可以是**任何**预处理记号序列。
-
-被跳过的组里，预处理器只关心指令名，以追踪 `#if` 的嵌套层次；其余一律忽略。于是下面这些在被跳过的组中全部合法：
+¶6 在被 `#if` 跳过的组（[[cpp.cond]]）里，指令名与换行之间可以是任意的预处理记号序列。预处理器在这里只需要看指令名，以追踪 `#if` 的嵌套层次：
 
 ```cpp run title="skipped.cpp" ok
 #if 0
-#  foo bar baz                   // 不是任何标准指令：不要紧
+#  foo bar baz                   // 不是标准指令：不要紧
 #  if this is (not an expression // 不求值，只计嵌套层数
-#  endif trailing junk           // 跳过组中的 #endif 后可跟任意记号
+#  endif trailing junk           // 跳过组中的 #endif 后可以跟任意记号
 #  include <no/such/file>        // 不执行
 #  error not triggered           // 不执行
 #  define F(                     // 不检查
@@ -233,18 +220,18 @@ export module m;
 int main() {}
 ```
 
-但"任意预处理记号序列"仍然要求**能被切分为预处理记号**：阶段 3 对整个文件一视同仁，跳过组也不例外。所以未闭合的 `/*` 注释在跳过组里也是非良构的；按 [[lex.pptoken#2]]，落入"其他单个字符"类的孤立 `'` 或 `"` 也是非良构的。
+但任意记号序列仍然必须能切分成预处理记号，阶段 3 对跳过的组一视同仁。所以未闭合的 `/*` 在跳过的组里也是非良构的；按 [[lex.pptoken#2]]，单独的 `'` 或 `"` 也是。
 
-!!! lawyer "Clang 对跳过组的词法宽容"
-    Clang 23 在被跳过的组中遇到孤立的 `'`（例如 `#if 0` 里写 `don't`）**不报任何诊断**。按草案这本应非良构。这是实践中广为依赖的宽容：大量代码用 `#if 0` 注释掉英文散文。
+!!! impl "Clang 对单独的引号很宽容"
+    本机 Clang 23 在被跳过的组里遇到单独的 `'`（比如 `#if 0` 里的英文 `don't`）不给任何诊断。按草案这是非良构的。很多代码依赖这种宽容，用 `#if 0` 注释掉大段英文。
 
-## 指令内只允许空格和水平制表（¶7）
+## 指令内的空白（¶7）
 
-¶7：从指令引导记号之后到终结换行之前，预处理记号之间出现的空白只能是 U+0020 空格和 U+0009 水平制表（包括阶段 3 中替换注释而来的空格，以及"可能由其他空白替换而来"的空格）。
+¶7 从指令引导记号之后到结尾换行之前，记号之间只能出现空格和水平制表，包括阶段 3 中替换注释得到的空格，以及可能由其他空白替换来的空格。
 
-括号里的话是关键：阶段 3 中"除换行外的非空空白序列是保留还是替换为一个空格"是**未指定**的（[[lex.phases#1]]）。所以 `#define\vA 1`（垂直制表）是否违反 ¶7 取决于实现在阶段 3 是否已经把 `\v` 换成了空格。Clang 23 接受它且不告警，可以理解为它在阶段 3 做了替换。
+括号里的补充是关键。阶段 3 中，换行以外的非空空白序列是保留还是替换为一个空格，是未指定的（[[lex.phases]]）。所以在 `#define` 和宏名之间放一个垂直制表符是否违反 ¶7，取决于实现在阶段 3 有没有把垂直制表换成空格。本机 Clang 23 接受它，不给警告。
 
-注释可以出现在指令中（脚注 116），因为注释在阶段 3 已经变成空格：
+注释可以出现在指令中，因为在阶段 3 它已经变成空格：
 
 ```cpp run title="comment-in-directive.cpp" ok
 #define N /* 注释变成空格 */ 3
@@ -253,50 +240,47 @@ int main() {}
 int main() { return N - 3; }
 ```
 
-## 指令中的记号默认不展开（¶8）
+## 指令里的记号默认不展开（¶8）
 
-¶8：预处理指令中的预处理记号**不做宏展开**，除非另有规定。规定了要展开的有：
+¶8 预处理指令里的记号不做宏展开，除非另有规定。规定要展开的情形如下：
 
 | 指令 | 是否宏展开 | 出处 |
 |---|---|---|
-| `#if` / `#elif` | 是（`defined` 的操作数除外） | [[cpp.cond#9]] |
-| `#ifdef` / `#ifndef` / `#elifdef` / `#elifndef` | 否：直接检查标识符 | [[cpp.cond#12]] |
-| `#include` | 仅当不匹配 `<...>`/`"..."` 形式时 | [[cpp.include#7]] |
-| `#embed` | 参数部分总是展开；资源名仅在不匹配直接形式时 | [[cpp.embed.gen#8]]、[[cpp.embed.gen#14]] |
-| `#line` | 仅当不匹配直接形式时 | [[cpp.line#5]] |
-| `import`（*pp-import*） | 是 | [[cpp.import#1]] |
-| `module`（*pp-module*） | 模块名部分**不能**展开，其余部分展开 | [[cpp.module#2]] |
-| `#define` / `#undef` | 否 | — |
-| `#error` / `#warning` | 否 | — |
-| `#pragma` | 否（实现可以对特定 pragma 自行展开） | [[cpp.pragma]] |
+| `#if`、`#elif` | 是，`defined` 的操作数除外 | [[cpp.cond#9]] |
+| `#ifdef`、`#ifndef`、`#elifdef`、`#elifndef` | 否，直接检查标识符 | [[cpp.cond]] |
+| `#include` | 仅当不是 `<...>` 或 `"..."` 形式时 | [[cpp.include#7]] |
+| `#embed` | 参数部分展开；资源名仅当不是直接形式时 | [[cpp.embed]] |
+| `#line` | 仅当不是直接形式时 | [[cpp.line]] |
+| `import` 指令 | 是 | [[cpp.import]] |
+| `module` 指令 | 模块名不展开，其余部分展开 | [[cpp.module]] |
+| `#define`、`#undef`、`#error`、`#warning` | 否 | |
+| `#pragma` | 否，实现可以对特定 pragma 自行展开 | [[cpp.pragma]] |
 
-`#define` 不展开意味着宏名本身不会被替换：
+`#define` 不展开，所以宏名本身不会被替换：
 
 ```cpp run title="define-no-expand.cpp" ok
 #define A B
-#define A B      // 重定义 A，而不是定义 B——宏名 A 不被展开
-#undef A         // 同理，取消的是 A
+#define A B      // 重定义 A，不是定义 B：宏名 A 不展开
+#undef A         // 取消的也是 A
 int main() {}
 ```
 
-此外 [[cpp.replace.general#10]] 规定：在可以开始指令的位置，`#` 后面的标识符不受宏替换——所以 `#define include` 不会让 `#include` 失效（虽然定义一个叫 `include` 的宏本身是合法的）。
+另外，在可以开始指令的位置，`#` 后面的标识符不受宏替换（[[cpp.replace.general#10]]），所以定义一个名为 `include` 的宏不会让 `#include` 失效。
 
 ## 历史与演进
 
 !!! history
-    - **C++98**：指令就是"以 `#` 开头（前面可有空白）的行"，文法与 C89 基本一致。
-    - **C++11**：与 C99 预处理器同步（[[N1653]]）：可变参数宏、`_Pragma`、空宏实参。
-    - **C++20**：模块。`import`/`module`/`export` 开头的行成为指令，并引入 *module-file* 文法（[[P1703R1]] 让头文件单元导入在预处理时被识别；[[P1857R3]] 把这套"指令化"推广到模块声明，目的是让依赖扫描只需预处理）。
-    - **C++23**：`#elifdef`/`#elifndef`（[[P2334R1]]）、`#warning`（[[P2437R1]]）。
-    - **C++26**：`#embed` 及其参数文法（[[P1967R14]]）{{c++26}}。原先散落在本章的若干 UB 被改写为非良构或 IFNDR。
+    - C++98：指令就是以 `#` 开头（前面可以有空白）的行，文法与 C89 基本一致。
+    - C++11：与 C99 的预处理器同步（[[N1653]]），加入可变参数宏、`_Pragma` 和空的宏实参。
+    - C++20：模块。`import`、`module`、`export` 开头的行成为指令，并引入 *module-file* 文法（[[P1703R1]]、[[P1857R3]]）。
+    - C++23：`#elifdef`、`#elifndef`（[[P2334R1]]）和 `#warning`（[[P2437R1]]）。
+    - C++26：`#embed` 及其参数文法（[[P1967R14]]）。原来散落在本章的许多 UB 改成了非良构或 IFNDR。
 
-### 为什么要把 import/module 变成"指令"
+C++20 早期的设计里，`import` 只是一个普通声明，在阶段 7 才处理。问题在于 `import "foo.h";` 会导入宏，这些宏又会影响后面各行的预处理。不完整地编译一遍，就不知道一个文件依赖哪些模块，构建系统也就无法在编译之前排出顺序。[[P1703R1]] 和 [[P1857R3]] 的做法是让这些行在阶段 4 就被识别，并用 ¶2 中纯词法的规则限定它们的形状，这样一次相对便宜的预处理就能扫描出全部依赖。[[cpp.module]] 禁止模块名来自宏展开，也是出于同样的考虑。
 
-C++20 早期的模块设计里，`import` 只是一个普通声明，在阶段 7 才被处理。问题是：`import "foo.h";` 会**导入宏**，而这些宏又会影响后续行的预处理——于是不完整编译就无法知道一个文件依赖哪些模块，构建系统也就没法在编译前排出编译顺序。[[P1703R1]] 和 [[P1857R3]] 的方案是：让这些行在阶段 4 就被识别，并用¶2 中纯词法的规则限定它们的形状——只要做一次（相对便宜的）预处理，就能扫描出全部依赖。这也是 [[cpp.module#1]] 禁止模块名由宏生成的原因。
+## 常见误解
 
-## 陷阱
-
-!!! pitfall "宏实参中的 #if"
+!!! pitfall "宏实参里可以写 #if"
     ```cpp
     printf("%d\n", MAX(a,
     #ifdef BIG
@@ -306,10 +290,7 @@ C++20 早期的模块设计里，`import` 只是一个普通声明，在阶段 7
     #endif
     ));
     ```
-    如果 `printf` 或 `MAX` 是宏，这段代码非良构（[[cpp.replace.general#14]]；C++23 及以前是 UB）。很多 C 标准库把 `printf`、`memcpy` 等实现为宏，于是这段代码"有时能编过有时不能"。Clang 对此给 `-Wembedded-directive` 警告。
-
-!!! pitfall "行首 import 劫持"
-    `import<T>`、`import :: foo`、`module m;` 三者中只有 `import ::` 是安全的（`::` 不在 ¶2.2 的后继列表里）。
+    如果 `printf` 或 `MAX` 是函数式宏，这段代码非良构（[[cpp.replace.general#14]]，C++23 及以前是 UB）。有的 C 标准库把 `printf`、`memcpy` 实现为宏，于是这段代码在有的平台上能编译，有的不能。Clang 对此只给出 `-Wembedded-directive` 警告。
 
 ## 思考题
 
@@ -321,31 +302,20 @@ C++20 早期的模块设计里，`import` 只是一个普通声明，在阶段 7
     ```
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-两行都**不是**指令。第一行：`export` 后面紧跟 `module`，但 `module` 后面在同一逻辑行上没有标识符、`:`、`;`（紧跟换行），所以 `module` 不满足 ¶2.3，`export` 也就不满足 ¶2.4。第二行以标识符 `m` 开头，是 *text-line*。
+两行都不是指令。第一行的 `module` 后面在同一逻辑行上没有标识符、`:` 或 `;`，不满足 ¶2.3，`export` 也就不满足 ¶2.4。第二行以标识符 `m` 开头，是 *text-line*。
 
-于是这两行作为普通记号进入后续阶段。`module` 没有被替换为 *module-keyword*（[[cpp.module#2]]），阶段 7 看到的是普通标识符 `module`——不可能构成模块声明，结果是语法错误。教训：模块声明的 `module` 和名字必须写在同一行。
+这两行作为普通记号进入后面的阶段。`module` 没有被替换成模块关键字（[[cpp.module]]），阶段 7 看到的只是普通标识符，构不成模块声明，结果是语法错误。模块声明的 `module` 和名字必须写在同一行。
 </details>
 
 !!! question "思考题 2"
-    为什么 `#define EMPTY` 后的 `EMPTY #define X 1` 不定义 `X`，但 `#define D defined(A)` 后的 `#if D` 却"能工作"（至少在 Clang 上）？两者有何本质区别？
+    `#define EMPTY` 之后，`EMPTY #define X 1` 不会定义 `X`。而 `#define D defined(A)` 之后，`#if D` 在 Clang 上却能工作。两者有什么本质区别？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-第一种是"宏造指令"：判定指令发生在阶段 4 开始时（¶2），宏展开在其后，所以永远造不出指令。这是规则的**定义性**后果，各实现必然一致。
+第一种是用宏造指令。是不是指令在阶段 4 开始时就确定了（¶2），宏展开在这之后，所以永远造不出指令。这是规则本身的结果，所有实现都一样。
 
-第二种是 `#if` 表达式内部的宏展开产生了 `defined` 记号。这被 [[cpp.cond#9]] 判为 IFNDR（C++23 及以前是 UB）。它"能工作"只是因为实现选择了某种行为（Clang 照常求值，同时给 `-Wexpansion-to-defined` 警告），标准并不保证。
+第二种是 `#if` 表达式里的宏展开产生了 `defined`，[[cpp.cond#9]] 规定这是 IFNDR（C++23 及以前是 UB）。它能工作只是因为 Clang 选择照常求值，同时给出 `-Wexpansion-to-defined` 警告，标准并不保证。
 </details>
-
-## 小结
-
-!!! summary
-    - 预处理指令 = 阶段 4 开始时位于行首的**指令引导记号**开启、到行尾结束的记号序列。引导记号有四种：`#`、满足条件的 `import`、`module`、`export`。
-    - 判定是纯词法的：宏展开**不能**制造或消灭指令。
-    - `import`/`module` 的识别看"同一逻辑行上的下一个记号"；`import<...>` 会劫持模板名 `import`。
-    - `#` 后跟非标准名字是**条件支持的指令**，不支持就必须诊断。
-    - 全局模块片段（阶段 4 开始时）只能有指令。
-    - 被跳过的组中，指令只看到指令名为止，其余随意——但词法上仍需能切成预处理记号。
-    - 指令内的空白只能是空格和水平制表；指令内的记号默认不展开，`#if`/`#elif`、`#include`/`#embed`/`#line` 的宏形式、`import` 是例外。
