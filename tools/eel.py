@@ -42,7 +42,9 @@ def replace_codeblocks(s):
                 break
         else:
             end = len(s)
-        code = re.sub("<[^>]+>", "", s[i + len(tag):end]).strip("\n")
+        # eel.is sometimes emits a raw '<' inside a span (e.g. #include <new>); escape it before stripping tags
+        code = re.sub(r"<(?![A-Za-z/!])", "&lt;", s[i + len(tag):end])
+        code = re.sub("<[^>]+>", "", code).strip("\n")
         out.append("\n```cpp\n" + code + "\n```\n")
         pos = end + len("</span>")
 
@@ -68,6 +70,7 @@ def to_text(s):
     s = re.sub(r"<div id='(?:note|example)-\d+' class='(note|example)'>", "\n    ", s)
     s = re.sub(r"<(?:/div|/li|/ul|/ol|ul[^>]*|ol[^>]*)>", "", s)
     s = re.sub(r"<i\s*>(.*?)</i>", r"*\1*", s, flags=re.S)
+    s = re.sub(r"<(?![A-Za-z/!])", "&lt;", s)
     s = re.sub(r"<[^>]+>", "", s)
     s = html.unescape(s).replace(" ", " ").replace(" ", " ").replace("\xa0", " ")
     s = re.sub(r"[ \t]+\n", "\n", s)
