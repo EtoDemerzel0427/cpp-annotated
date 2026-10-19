@@ -85,6 +85,7 @@ ADMONITION_TITLES = {
 }
 
 WARNINGS = []
+ASSET_VERSION = dt.datetime.now().strftime("%Y%m%d%H%M%S")  # cache-busting query for CSS/JS
 
 
 def warn(msg):
@@ -442,7 +443,7 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
 <title>{esc(full_title)}</title>
 <meta name="description" content="{esc(desc or SITE_SUB)}">
 <link rel="icon" href="{root}static/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="{root}static/css/site.css">
+<link rel="stylesheet" href="{root}static/css/site.css?v={ASSET_VERSION}">
 <script>try{{var t=localStorage.getItem('cppstd.theme');if(t)document.documentElement.dataset.theme=t;}}catch(e){{}}</script>
 </head>
 <body class="{body_class}" data-root="{root}" data-page="{esc(page_id)}" data-active="{esc(active)}">
@@ -476,8 +477,8 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
   </div>
 </div>
 <div class="tip" hidden></div>
-<script src="{root}static/js/nav-data.js"></script>
-<script src="{root}static/js/site.js" defer></script>
+<script src="{root}static/js/nav-data.js?v={ASSET_VERSION}"></script>
+<script src="{root}static/js/site.js?v={ASSET_VERSION}" defer></script>
 </body>
 </html>
 """
