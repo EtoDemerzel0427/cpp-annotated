@@ -1,30 +1,23 @@
 ---
 title: C++ 与 ISO C++ 2026 的差异
-summary: Annex C.1：C++26 发布后并入工作草案、会破坏 C++26 合法代码的三处改动——抛异常的释放函数非良构、聚合基类的指派初始化引入重载歧义、显式默认化的赋值运算符不得带 cv/&& 限定。附例子与 Clang 23 实测（均未实现）。
-status: draft
+summary: C++26 定稿后并入工作草案的三处不兼容改动：带可能抛出异常说明的释放函数、可以指派基类成员的指派初始化、带 cv 或 && 限定的默认化赋值运算符。
+status: done
 covers: *
-related: diff, diff.cpp23, basic.stc, dcl.init.aggr, dcl.fct.def
+related: diff, diff.cpp23, basic.stc.dynamic.deallocation, dcl.init.aggr, dcl.fct.def.default
 tags: 附录, 兼容性, 迁移, C++26
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[diff.cpp26] 是当前工作草案相对 **C++26** 的不兼容清单，是 [[diff]] 里最新的一节。它只有三条，都来自 C++26 定稿之后并入草案的改动，所以下面统一标 {{c++29}}（指"C++26 之后的下一版"）。
+!!! tldr
+    - 这一节列出 C++26 定稿后才并入工作草案、会让 C++26 合法代码失效的改动，目前只有三条，下面统一标 {{c++29}}。
+    - `operator delete` 不能再声明成可能抛出异常，例如写上 `noexcept(false)`。
+    - 指派初始化可以指派聚合基类的成员，原本只匹配一个重载的 `f({.a = 1})` 可能变成歧义。
+    - `= default` 的赋值运算符不能再带 `const`、`&&` 限定，移动赋值的形参也不能是 `const T&&`。
+    - 截至 Clang 23.1.3，三条都还没有实现，旧代码在 `-std=c++2c` 和 `-std=c++2d` 下照常编译。
 
-三条都是"原来良构、现在非良构"，没有静默改变行为的条目。截至 Clang 23.1.3，三条都**没有实现**：用 `-std=c++2c` 和 `-std=c++2d`（Clang 为下一版预留的模式，`__cplusplus` 为 `202700L`）编译，旧代码照常通过。
+三条改动都是原来良构、现在非良构，没有静默改变行为的。Clang 用 `-std=c++2d` 表示 C++26 之后的下一版（`__cplusplus` 为 `202700L`），但这三条在两个模式下都没有生效。
 
-¶1 [diff.cpp26.general] 只有一句话：本小节按正文章节列出与 ISO C++ 2026 的差异。
-
-## Clause [basic] {#diff.cpp26.basic}
-
-### ¶1 释放函数不得带"可能抛出"的异常说明
-
-**受影响小节**：[[basic.stc.dynamic.deallocation]]
-
-**改动**：声明一个带**可能抛出**（potentially-throwing）异常说明的释放函数（`operator delete` / `operator delete[]`）是非良构的。
-
-**理由**：消除潜在的未定义行为。释放函数在 *delete-expression*、构造失败时的清理等场合被调用，这些地方大多处在 `noexcept` 上下文或析构过程中；在当前规则下，释放函数抛出异常导致的是 UB，而不是一个有意义的错误处理路径。与其保留一个"能声明但不能用"的形式，不如直接禁止。
-
-**对旧代码的影响**：
+## 释放函数不能声明为可能抛出 [diff.cpp26.basic]
 
 ```cpp error
 struct T {
@@ -32,23 +25,11 @@ struct T {
 };
 ```
 
-释放函数默认就是 `noexcept` 的（[[except.spec]] 对释放函数的隐式异常说明），所以只有**显式**写了 `noexcept(false)` 或带可能为 false 的 `noexcept(expr)` 的声明会受影响。
+¶1 改动落在 [[basic.stc.dynamic.deallocation]]。**释放函数**（deallocation function）指 `operator delete` 和 `operator delete[]`。它们在 *delete-expression* 中、在构造函数抛出异常后的清理中被调用，C++26 规定释放函数以抛出异常结束时行为未定义。既然能声明的东西用起来必然是 UB，新规则干脆不让声明，条文给出的理由是消除潜在的未定义行为。
 
-**Clang 23 实测**：`-std=c++2c` 与 `-std=c++2d` 下都没有任何诊断，尚未实现。
+释放函数没有写异常说明时，本来就隐式是 `noexcept` 的（[[except.spec]]）。所以受影响的只有显式写了 `noexcept(false)`，或者写了可能求值为 `false` 的 `noexcept(expr)` 的声明。改法是删掉它；如果函数体里真有可能抛出的操作，那本来就是缺陷，需要改成不抛出。
 
-**改写难度**：容易。删掉 `noexcept(false)`；如果释放函数里真有可能抛出的操作，那本来就是 bug，需要改成不抛出（记录日志、`std::terminate`）。
-
-## Clause [dcl] {#diff.cpp26.dcl}
-
-### ¶1 聚合的基类可以用指派初始化，导致重载歧义
-
-**受影响小节**：[[dcl.init]]（具体规则在 [[dcl.init.aggr]]）
-
-**改动**：*designated-initializer* 可以指派聚合**基类**中的成员（C++26 只能指派本类的直接非静态数据成员）。
-
-**理由**：新功能。C++17 起聚合可以有基类（见 [[diff.cpp14]] [dcl.init.aggr] 一条），但指派初始化一直无法触及基类成员，只能退回到位置初始化 `{{1}, 2}`。
-
-**对旧代码的影响**：指派初始化器参与重载决议时，原来只能匹配一个候选的列表，现在可能同时匹配多个：
+## 指派初始化可以指派基类成员 [diff.cpp26.dcl]
 
 ```cpp
 struct A { int a; };
@@ -58,56 +39,49 @@ void f(A);              // #1
 void f(B);              // #2
 
 void g() {
-  f({.a = 1});          // 现在：#1 与 #2 之间有歧义；C++26：调用 #1
+  f({.a = 1});          // 现在：#1 与 #2 歧义；C++26：调用 #1
 }
 ```
 
-在 C++26 中，`{.a = 1}` 只能初始化 `A`（`B` 没有名叫 `a` 的直接成员），所以只有 #1 可行。新规则下 `.a` 也可以指派 `B` 的基类 `A` 的成员，两个转换都是用户定义的列表初始化转换序列，没有优劣之分，于是歧义。这是一个"新功能让旧的唯一解变成多解"的典型例子，与 [[diff.cpp20]] 里 UTF-8 字面量初始化 `char` 数组导致的歧义同一类。
+¶1 改动落在 [[dcl.init]]，规则细节在 [[dcl.init.aggr]]。这是一个新功能：C++17 起聚合可以有基类，但 C++26 的指派初始化只能指派本类的直接非静态数据成员，基类成员只能用位置初始化 `B{{1}, 2}`。现在 `.a` 也可以指派基类 `A` 的成员。
 
-**Clang 23 实测**：`-std=c++2c` 与 `-std=c++2d` 下都选 #1，没有歧义，新规则尚未实现。
+新功能让旧代码失效的方式是重载决议。C++26 中 `{.a = 1}` 只能初始化 `A`，只有 #1 可行。新规则下它也能初始化 `B`，两个候选都需要一次列表初始化转换，没有优劣之分，于是歧义。[[diff.cpp20]] 里 UTF-8 字面量可以初始化 `char` 数组带来的歧义是同一类问题。
 
-**改写难度**：容易，但只有编译器实现之后才能发现。给实参写明类型：`f(A{.a = 1})`。
+本机 Clang 23 在两个模式下都选 #1。编译器实现新规则之前发现不了这个问题；改法是写明类型：`f(A{.a = 1})`。
 
-### ¶2 显式默认化的赋值运算符不得带 cv 或 `&&` 限定
-
-**受影响小节**：[[dcl.fct.def.default]]
-
-**改动**：显式默认化（`= default`）的赋值运算符不能带 *cv-qualifier-seq*，也不能带 `&&` *ref-qualifier*；显式默认化的移动赋值运算符的形参不能是"到 cv 限定 `T` 的引用"。
-
-**理由**：移除少见且令人困惑的写法。这些写法在 C++26 中要么"良构但被定义为删除"（`const` 限定、`const T&&` 形参），要么良构但语义奇怪（`&&` 限定的默认赋值只能对右值调用）。
-
-**对旧代码的影响**：
+## 默认化的赋值运算符不能带 cv 或 && 限定
 
 ```cpp error
 struct S {
-  S& operator=(const S&) && = default;       // error: 现在非良构；C++26 中良构
+  S& operator=(const S&) && = default;      // error: 现在非良构；C++26 中良构
 };
 struct T {
-  T& operator=(const T&) const = default;    // error: 现在非良构；C++26 中良构但被删除
+  T& operator=(const T&) const = default;   // error: 现在非良构；C++26 中良构但被删除
 };
 struct U {
-  U& operator=(const U&&) = default;         // error: 现在非良构；C++26 中良构但被删除
+  U& operator=(const U&&) = default;        // error: 现在非良构；C++26 中良构但被删除
 };
 ```
 
-注意 `T` 和 `U` 在 C++26 里虽然能编译，但这两个赋值运算符是**被删除**的，任何使用都会报错；真正会改变的只是"声明本身"从被静默删除变成直接报错。只有 `S` 那种 `&&` 限定、在 C++26 中确实可用的写法，才是实打实的功能移除。
+¶2 改动落在 [[dcl.fct.def.default]]。显式默认化的赋值运算符不能再带 *cv-qualifier-seq* 或 `&&` *ref-qualifier*；显式默认化的移动赋值运算符，形参不能是到 cv 限定的 `T` 的引用。条文给出的理由是移除少见且容易误解的写法。
 
-**Clang 23 实测**：
+三种写法在 C++26 中的处境不同：
 
-```text
-$ clang++ -std=c++2d -fsyntax-only -Wall c26c.cpp
-c26c.cpp:2:15: warning: explicitly defaulted copy assignment operator is implicitly deleted [-Wdefaulted-function-deleted]
-c26c.cpp:3:15: warning: explicitly defaulted move assignment operator is implicitly deleted [-Wdefaulted-function-deleted]
-```
+- `T` 和 `U` 的声明能编译，但类型与隐式声明的赋值运算符不符，函数被定义为删除，任何调用都会报错。新规则只是把静默删除改成了直接报错。
+- `S` 的 `&&` 限定版本在 C++26 中可以正常调用，只是只能对右值调用。这是真正被移除的功能，改法是去掉 `&&`，或者写一个用户提供的函数体。
 
-`T` 和 `U` 只得到"被隐式删除"的警告，`S` 没有任何诊断。新规则尚未实现。
+本机 Clang 23 对 `T` 和 `U` 只给出 `-Wdefaulted-function-deleted` 警告（explicitly defaulted ... is implicitly deleted），对 `S` 没有任何诊断。
 
-**改写难度**：容易。`T`、`U` 的声明本来就无用，删掉即可；`S` 去掉 `&&`，或者改成用户提供的函数体。
+<details class="fine" markdown="1"><summary>其余条文</summary>
+
+[diff.cpp26.general] ¶1 只说明本小节按正文章节列出与 ISO C++ 2026 的差异。
+
+</details>
 
 ## 小结
 
-| 条目 | 旧行为（C++26） | 新行为 | Clang 23 |
+| 条目 | C++26 | 当前草案 | Clang 23 |
 |---|---|---|---|
 | `operator delete(void*) noexcept(false)` | 良构 | 非良构 | 未实现 |
-| `f({.a = 1})` 在 `f(A)` / `f(B : A)` 间 | 调用 `f(A)` | 歧义 | 未实现 |
-| 默认化赋值带 `const` / `&&` / `const T&&` | 良构（部分被删除） | 非良构 | 未实现 |
+| `f({.a = 1})`，重载 `f(A)`、`f(B)`，`B` 派生自 `A` | 调用 `f(A)` | 歧义 | 未实现 |
+| 默认化赋值带 `const`、`&&` 或形参为 `const T&&` | 良构（后两种被删除） | 非良构 | 未实现 |
