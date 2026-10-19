@@ -1,80 +1,49 @@
 ---
 title: map、set、multimap、multiset
-summary: 四个有序关联容器的具体条款——map::operator[] 即 try_emplace、at 与 lookup、try_emplace 不碰实参 vs emplace 可能"吃掉"实参、insert_or_assign、C++26 异构插入及其 UB 条件、推导指引与 iter-key-type、erase_if；libc++ 红黑树节点布局实测与常见陷阱
+summary: 四个有序关联容器各自特有的成员：map::operator[] 就是 try_emplace，try_emplace 在键已存在时不动实参而 emplace 不保证，insert_or_assign、lookup，C++26 异构插入的未定义行为条件，以及推导指引和 erase_if。
 status: done
 covers: *
 related: associative.reqmts, container.node, container.requirements, unord, flat.map, flat.set, alg.sorting
 tags: 标准库, 容器, map, set, 红黑树, try_emplace
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
-[associative] 定义 `<map>`（`map`、`multimap`）和 `<set>`（`set`、`multiset`）。它们的大部分语义来自 [[associative.reqmts]]，本节只补充每个类模板**特有**的成员：主要是 `map` 的元素访问和"带键的插入"家族。
+!!! tldr
+    - `m[k]` 被定义为 `try_emplace(k).first->second`：键不存在时插入一个值初始化的值，所以它是修改操作，要求映射类型能默认构造。
+    - 键已存在时，`try_emplace` 保证没有任何效果，右值实参不会被移走；`emplace` 没有这个保证。
+    - `insert_or_assign` 不要求映射类型能默认构造，并且返回是否插入了新元素。
+    - C++26 的异构插入要求由异构键构造出的真实键与它在比较器下处于同一位置，否则是未定义行为。
+    - `erase_if` 对节点容器是逐个擦除，因为 `pair<const K, T>` 不能赋值，remove-erase 惯用法用不了。
 
-## 概述与推导指引（[associative.general]）
+[associative] 定义 `<map>` 里的 `map`、`multimap` 和 `<set>` 里的 `set`、`multiset`。它们的大部分语义来自关联容器要求（[[associative.reqmts]]）：按比较器排序、查找和插入是对数时间、插入不使迭代器失效。[associative] 只补充每个类模板特有的部分，主要是 `map` 的元素访问和带键插入的那一组函数。
 
-¶1：`<map>` 定义 `map` 与 `multimap`，`<set>` 定义 `set` 与 `multiset`。¶2：定义了推导指引用的仅阐述别名：
+## m[k] 做了什么（[map.access]）
 
-| 别名 | 含义 |
-|---|---|
-| `iter-value-type<It>` | `iterator_traits<It>::value_type` |
-| `iter-key-type<It>` | `remove_const_t<tuple_element_t<0, iter-value-type<It>>>` |
-| `iter-mapped-type<It>` | `tuple_element_t<1, iter-value-type<It>>` |
-| `iter-to-alloc-type<It>` | `pair<const iter-key-type<It>, iter-mapped-type<It>>` |
-| `range-key-type<R>` 等 | 对 `ranges::range_value_t<R>` 的同样处理 |
+```cpp title="map-subscript-nodefault.cpp" error
+#include <map>
+struct NoDefault { NoDefault(int) {} };
+int main() {
+  std::map<int, NoDefault> m;
+  m.try_emplace(1, 42);    // OK
+  m[1];                    // error: operator[] 需要 NoDefault 能默认构造
+}
+```
 
-`iter-key-type` 去掉了 `const`，所以从另一个 `map` 的迭代器（值类型 `pair<const K, V>`）也能推导出 `map<K, V>`；从 `vector<pair<K, V>>` 推导同样可行。初始化器列表的推导指引接受 `initializer_list<pair<Key, T>>`，所以 `std::map m{std::pair{1, 2.0}, std::pair{2, 3.0}}` 推导出 `map<int, double>`。
+¶1 `operator[](const key_type& x)` 的效果等价于 `return try_emplace(x).first->second;`。¶2 右值键的版本把键移进 `try_emplace`。所以 `m[k]` 在键不存在时，用空的实参列表构造映射值，再插入。没有默认构造函数的类型不能用 `operator[]`，即使这个键已经存在。
 
-## map（[map]）
+`operator[]` 因此是修改操作：不能用于 `const map`，也不在 [[container.requirements.dataraces#1]] 视为 const 的函数名单里，两个线程同时对同一个 map 调用 `operator[]` 会构成数据竞争。只读访问用下面几种：
 
-### 概述（[map.overview]）
-
-¶1：`map` 支持唯一键，并提供基于键快速检索另一类型 `T` 的值；支持双向迭代器。¶2：满足容器、可逆容器、分配器感知容器、关联容器要求，提供唯一键（`a_uniq`）操作；`key_type` 为 `Key`，`value_type` 为 `pair<const Key, T>`。¶3：迭代器满足 constexpr 迭代器要求（C++26 起 `map` 整体 constexpr，本机 libc++ 已实现）。
-
-### 构造（[map.cons]）
-
-比较器 + 分配器构造为常数；区间构造（迭代器对或 `from_range`）在区间**已按 `comp` 排序时线性**，否则 N log N（¶1–¶6）。
-
-### 元素访问（[map.access]）
-
-| 成员 | 规定 | 要点 |
+| 成员 | 规定 | 出处 |
 |---|---|---|
-| `operator[](const key_type& x)` | 等价于 `return try_emplace(x).first->second;`（¶1） | 键不存在时**插入**值初始化的 `T` |
-| `operator[](key_type&& x)` | 等价于 `try_emplace(std::move(x)).first->second`（¶2） | |
-| `template<class K> operator[](K&& x)` | *Constraints*：`Compare::is_transparent` 有效（¶3–¶4） | C++26 异构插入 |
-| `at(x)` | 返回映射值引用；不存在则抛 `out_of_range`（¶5–¶7） | 对数 |
-| `template<class K> at(const K& x)` | 透明比较器；前置条件 `find(x)` 良构且行为良定义（¶8–¶12） | |
-| `lookup(x)` | 返回 `optional<mapped_type&>`：存在则为 `find(x)->second`，否则 `nullopt`（¶13–¶16） | 较新草案新增，配合 C++26 的 `optional<T&>` |
+| `at(x)` | 返回映射值的引用；键不存在时抛 `out_of_range`；对数时间 | ¶5–¶7 |
+| `lookup(x)` | 返回 `optional<mapped_type&>`：存在时引用映射值，否则 `nullopt` | ¶13–¶16 |
+| `find(x)`、`contains(x)` | 见 [[associative.reqmts]] | |
 
-`operator[]` 用 `try_emplace` 定义，带来两条后果：
+`lookup` 是 C++26 之后的新接口，用到了 `optional<T&>`。本机 libc++ 还没有提供。
 
-1. `mapped_type` 必须能从**空实参列表**构造（经由 `piecewise_construct, forward_as_tuple(k), forward_as_tuple()`）。没有默认构造函数的 `T` 不能用 `operator[]`：
+¶3–¶4、¶8–¶12 `operator[]` 和 `at` 还各有一个模板版本 `template<class K>`，只在比较器有成员类型 `is_transparent` 时参与重载决议，这时可以不先构造 `key_type` 就查找。¶9 规定 `at(const K&)` 的前置条件是 `find(x)` 良构且行为有定义。
 
-    ```cpp title="map-subscript-nodefault.cpp" error
-    #include <map>
-    struct NoDefault { NoDefault(int) {} };
-    int main() {
-      std::map<int, NoDefault> m;
-      m.try_emplace(1, 42);    // OK
-      m[1];                    // error: operator[] 需要 mapped_type 可默认构造
-    }
-    ```
-
-2. `operator[]` 是**修改**操作：它不能用于 `const map`，也不在 [container.requirements.dataraces] 的"视为 const"名单里（[[container.requirements]]）。只读访问用 `at`、`find`、`contains` 或 `lookup`。
-
-`lookup` 在本机 libc++ 中尚未提供。
-
-### 修改器（[map.modifiers]）
-
-**`insert(P&& x)`**（¶1–¶2）：*Constraints* `is_constructible_v<value_type, P&&>`；等价于 `emplace(std::forward<P>(x))`。这个模板让 `m.insert({1, "x"})` 之外的 `m.insert(std::pair{1, "x"})`（`pair<int, const char*>`）也能直接构造 `pair<const int, std::string>` 而不经过中间 `value_type` 临时对象。
-
-**`try_emplace(k, args…)`**（¶3–¶10）：
-
-!!! std
-    If the map already contains an element whose key is equivalent to k, there is no effect.
-
-    若 map 已含键等价于 k 的元素，则无效果。
-
-"无效果"是关键：`args…` **不会被移动**。对比 `emplace(k, args…)`——唯一键容器必须先构造出 `value_type` 才能拿到键做比较（[[associative.reqmts]] ¶49 只说"插入 t 当且仅当……"），键已存在时这个临时对象被销毁，而右值实参已经被移进去了。
+## try_emplace 与 emplace（[map.modifiers]）
 
 ```cpp title="try-emplace.cpp" run ok
 #include <map>
@@ -87,89 +56,137 @@ int main() {
   m.emplace("a", std::make_unique<int>(1));
 
   auto p = std::make_unique<int>(2);
-  m.try_emplace("a", std::move(p));        // 键已存在：不构造 value_type，p 不被移动
+  m.try_emplace("a", std::move(p));   // 键已存在：p 不会被移走
   assert(p != nullptr);
 
   auto q = std::make_unique<int>(3);
-  m.emplace("a", std::move(q));            // emplace 可能已把 q 移进一个临时节点再丢弃
-  // 此处 q 的状态未指明（本机 libc++ 中 q 已为空）
+  m.emplace("a", std::move(q));       // q 可能已被移进一个临时节点后丢弃
+  // 标准不规定 q 此时的状态；本机 libc++ 中 q 已为空
 
   auto [it, inserted] = m.insert_or_assign("a", std::make_unique<int>(4));
-  assert(!inserted && *it->second == 4);   // 已存在：赋值给 mapped
-
-  std::map<std::string, int> counts;
-  ++counts["x"];                           // operator[]：不存在则值初始化 int 后插入
-  assert(counts.at("x") == 1);
+  assert(!inserted && *it->second == 4);   // 已存在：赋值给映射值
 }
 ```
 
-{{impl}} libc++ 在 `emplace` 的第一个实参**恰好是 `key_type`** 时会先用它查找、找到就不构造节点（把 `std::map<int, unique_ptr<int>>` 换成 `emplace(1, std::move(q))`，本机实测 `q` 保持不变）；实参是 `"a"`（`const char[2]`）这类需要转换的类型时，它只能先构造节点。标准对 `emplace` 不作此保证，`try_emplace` 才有保证。
+¶3–¶10 `try_emplace(k, args...)` 的效果：
 
-**`insert_or_assign(k, obj)`**（¶16–¶25）：*Mandates* `is_assignable_v<mapped_type&, M&&>`；键存在则把 `obj` 赋给 `e.second`，否则插入 `value_type(k, std::forward<M>(obj))`。返回 `pair<iterator, bool>`（带提示版本返回 `iterator`）。与 `m[k] = obj` 相比，它不要求 `mapped_type` 可默认构造，并且告诉你是否插入了新元素。
+!!! std
+    If the map already contains an element whose key is equivalent to k, there is no effect.
 
-**异构版本**（¶11–¶15、¶26–¶31）{{c++26}}：`template<class K, class... Args> try_emplace(K&& k, Args&&...)` 与 `template<class K, class M> insert_or_assign(K&& k, M&& obj)` 要求 `Compare::is_transparent`（`try_emplace` 的首个重载还排除可转换为迭代器的 `K`）。效果描述里埋着一条 UB：
+没有效果意味着 `args...` 不会被移动。否则，用 `piecewise_construct, forward_as_tuple(k), forward_as_tuple(args...)` 构造一个元素插入，也就是键从 `k` 构造，映射值从 `args...` 构造。
+
+`emplace(args...)` 只规定"构造一个元素 t，当且仅当容器中没有与 t 的键等价的元素时插入"（[[associative.reqmts.general#49]]）。键在 `args` 里面，一般要先构造出元素才知道键是什么。键已存在时，这个元素被销毁，右值实参已经被移进去了。
+
+{{impl}} libc++ 在 `emplace` 的第一个实参正好是 `key_type` 时会先查找，找到就不构造节点：把上例换成 `std::map<int, std::unique_ptr<int>>` 和 `m.emplace(1, std::move(q))`，本机 `q` 保持不变。实参是 `"a"`（`const char[2]`）这类需要转换的类型时，它只能先构造节点。这只是实现的优化，标准只对 `try_emplace` 作出保证。
+
+### insert_or_assign 与 insert(P&&)
+
+¶16–¶25 `insert_or_assign(k, obj)` 要求 `is_assignable_v<mapped_type&, M&&>`（*Mandates*，不满足则非良构）。键已存在时把 `obj` 赋给映射值，否则插入 `value_type(k, std::forward<M>(obj))`。返回 `pair<iterator, bool>`，带提示的版本返回 `iterator`。
+
+和 `m[k] = obj` 相比，它不要求映射类型能默认构造，也不会先构造一个默认值再赋值，并且能告诉你是否插入了新元素。
+
+¶1–¶2 `template<class P> insert(P&& x)` 在 `is_constructible_v<value_type, P&&>` 为真时参与重载决议，等价于 `emplace(std::forward<P>(x))`。有了它，`m.insert(std::pair{1, "x"})` 可以从 `pair<int, const char*>` 直接构造出 `pair<const int, std::string>`，不经过一个中间的 `value_type` 临时对象。
+
+### 计数的惯用法
+
+```cpp run ok
+#include <map>
+#include <string>
+#include <cassert>
+
+int main() {
+  std::map<std::string, int> counts;
+  ++counts["x"];     // 不存在：插入值初始化的 0，再自增
+  ++counts["x"];
+  assert(counts.at("x") == 2);
+}
+```
+
+值初始化保证新插入的 `int` 是 0，所以 `++counts[k]` 是统计次数的标准写法。
+
+## C++26 异构插入（¶11–¶15、¶26–¶31）{{c++26}}
+
+`std::map<std::string, int, std::less<>>` 已经可以用 `const char*` 或 `string_view` 查找，不必构造 `std::string`。C++26 把这一点扩展到插入：`try_emplace(K&& k, ...)`、`insert_or_assign(K&& k, obj)` 和 `operator[](K&&)` 都有了异构版本，要求比较器有 `is_transparent`。
+
+¶13 的效果描述里有一个未定义行为条件：
 
 !!! std
     let r be equal_range(k). Constructs an object u of type value_type with ... If equal_range(u.first) == r is false, the behavior is undefined.
 
-    令 r 为 equal_range(k)，构造 value_type 对象 u；若 equal_range(u.first) == r 为假，行为未定义。
+意思是，由 `k` 构造出来的真实键 `u.first`，在比较器下必须和 `k` 落在同一个位置。如果从 `K` 到 `Key` 的转换会改变排序位置，例如转换时截断了字符串、或者统一了大小写而比较器不统一，就是 {{ub}}。这条要求让实现可以先用 `k` 找到插入点，再构造节点直接链入，不必用 `u.first` 再查一次。
 
-也就是说：用异构键 `k` 构造出来的真正的键 `u.first`，必须落在与 `k` **完全相同的位置**。如果 `Key` 从 `K` 的转换会改变它在比较器下的位置（例如截断、规范化大小写而比较器不规范化），就是 {{ub}}。这条前置条件让实现可以"先用 `k` 找到插入点、再构造节点、直接链入"，而不必用 `u.first` 再查一遍。本机 libc++ 尚未实现异构插入（`__cpp_lib_associative_heterogeneous_insertion` 未定义）。
+本机 libc++ 还没有实现异构插入（`__cpp_lib_associative_heterogeneous_insertion` 未定义）。
 
-### 擦除（[map.erasure]）
+!!! lawyer "排除迭代器的约束为什么写在不同的重载上"
+    ¶11 对 `map::try_emplace` 的异构版本，要求 `K&&` 不能转换为迭代器，这一条只加在不带提示的那个重载上；`set::insert` 的异构版本恰好相反，加在带提示的重载上（[set.modifiers] ¶1）。两者防的是不同的歧义：`try_emplace(k, args...)` 的 `k` 如果是迭代器，会和带提示的 `try_emplace(hint, key, args...)` 混淆；`insert(hint, x)` 的 `x` 如果是迭代器，会和区间插入 `insert(first, last)` 混淆。
 
-`erase_if(c, pred)` 被规定为逐个 `c.erase(i)` 的循环（¶1），返回擦除个数；节点式容器不能用 erase-remove（`remove` 要给元素赋值，而 `pair<const K, T>` 不可赋值）。
+## 构造与推导指引（[associative.general]、[map.cons]）
 
-## multimap（[multimap]）
+[map.cons] ¶1–¶6 用比较器和分配器构造是常数时间。区间构造（迭代器对或 `from_range`）在区间已经按比较器排好序时是线性时间，否则是 N log N。
 
-`multimap` 支持等价键（一个键可对应多个值），提供 `a_eq` 操作；**没有** `operator[]`、`at`、`try_emplace`、`insert_or_assign`——"键对应的那个值"在 `multimap` 中没有定义。构造（[multimap.cons]）同 `map`；修改器（[multimap.modifiers]）只有 `insert(P&&)` 模板，等价于 `emplace`；擦除（[multimap.erasure]）同 `map`。等价键的插入顺序与保持规则见 [[associative.reqmts]] ¶4、¶54。
+[associative.general] ¶2 定义了几个推导指引用的仅阐述别名：
 
-## set 与 multiset（[set]、[multiset]）
+| 别名 | 含义 |
+|---|---|
+| `iter-value-type<It>` | `iterator_traits<It>::value_type` |
+| `iter-key-type<It>` | `remove_const_t<tuple_element_t<0, iter-value-type<It>>>` |
+| `iter-mapped-type<It>` | `tuple_element_t<1, iter-value-type<It>>` |
+| `iter-to-alloc-type<It>` | `pair<const iter-key-type<It>, iter-mapped-type<It>>` |
+| `range-key-type<R>` 等 | 对 `ranges::range_value_t<R>` 做同样的处理 |
 
-`set` 的 `value_type` 与 `key_type` 都是 `Key`，`iterator` 是**常量迭代器**——不能经由迭代器修改元素，因为那可能破坏排序（[[associative.reqmts]] ¶6）。构造与 `erase_if` 同 `map`。
+`iter-key-type` 去掉了 `const`，所以从另一个 map 的迭代器（值类型是 `pair<const K, V>`）推导出的是 `map<K, V>`；从 `vector<pair<K, V>>` 推导也一样。初始化器列表的推导指引接受 `initializer_list<pair<Key, T>>`，所以 `std::map m{std::pair{1, 2.0}, std::pair{2, 3.0}};` 推导出 `map<int, double>`。
 
-[set.modifiers] 有一个 {{c++26}} 的异构插入：`template<class K> insert(K&& x)` / `insert(hint, K&& x)`，要求 `Compare::is_transparent`；若已含与 `x` 等价的元素则无效果；否则令 `r = equal_range(x)`，以 `std::forward<K>(x)` 构造 `u`，**若 `equal_range(u) == r` 为假则 UB**——与 `map` 的异构插入同一模式。有趣的细节：草案中"不可转换为迭代器"的约束只对**带提示的**第二个重载列出（[set.modifiers] ¶1），而 `map::try_emplace` 的同类约束列在第一个重载上——两者防范的歧义不同：`set::insert(hint, x)` 若 `x` 是迭代器，就和区间插入 `insert(first, last)` 撞车；`map::try_emplace(k, args…)` 若 `k` 是迭代器，就和带提示的 `try_emplace(hint, key, args…)` 撞车。
+## erase_if（[map.erasure]）
 
-`multiset` 同理，没有异构 `insert`。
+¶1 `erase_if(c, pred)` 被规定为一个逐个检查、逐个 `c.erase(i)` 的循环，返回擦除的元素个数。节点容器不能用 remove-erase 惯用法：`remove` 要给元素赋值，而 `pair<const K, T>` 不能赋值，`set` 的元素也不能通过迭代器修改。
 
-## libc++ 实现笔记
+## multimap、set、multiset
 
-{{impl}} libc++ 的四个有序容器都基于 `<__tree>` 中的红黑树：
+**multimap**（[multimap]）支持等价键，一个键可以对应多个值。它没有 `operator[]`、`at`、`try_emplace`、`insert_or_assign`，因为在 `multimap` 里"键对应的那个值"没有定义。修改器只有 `insert(P&&)` 模板，等价于 `emplace`；构造和 `erase_if` 与 `map` 相同。插入等价键时，新元素放在已有等价元素范围的末尾（[[associative.reqmts.general#54]]）。
 
-- `sizeof(std::map<int,int>) == sizeof(std::set<int>) == 24`：起始节点指针、"尾节点"（只含一个 left 指针，作为 `end()` 和根的父节点，内嵌在容器对象里）、元素计数；比较器为空类时经由空基类/`[[no_unique_address]]` 不占空间。
-- 节点：`left`、`right`、`parent` 三个指针 + 一个 `bool` 颜色位（填充到 8 字节）+ 值。`map<int,int>` 的节点为 40 字节（本机用计数分配器实测 `allocate(1)` 请求 40 字节）。
-- 因为尾节点内嵌在容器对象里，`end()` 指向容器对象内部——这就是 [[container.requirements.general]] ¶65 说"`a.end()` 交换后是否等于 `b.end()` 未指明"的现实原因。
+**set**（[set]）的 `key_type` 和 `value_type` 都是 `Key`，迭代器是常量迭代器：通过迭代器修改元素可能破坏排序，所以不允许（[[associative.reqmts.general#6]]）。
 
-## 常见误区
+[set.modifiers] ¶1–¶3 有一个 C++26 的异构 `insert(K&& x)`，要求比较器透明。已有与 `x` 等价的元素时没有效果；否则令 `r = equal_range(x)`，用 `std::forward<K>(x)` 构造 `u`，如果 `equal_range(u) == r` 为假，行为未定义。这和 `map` 的异构插入是同一个模式。
+
+**multiset** 与 `set` 相同，但支持等价键，没有异构 `insert`。
+
+## libc++ 实现
+
+{{impl}} libc++ 的四个有序容器都基于 `<__tree>` 中的红黑树。
+
+- `sizeof(std::map<int, int>)` 和 `sizeof(std::set<int>)` 都是 24 字节：最左节点指针、一个只含 left 指针的尾节点（作为 `end()`，也是根的父节点，直接嵌在容器对象里）、元素个数。比较器是空类时不占空间。
+- 每个节点有 left、right、parent 三个指针，一个颜色位（填充到 8 字节），然后是元素。`map<int, int>` 的节点是 40 字节，本机用一个打印请求大小的分配器验证过。
+- 尾节点嵌在容器对象里，`end()` 指向容器对象内部，交换两个容器后 `end()` 不会跟着元素走。这就是 [[container.reqmts#65]] 规定交换后 `a.end()` 是否等于 `b.end()` 未指定的现实原因。
+
+## 常见误解
 
 !!! pitfall "用 `m[k]` 判断键是否存在"
-    `if (m[k] == 0)` 会**插入** `k`。判断存在用 `contains(k)`（C++20）或 `find(k) != end()`。
+    `if (m[k] == 0)` 会插入 `k`。判断存在用 `contains(k)`（C++20）或者 `find(k) != end()`。
 
-!!! pitfall "用 `<=` 或不一致的比较器"
-    见 [[associative.reqmts]] 的 `less_equal` 例子：唯一键容器里出现重复键、`find` 失败——严格弱序是前置条件，违反即 UB。
+!!! pitfall "用 `<=` 作比较器"
+    比较器必须是严格弱序，这是关联容器的前置条件，违反它是未定义行为。用 `std::less_equal` 时唯一键容器会出现重复键，`find` 也会失败，见 [[associative.reqmts]]。
 
-!!! pitfall "在 `set` 元素上 `const_cast` 修改参与比较的成员"
-    `set` 的迭代器是常量迭代器正是为了防止这件事。若必须修改"不参与比较"的成员，把它声明为 `mutable`；若要修改参与比较的部分，用 `extract` → 修改 → `insert`（[[container.node]]）。
+!!! pitfall "对 `set` 的元素 `const_cast` 后修改参与比较的成员"
+    `set` 的迭代器是常量迭代器，就是为了防止这件事。如果只修改不参与比较的成员，可以把它声明为 `mutable`；要修改参与比较的部分，用 `extract`、修改、再 `insert`（[[container.node]]）。
 
 ## 思考题
 
-!!! question "`std::map<std::string, int> m; m.emplace(“k”, 1);` 与 `m.try_emplace(“k”, 1);`，在键 `“k”` 已存在时，哪个可能分配内存？"
+!!! question "思考题"
+    `std::map<std::string, int> m;` 中键 `"k"` 已经存在。`m.emplace("k", 1);` 和 `m.try_emplace("k", 1);` 哪个可能分配内存？
 
 <details markdown="1">
-<summary>展开查看答案与解析</summary>
+<summary>答案</summary>
 
-`emplace` 可能：它（在 libc++ 中，因为第一个实参是 `const char[2]` 而不是 `std::string`）需要先分配一个节点并在其中构造 `pair<const std::string, int>`，才能拿到键与已有元素比较；发现重复后再销毁并释放。`try_emplace("k", 1)` 中 `"k"` 先被转换为 `key_type`（`const key_type&` 形参，产生一个 `std::string` 临时对象——短字符串时不分配），用它查找，存在则"无效果"，不分配节点。若使用 C++26 的异构 `try_emplace` 加透明比较器，连这个临时 `std::string` 都可以省掉。
+`emplace` 可能分配。它的第一个实参是 `const char[2]` 而不是 `std::string`，libc++ 需要先分配一个节点，在里面构造 `pair<const std::string, int>`，才能拿到键去比较；发现重复后再销毁并释放这个节点。
+
+`try_emplace("k", 1)` 会先把 `"k"` 转换成一个 `std::string` 临时对象（短字符串不分配堆内存），用它查找；键存在时没有效果，不分配节点。如果用 C++26 的异构 `try_emplace` 加透明比较器，连这个临时 `std::string` 都可以省掉。
 </details>
 
 ## 小结
 
 | 容器 | 键 | 特有成员 |
 |---|---|---|
-| `map` | 唯一 | `operator[]`（= `try_emplace`）、`at`、`lookup`、`try_emplace`、`insert_or_assign`、C++26 异构版本 |
+| `map` | 唯一 | `operator[]`（即 `try_emplace`）、`at`、`lookup`、`try_emplace`、`insert_or_assign`，以及 C++26 异构版本 |
 | `multimap` | 等价 | 只有 `insert(P&&)` |
 | `set` | 唯一 | C++26 异构 `insert(K&&)` |
-| `multiset` | 等价 | — |
-
-- `try_emplace` 在键存在时**不碰**实参；`emplace` 不保证这一点。
-- C++26 异构插入要求"由 `k` 构造出的键落在与 `k` 相同的 `equal_range`"，否则 UB。
-- `erase_if` 是逐个擦除；`operator[]` 是修改操作。
+| `multiset` | 等价 | 无 |
