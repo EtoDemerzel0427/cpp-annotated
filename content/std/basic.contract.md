@@ -36,7 +36,7 @@ int isqrt(const int x)
 本节讲契约在运行时的含义。语法和声明规则在 [[dcl.contract.func]]、[[dcl.contract.res]]、[[stmt.contract.assert]]，库接口在 [[support.contract]]。
 
 !!! warning "编译器支持"
-    截至写作时，本机 Clang 23 还不支持 `pre`、`post`、`contract_assert` 语法，GCC 和 Clang 只有实验性的实现。所以本页的例子都没有经过编译验证，也不带判定标记，结论完全依据标准原文。特性测试宏是 `__cpp_contracts`。
+    截至写作时，本机 Clang 23 还不支持 `pre`、`post`、`contract_assert` 语法，GCC 的开发分支有一个实验性实现（本机没有 GCC，未验证）。所以本页的例子都没有经过编译验证，也不带判定标记，结论完全依据标准原文。特性测试宏是 `__cpp_contracts`。
 
 ### 和 assert 有什么不同
 
