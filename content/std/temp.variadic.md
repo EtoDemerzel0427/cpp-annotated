@@ -155,7 +155,7 @@ int f() {
 | 6.13 | `sizeof...` | 标识符 | `sizeof...(Ts)` |
 | 6.14 | 包索引表达式 {{c++26}} | 标识符 | `ts...[0]` |
 | 6.15 | 包索引类型 {{c++26}} | *typedef-name* | `Ts...[0]` |
-| 6.16 | 包索引模板名 {{c++26}} | *simple-template-name* | `TTs...[0]<int>` |
+| 6.16 | 包索引模板名 {{c++29}} | *simple-template-name* | `TTs...[0]<int>` |
 | 6.17 | 折叠表达式 [[expr.prim.fold]] | 含未展开包的那个操作数 | `(ts + ...)` |
 | 6.18 | 折叠展开约束 [[temp.constr.fold]] {{c++26}} | 该约束 | `requires (C<Ts> && ...)` |
 
