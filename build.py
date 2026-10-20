@@ -1036,7 +1036,7 @@ def home_page(clauses, by_id, ctx, pages, toc_meta):
   <div class="hero-mark">§</div>
   <h1>{SITE_NAME}</h1>
   <p class="hero-en">{SITE_SUB}</p>
-  <p class="hero-lede">逐条读 C++ 标准：每一节给出条文的<strong>释义</strong>，补上标准不写的<strong>设计动机与条款关联</strong>，再用能直接编译运行的<strong>例子</strong>把规则落到实处。</p>
+  <p class="hero-lede">基于 eel.is 上的 C++ 标准工作草案，逐节疏解规范条文，考辨设计动机、条款关联与演进脉络，辅以可验证的代码示例。</p>
   <button class="hero-search search-btn" type="button"><span>检索条款或关键词：如 <code>basic.life</code>、<code>dcl.init.list</code>、<code>over.match.best</code></span><kbd>/</kbd></button>
   <div class="hero-stats">
     <div><b>{counts['std']}</b><span>条款笔记</span></div>
