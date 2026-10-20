@@ -325,7 +325,7 @@ note: read of object outside its lifetime is not allowed in a constant expressio
 
 | 工具 | 开关 | 检测 | 本机可用 | 典型开销 |
 |---|---|---|---|---|
-| UBSan | `-fsanitize=undefined` | 有符号溢出、移位越界、空指针、未对齐、静态大小数组越界、`unreachable`、非法 `enum`/`bool` 值、vptr 类型错误等 | 是 | 低 |
+| UBSan | `-fsanitize=undefined` | 有符号溢出、移位越界、空指针、未对齐、静态大小数组越界、`unreachable`、非法 `enum`/`bool` 值等（vptr 类型错误要另加 `-fsanitize=vptr`，`undefined` 本机不含它） | 是 | 低 |
 | ASan | `-fsanitize=address` | 堆、栈、全局越界，use-after-free、use-after-scope、use-after-return，double free | 是 | 约 2× |
 | MSan | `-fsanitize=memory` | 读取未初始化内存 | 否，只支持 Linux 等平台 | 约 3× |
 | TSan | `-fsanitize=thread` | 数据竞争（[[intro.races#17]]） | 是 | 5–15× |
