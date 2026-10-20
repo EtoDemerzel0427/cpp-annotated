@@ -253,7 +253,7 @@ int f(bool b) {
 -std=c++2c -O2 -ftrivial-auto-var-init=zero    b ? 1 : 0
 ```
 
-默认配置下，Clang 仍把读未初始化变量当作 UB 来优化：`b == false` 那条路径读到的值可以是任意值，就选 1，让两条路径合并。这个值等于程序在另一条路径上写入的值，取决于程序本身，不符合 [[basic.indet#1]] 要求的与程序状态无关。所以截至写作时，Clang 23 在 `-std=c++2c` 下还没有实现 EB 的语义；`-ftrivial-auto-var-init=pattern` 或 `zero` 产生的才是 EB 预期的行为。编译期的 `-Wsometimes-uninitialized` 警告早已存在，正是建议诊断的一种形式。
+默认配置下，Clang 仍把读未初始化变量当作 UB 来优化：`b == false` 那条路径读到的值可以是任意值，就选 1，让两条路径合并。单看这个例子还有争议：一个固定的 1 也许可以算作"与程序状态无关"的实现选定值（[[basic.indet#1]]）。更明确的证据是 `int x; return x;` 直接返回寄存器里残留的值，以及栈上残留的旧数据能被读出来（见 [[papers/erroneous-behaviour]]），这些都取决于程序状态。所以截至写作时，Clang 23 在 `-std=c++2c` 下还没有实现 EB 的语义；`-ftrivial-auto-var-init=pattern` 或 `zero` 产生的才是 EB 预期的行为。编译期的 `-Wsometimes-uninitialized` 警告早已存在，正是建议诊断的一种形式。
 
 如果明确知道一个大缓冲区会在读取前被填满，想省掉初始化的开销，可以用 C++26 的 `[[indeterminate]]`（[[dcl.attr.indet]]）退出 EB。被标注的变量回到旧的语义：值不确定，读取即 UB。
 
