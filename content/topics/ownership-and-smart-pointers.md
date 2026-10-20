@@ -364,7 +364,7 @@ std::shared_ptr<int> age(p, &p->age);   // 拥有整个 Person，指向它的成
 
 ### 线程安全：计数、对象、变量
 
-`shared_ptr` 的线程安全保证只有一句（[[util.smartptr.shared#5]]）：判断数据竞争时，成员函数只算访问了 `shared_ptr`、`weak_ptr` 对象本身，不算访问它们指向的对象；`use_count()` 的变化不算可能引起数据竞争的修改。由此得到三个层次：
+`shared_ptr` 的线程安全保证只有一句（[[util.smartptr.shared.general#5]]）：判断数据竞争时，成员函数只算访问了 `shared_ptr`、`weak_ptr` 对象本身，不算访问它们指向的对象；`use_count()` 的变化不算可能引起数据竞争的修改。由此得到三个层次：
 
 | 访问什么 | 多个线程同时这样做 | 结论 |
 |---|---|---|
