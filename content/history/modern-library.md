@@ -304,7 +304,7 @@ iostream 类型安全、可扩展，但格式化能力弱；`printf` 写起来�
 struct Point { int x, y; };
 template <>
 struct std::formatter<Point> : std::formatter<std::string> {
-    auto format(Point p, std::format_context& ctx) const {
+    auto format(Point p, auto& ctx) const {   // 泛型上下文：放进容器里也能格式化
         return std::formatter<std::string>::format(std::format("({}, {})", p.x, p.y), ctx);
     }
 };
