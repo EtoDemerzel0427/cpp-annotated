@@ -1,6 +1,6 @@
 ---
 title: lambda 表达式
-summary: 一个 lambda 表达式定义一个无名的闭包类并创建它的对象：调用运算符的性质（const、mutable、static、constexpr、泛型、显式对象参数），捕获什么、怎样捕获、捕获后名字指向哪里，以及向函数指针的转换和特殊成员函数。
+summary: 一个 lambda 表达式定义一个无名的闭包类并创建它的对象：调用运算符的性质（const、mutable、static、constexpr、泛型、显式对象形参），捕获什么、怎样捕获、捕获后名字指向哪里，以及向函数指针的转换和特殊成员函数。
 status: done
 covers: expr.prim.lambda.general, expr.prim.lambda.closure, expr.prim.lambda.capture
 papers: P0018R3, P0170R1, P0588R1, P0428R2, P0624R2, P0315R4, P0780R2, P0806R2, P1091R3, P1381R1, P1102R2, P1169R4, P0847R7, P2173R1, P2036R3
@@ -14,7 +14,7 @@ updated: 2026-10-19
     - 调用运算符默认是 `const` 成员函数；`mutable` 去掉 const，`static` 让它成为静态成员函数，满足条件时它自动是 `constexpr`。
     - 写了 `[=]` 或 `[&]` 时，lambda 体里潜在求值地引用了哪些外层局部变量，就隐式捕获哪些，由语法决定，不看是否真的 odr-use；`[=]` 隐式捕获的 `this` 是指针，不是对象的副本，已弃用。
     - 读一个常量的值不算 odr-use，所以不捕获也能用；取地址、绑定引用就必须捕获。
-    - 只有没有捕获、没有显式对象参数的 lambda 能转换为函数指针（泛型 lambda 得到一个转换函数模板）；C++20 起无捕获的闭包类型还可以默认构造和赋值。
+    - 只有没有捕获、没有显式对象形参的 lambda 能转换为函数指针（泛型 lambda 得到一个转换函数模板）；C++20 起无捕获的闭包类型还可以默认构造和赋值。
 
 ## lambda 是一个类加一个对象
 
@@ -73,12 +73,12 @@ int main() {}
 - 没有形参时 `()` 可以省略。C++23 起，即使后面有说明符、`noexcept` 或尾置返回类型也能省略：`[] mutable {}` 合法，C++20 要写 `[]() mutable {}`。
 - 契约 {{c++26}}：`[](int x) pre(x > 0) { … }`。
 
-¶4 说明符的组合有几条限制：每个说明符最多出现一次；`constexpr` 和 `consteval` 不能同时出现；`mutable` 和 `static` 不能同时出现；有显式对象参数（`this auto self`）时不能写 `mutable` 或 `static`；写了 `static` 就不能有任何捕获。
+¶4 说明符的组合有几条限制：每个说明符最多出现一次；`constexpr` 和 `consteval` 不能同时出现；`mutable` 和 `static` 不能同时出现；有显式对象形参（`this auto self`）时不能写 `mutable` 或 `static`；写了 `static` 就不能有任何捕获。
 
 ```cpp error
 auto e1 = [](int) constexpr consteval {};   // error: constexpr 与 consteval 不能共存
-auto e2 = [](this auto) mutable {};         // error: 显式对象参数与 mutable
-auto e3 = [](this auto) static {};          // error: 显式对象参数与 static
+auto e2 = [](this auto) mutable {};         // error: 显式对象形参与 mutable
+auto e3 = [](this auto) static {};          // error: 显式对象形参与 static
 auto e4 = [](int) mutable static {};        // error: mutable 与 static
 void f() {
   int x = 0;
@@ -86,7 +86,7 @@ void f() {
 }
 ```
 
-这些限制都来自上面的类模型。`mutable` 的作用是让调用运算符不再是 const，有显式对象参数时这一点改由 `self` 的类型表达；静态成员函数没有对象，也就无从访问捕获成员。
+这些限制都来自上面的类模型。`mutable` 的作用是让调用运算符不再是 const，有显式对象形参时这一点改由 `self` 的类型表达；静态成员函数没有对象，也就无从访问捕获成员。
 
 ## 调用运算符
 
@@ -138,13 +138,13 @@ int main() {}
 !!! tip "static lambda 有什么用"
     无捕获 lambda 的非静态 `operator()` 仍然要接收一个对象参数，哪怕这个对象是空的。`static` 让调用运算符成为真正的静态函数，省掉这个参数；转换为函数指针时（见下文）也直接得到它的地址，不需要中间的转发函数。
 
-### 泛型 lambda 与显式对象参数
+### 泛型 lambda 与显式对象形参
 
 ¶6 lambda 有 `auto` 形参或者有模板形参列表时，叫做**泛型 lambda**（[[g:generic-lambda|generic lambda]]）。`[](this auto self, int i)` 也是泛型 lambda，因为 `this auto` 也是一个 `auto` 形参（[expr.prim.lambda.general]）。
 
 按 [[expr.prim.lambda.closure#5]]，泛型 lambda 的调用运算符是一个成员函数模板，模板形参由写出的 `<…>` 和每个 `auto` 形参生成的模板形参组成。`<…>` 之后的 *requires-clause* 和形参列表之后的 *requires-clause* 都成为这个模板的约束。
 
-标准例 1 演示了泛型 lambda 的嵌套、形参包的捕获，以及用显式对象参数写递归：
+标准例 1 演示了泛型 lambda 的嵌套、形参包的捕获，以及用显式对象形参写递归：
 
 ```cpp run ok
 #include <iostream>
@@ -168,9 +168,9 @@ int main() {
 }
 ```
 
-C++23 之前，lambda 体里没有办法指代 lambda 自己：闭包类型没有名字，`this` 指的是外层对象（见下一节）。显式对象参数 `self` 就是闭包对象本身。
+C++23 之前，lambda 体里没有办法指代 lambda 自己：闭包类型没有名字，`this` 指的是外层对象（见下一节）。显式对象形参 `self` 就是闭包对象本身。
 
-[[expr.prim.lambda.closure#6]] 规定，有捕获的 lambda，其显式对象参数的类型只能是闭包类型、公开且无歧义地派生自闭包类型的类，或者指向这些类型的引用。访问捕获就是访问 `self` 的成员，`self` 的类型与闭包无关时这无从谈起。
+[[expr.prim.lambda.closure#6]] 规定，有捕获的 lambda，其显式对象形参的类型只能是闭包类型、公开且无歧义地派生自闭包类型的类，或者指向这些类型的引用。访问捕获就是访问 `self` 的成员，`self` 的类型与闭包无关时这无从谈起。
 
 ```cpp error
 struct C {
@@ -552,7 +552,7 @@ void test() {
 
 ## 转换为函数指针 [expr.prim.lambda.closure]
 
-¶11 一个 lambda 如果不是泛型的、没有捕获、没有显式对象参数，并且约束（如果有）得到满足，它的闭包类型就有一个转换到函数指针的转换函数。函数指针的形参和返回类型与调用运算符相同；调用运算符不会抛出异常时，转换到 `noexcept` 函数指针。
+¶11 一个 lambda 如果不是泛型的、没有捕获、没有显式对象形参，并且约束（如果有）得到满足，它的闭包类型就有一个转换到函数指针的转换函数。函数指针的形参和返回类型与调用运算符相同；调用运算符不会抛出异常时，转换到 `noexcept` 函数指针。
 
 调用运算符是静态成员函数时，转换得到的就是它的地址。否则得到某个函数 F 的地址，调用 F 的效果等同于在一个默认构造的闭包对象上调用调用运算符。
 
@@ -683,7 +683,7 @@ int main() {
     - C++14：泛型 lambda（`auto` 形参）；init-capture，用来捕获只能移动的对象；返回类型推导与普通函数统一。
     - C++17：constexpr lambda 和隐式 constexpr（[[P0170R1]]）；`[*this]` 按值捕获整个对象（[[P0018R3]]）。
     - C++20：模板形参列表（[[P0428R2]]）；无捕获 lambda 可以默认构造和赋值（[[P0624R2]]）；lambda 可以出现在未求值操作数中（[[P0315R4]]）；init-capture 包（[[P0780R2]]）；`[=, this]` 和弃用 `[=]` 隐式捕获 `this`（[[P0806R2]]）；捕获结构化绑定（[[P1091R3]]、[[P1381R1]]）；隐式捕获改为基于语法的规则（[[P0588R1]]），此前的规则以 odr-use 为基础，并为泛型 lambda 另设了复杂的特殊规则。
-    - C++23：省略 `()` 的限制放宽（[[P1102R2]]）；`static` lambda（[[P1169R4]]）；显式对象参数（[[P0847R7]]）；声明符前的属性（[[P2173R1]]）；尾置返回类型可以看到捕获的名字（[[P2036R3]]）。
+    - C++23：省略 `()` 的限制放宽（[[P1102R2]]）；`static` lambda（[[P1169R4]]）；显式对象形参（[[P0847R7]]）；声明符前的属性（[[P2173R1]]）；尾置返回类型可以看到捕获的名字（[[P2036R3]]）。
     - C++26：lambda 可以带契约，契约断言不得引起隐式捕获。
 
 ## 常见错误

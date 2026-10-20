@@ -326,8 +326,8 @@ int main() {
 
 同理，有多个 `operator()` 重载的类和 `std::bind` 的结果都不能用 CTAD。[func.wrap.func.general] 的注 1 还提醒，推导指引推出的类型将来可能改变，不要依赖它的确切结果。
 
-!!! impl "libc++ 还没有实现显式对象参数形式"
-    按第二种形式，`struct S { long operator()(this S, double); };` 应推导出 `function<long(double)>`。本机 libc++ 把显式对象参数当成了普通形参，推导出 `function<long(S, double)>`，于是 `std::function f = S{};` 编译失败（"no viable conversion from 'S' to 'std::function<long (S, double)>'"）。这是 libc++ 的缺陷。
+!!! impl "libc++ 还没有实现显式对象形参形式"
+    按第二种形式，`struct S { long operator()(this S, double); };` 应推导出 `function<long(double)>`。本机 libc++ 把显式对象形参当成了普通形参，推导出 `function<long(S, double)>`，于是 `std::function f = S{};` 编译失败（"no viable conversion from 'S' to 'std::function<long (S, double)>'"）。这是 libc++ 的缺陷。
 
 ## 思考题
 

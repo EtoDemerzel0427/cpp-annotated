@@ -326,9 +326,9 @@ int main() { return twice(0); }
 
 无捕获 lambda 的非静态 `operator()` 仍要接收一个指向空闭包的对象参数。`static` 去掉这个参数，常用于标准库算法的比较器、投影这类无状态函数对象。更多编译期计算的用法见 [[topics/compile-time-programming]]。
 
-### 递归：显式对象参数
+### 递归：显式对象形参
 
-闭包类型没有名字，lambda 体里的 `this` 又指外层对象，所以 C++23 之前 lambda 没有直接的办法调用自己。C++23 的显式对象参数（[[P0847R7]]）让第一个形参就是闭包对象本身：
+闭包类型没有名字，lambda 体里的 `this` 又指外层对象，所以 C++23 之前 lambda 没有直接的办法调用自己。C++23 的显式对象形参（[[P0847R7]]）让第一个形参就是闭包对象本身：
 
 <div class="compare" markdown="1">
 
@@ -363,7 +363,7 @@ fib(20);        // 6765
 
 ## 转换为函数指针
 
-没有捕获、不是泛型、没有显式对象参数的 lambda 可以隐式转换为同签名的函数指针（[[expr.prim.lambda.closure#11]]）。函数指针只是一个地址，没有地方存放捕获的状态，所以有捕获的 lambda 不能转换。
+没有捕获、不是泛型、没有显式对象形参的 lambda 可以隐式转换为同签名的函数指针（[[expr.prim.lambda.closure#11]]）。函数指针只是一个地址，没有地方存放捕获的状态，所以有捕获的 lambda 不能转换。
 
 ```cpp run title="fnptr.cpp" ok
 #include <cstdio>

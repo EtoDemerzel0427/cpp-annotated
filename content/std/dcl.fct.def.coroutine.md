@@ -216,7 +216,7 @@ int main() {
 
 本机 AddressSanitizer 报告 `stack-use-after-scope`。改成按值接收（`lazy print(std::string s)`）就安全了。`std::string_view`、`std::span`、迭代器这类借用类型也一样：它们本身按值复制，指向的数据却不在协程状态里。
 
-成员函数协程的 `*this` 也不复制（`q_1` 就是 `*this`）。lambda 协程的闭包对象同理，`[x]() -> task<> { co_await …; use(x); }()` 中的临时闭包在完整表达式结束时销毁，之后恢复协程再读 `x` 就是 UB。C++23 起可以用显式对象参数按值接收闭包：`[x](this auto self) -> task<> { … }`，`self` 是普通的按值形参，会移动进协程状态。
+成员函数协程的 `*this` 也不复制（`q_1` 就是 `*this`）。lambda 协程的闭包对象同理，`[x]() -> task<> { co_await …; use(x); }()` 中的临时闭包在完整表达式结束时销毁，之后恢复协程再读 `x` 就是 UB。C++23 起可以用显式对象形参按值接收闭包：`[x](this auto self) -> task<> { … }`，`self` 是普通的按值形参，会移动进协程状态。
 
 ## 协程状态的分配（¶9–¶10）
 

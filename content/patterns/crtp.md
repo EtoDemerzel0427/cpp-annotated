@@ -1,6 +1,6 @@
 ---
 title: CRTP 与静态多态
-summary: 派生类把自己作为模板实参传给基类（class D : public Base<D>）：这种写法为什么能编译，static_cast<D&>(*this) 为什么安全，它和虚函数在代码生成与对象大小上的差别，标准库里的用法，常见陷阱，以及 C++23 的显式对象参数取代了它的哪些用途。
+summary: 派生类把自己作为模板实参传给基类（class D : public Base<D>）：这种写法为什么能编译，static_cast<D&>(*this) 为什么安全，它和虚函数在代码生成与对象大小上的差别，标准库里的用法，常见陷阱，以及 C++23 的显式对象形参取代了它的哪些用途。
 status: draft
 order: 35
 since: c++98
@@ -15,7 +15,7 @@ updated: 2026-10-19
     - 它能编译，是因为类模板实例化时只生成成员函数的声明，函数体要等用到时才实例化，那时 `D` 已经完整。反过来，基类的成员声明（成员类型、形参和返回类型）不能用 `D` 的成员。
     - 与虚函数相比，CRTP 没有 vptr，调用可以内联；代价是没有公共基类型，不同派生类不能放进同一个容器，每个 `D` 各生成一份代码。
     - 模板实参写错（`class E : public Base<D>`）时，`static_cast` 是未定义行为，编译器不报错。把基类构造函数设为私有、再声明 `friend D`，可以把它变成编译错误。
-    - C++23 的显式对象参数（deducing this）取代了只为调用派生类成员而写的 CRTP。需要每个派生类一份静态数据、需要以 `D` 为形参的非成员运算符，或者需要通过基类引用保留 `D` 时，仍然要用 CRTP。
+    - C++23 的显式对象形参（deducing this）取代了只为调用派生类成员而写的 CRTP。需要每个派生类一份静态数据、需要以 `D` 为形参的非成员运算符，或者需要通过基类引用保留 `D` 时，仍然要用 CRTP。
 
 ## 基类想调用派生类的函数
 
@@ -642,7 +642,7 @@ int main() { Plugin p; }   // UB: name 还没有构造
 
 虚函数在这里至少是有定义的：构造期间的虚调用落到正在构造的那个类的版本上（[[class.cdtor#4]]），不会调用到派生类。CRTP 绕过了这层保护，所以基类的构造函数和析构函数里不应当调用派生类的成员。派生类构造完成后才需要做的事，交给派生类自己的构造函数，或者在对象构造完后由调用方显式调用。
 
-## C++23：显式对象参数
+## C++23：显式对象形参
 
 C++23 允许非静态成员函数把对象参数写成显式的第一个形参（[[dcl.fct#7]]，[[P0847R7]]）。它常被称作 deducing this：把这个形参写成模板，`Self` 就会被推导为调用对象的实际类型，基类因此不必再是模板。
 
@@ -717,21 +717,21 @@ int main() {
 }
 ```
 
-取消最后一行的注释，本机 Clang 23 报告 `no member named 'name' in 'Shape'`，来自 `Shape::print<Shape>` 的实例化。CRTP 的 `const Shape<Square>&` 仍然知道 `D` 是 `Square`，显式对象参数的 `const Shape&` 已经丢掉了这个信息。
+取消最后一行的注释，本机 Clang 23 报告 `no member named 'name' in 'Shape'`，来自 `Shape::print<Shape>` 的实例化。CRTP 的 `const Shape<Square>&` 仍然知道 `D` 是 `Square`，显式对象形参的 `const Shape&` 已经丢掉了这个信息。
 
-多层派生时，结论反过来。前面的 `Tile : Square` 例子里，CRTP 版本调用 `Square::area_impl`；改用显式对象参数后，`Tile{}.area()` 推导出 `Self = Tile`，调用的是 `Tile::area_impl`。本机实测两者分别返回 4 和 5。
+多层派生时，结论反过来。前面的 `Tile : Square` 例子里，CRTP 版本调用 `Square::area_impl`；改用显式对象形参后，`Tile{}.area()` 推导出 `Self = Tile`，调用的是 `Tile::area_impl`。本机实测两者分别返回 4 和 5。
 
-显式对象参数取代了只为在成员函数里拿到派生类类型而写的 CRTP。下面这些情形仍然需要 CRTP：
+显式对象形参取代了只为在成员函数里拿到派生类类型而写的 CRTP。下面这些情形仍然需要 CRTP：
 
-| 需求 | 为什么显式对象参数做不到 |
+| 需求 | 为什么显式对象形参做不到 |
 |---|---|
-| 每个派生类一份静态数据（如 `Counted<D>`） | 显式对象参数只出现在成员函数里，类本身只有一个 |
+| 每个派生类一份静态数据（如 `Counted<D>`） | 显式对象形参只出现在成员函数里，类本身只有一个 |
 | 以 `D` 为形参的非成员运算符（如 `Ordered<D>`） | 隐藏友元不是成员函数，没有对象参数可以推导 |
-| 基类的成员类型、构造函数、析构函数要用到 `D` | 这些都不是可以带显式对象参数的成员函数（[[dcl.fct#7]]） |
+| 基类的成员类型、构造函数、析构函数要用到 `D` | 这些都不是可以带显式对象形参的成员函数（[[dcl.fct#7]]） |
 | 通过基类引用或指针调用时仍要分派到 `D` | `Self` 只能推导出静态类型 |
 | 标准库接口规定了 CRTP 基类 | `view_interface`、`enable_shared_from_this`、`range_adaptor_closure` 都以 `D` 为模板实参 |
 
-显式对象参数还有一个限制：这样的成员函数不能是虚函数（[[dcl.fct#7]]），带模板形参的版本也只能定义在头文件里。
+显式对象形参还有一个限制：这样的成员函数不能是虚函数（[[dcl.fct#7]]），带模板形参的版本也只能定义在头文件里。
 
 ## CRTP 与 concepts
 
@@ -808,7 +808,7 @@ int main() {
 | 情形 | 建议 |
 |---|---|
 | 运行时才知道具体类型，需要异构容器 | 虚函数、`std::variant` 或 [[patterns/type-erasure|类型擦除]] |
-| 基类的成员函数要调用派生类的成员，C++23 可用 | 显式对象参数 |
+| 基类的成员函数要调用派生类的成员，C++23 可用 | 显式对象形参 |
 | 每个派生类需要独立的静态数据 | CRTP |
 | 给派生类生成以 `D` 为形参的非成员函数或运算符 | CRTP；比较运算符优先用预置的 `<=>` 和 `==` |
 | 基类的声明要用到派生类的类型 | CRTP，配合 `auto` 返回类型、默认模板实参或特征类 |
@@ -829,16 +829,16 @@ int main() {
 </details>
 
 !!! question "2"
-    `struct Tile : Square` 重新定义了 `area_impl`。用 CRTP 写的 `Shape<Square>` 和用显式对象参数写的 `Shape`，`Tile{}.area()` 分别调用谁的 `area_impl`？
+    `struct Tile : Square` 重新定义了 `area_impl`。用 CRTP 写的 `Shape<Square>` 和用显式对象形参写的 `Shape`，`Tile{}.area()` 分别调用谁的 `area_impl`？
 
 <details markdown="1">
 <summary>答案</summary>
 
 CRTP 版本调用 `Square::area_impl`。`Tile` 的基类是 `Square`，而 `Square` 的基类固定为 `Shape<Square>`，`static_cast<const Square&>(*this).area_impl()` 从 `Square` 开始查找，看不到 `Tile` 里的同名函数。
 
-显式对象参数版本调用 `Tile::area_impl`。`Self` 从对象表达式 `Tile{}` 推导为 `Tile`，`self.area_impl()` 从 `Tile` 开始查找，找到 `Tile::area_impl`，它隐藏了 `Square::area_impl`。本机实测分别返回 4 和 5。
+显式对象形参版本调用 `Tile::area_impl`。`Self` 从对象表达式 `Tile{}` 推导为 `Tile`，`self.area_impl()` 从 `Tile` 开始查找，找到 `Tile::area_impl`，它隐藏了 `Square::area_impl`。本机实测分别返回 4 和 5。
 
-两种结果都不是虚函数意义上的覆盖：CRTP 绑定到继承时写下的 `D`，显式对象参数绑定到调用处的静态类型。
+两种结果都不是虚函数意义上的覆盖：CRTP 绑定到继承时写下的 `D`，显式对象形参绑定到调用处的静态类型。
 </details>
 
 !!! question "3"

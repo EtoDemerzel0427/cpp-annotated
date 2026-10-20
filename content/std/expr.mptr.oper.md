@@ -335,7 +335,7 @@ int main() {
 <details markdown="1">
 <summary>答案</summary>
 
-因为引用绑定本来就是这样：`const T&` 能绑定右值，`volatile T&` 和 `const volatile T&` 不能（[[dcl.init.ref]]）。直接调用 `S{}.f()` 时，隐式对象参数就是对应的引用类型，所以 `const volatile &` 成员函数在右值上本来就不能调用。¶6 写的是 "unless its *cv-qualifier-seq* is `const`"，恰好只放过 `const` 一种，与直接调用一致。
+因为引用绑定本来就是这样：`const T&` 能绑定右值，`volatile T&` 和 `const volatile T&` 不能（[[dcl.init.ref]]）。直接调用 `S{}.f()` 时，隐式对象形参就是对应的引用类型，所以 `const volatile &` 成员函数在右值上本来就不能调用。¶6 写的是 "unless its *cv-qualifier-seq* is `const`"，恰好只放过 `const` 一种，与直接调用一致。
 </details>
 
 ## 小结

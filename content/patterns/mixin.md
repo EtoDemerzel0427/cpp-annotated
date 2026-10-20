@@ -462,7 +462,7 @@ int main() {
 
 ## deducing this：不用模板形参的 mixin
 
-C++23 的**显式对象参数**（[[g:explicit-object-parameter|explicit object parameter]]，[[dcl.fct#8]]，[[P0847R7]]）让成员函数把调用它的对象作为第一个形参，类型由推导得到。很多 CRTP 式 mixin 因此不再需要模板形参：
+C++23 的**显式对象形参**（[[g:explicit-object-parameter|explicit object parameter]]，[[dcl.fct#8]]，[[P0847R7]]）让成员函数把调用它的对象作为第一个形参，类型由推导得到。很多 CRTP 式 mixin 因此不再需要模板形参：
 
 <div class="compare" markdown="1">
 
