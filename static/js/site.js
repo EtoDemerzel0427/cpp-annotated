@@ -368,6 +368,18 @@
     refresh();
   })();
 
+  /* ---------------- embedded video: platform tabs ---------------- */
+  document.querySelectorAll("figure.video").forEach(function (fig) {
+    var frame = fig.querySelector("iframe");
+    fig.querySelectorAll(".video-tabs button").forEach(function (b, _, all) {
+      b.addEventListener("click", function () {
+        if (b.getAttribute("aria-selected") === "true") return;
+        all.forEach(function (o) { o.setAttribute("aria-selected", o === b ? "true" : "false"); });
+        frame.src = b.dataset.src;
+      });
+    });
+  });
+
   /* ---------------- live reload (local preview only) ---------------- */
   if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
     var lastBuild = null;

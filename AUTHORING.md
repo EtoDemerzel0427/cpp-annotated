@@ -60,6 +60,7 @@ papers: P0593R6, P1971R0        # 可选：相关提案（只写确定存在且�
 related: basic.stc, topics/object-model   # 可选：页尾"相关阅读"
 tags: 对象模型, UB               # 可选
 order: 10                       # 可选：专题/工具链列表中的排序
+video: bilibili=BV号, youtube=视频ID  # 可选：嵌入本页的视频版（只在专题/提案等栏目页生效）
 updated: 2026-10-17
 ---
 ```

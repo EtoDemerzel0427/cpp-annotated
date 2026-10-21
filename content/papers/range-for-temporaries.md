@@ -8,7 +8,8 @@ since: c++23
 papers: P2718R0, P2644R1, P2012R2, P0936R0, P0614R1, CWG900, CWG1498
 related: class.temporary, stmt.ranged, dcl.init.ref, expr.call, diff.cpp20, cpp.predefined, stmt.expand, range.all, topics/dangling-references, topics/ranges-design, topics/object-model, papers/how-to-read-a-paper
 tags: 提案, 范围 for, 临时对象, 生命周期, 悬垂, C++23
-updated: 2026-10-19
+updated: 2026-10-21
+video: bilibili=BV1kFnq68Eig, youtube=roalgUcBrkY
 ---
 
 !!! tldr
@@ -304,7 +305,7 @@ int main() {
 }
 ```
 
-`g()` 的临时对象确实被延长了，但它只用来初始化形参 `t`，`f2` 返回的是 `t`。形参在函数返回时或在完整表达式末尾销毁（由实现定义，[[expr.call#7]]），无论哪种都早于循环体。Clang 在 `f2` 的定义处给出 `-Wreturn-stack-address` 警告。值得注意的是，本机 `-std=c++23` 加 ASan 运行时没有报告任何错误，第二个循环只是悄悄地一次也没有执行；ASan 没报不等于程序正确。
+这里根本没有可以延长的临时对象。从 C++17 起，`g()` 这个纯右值直接初始化形参 `t`（[[dcl.init.general#15.6.1]]），中间不产生临时对象；`f2` 返回的是 `t` 的引用，而形参不是临时对象，新规则管不到它。形参在函数返回时或在完整表达式末尾销毁（由实现定义，[[expr.call#7]]），无论哪种都早于循环体。Clang 在 `f2` 的定义处给出 `-Wreturn-stack-address` 警告。值得注意的是，本机 `-std=c++23` 加 ASan 运行时没有报告任何错误，第二个循环只是悄悄地一次也没有执行；ASan 没报不等于程序正确。
 
 第二种是范围 for 以外的地方。普通声明没有这条特例：
 

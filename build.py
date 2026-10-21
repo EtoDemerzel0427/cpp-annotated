@@ -608,6 +608,25 @@ def children_block(entry, root, ctx, title="本节结构"):
 
 # --------------------------------------------------------------------------- build
 
+VIDEO_SOURCES = (  # (key, tab label, embed URL template)
+    ("bilibili", "B站 · 中文", "https://player.bilibili.com/player.html?bvid={}&page=1&autoplay=0&high_quality=1&danmaku=0"),
+    ("youtube", "YouTube · English", "https://www.youtube-nocookie.com/embed/{}"),
+)
+
+
+def video_html(video):
+    """Embedded episode of the page's video version, one tab per platform."""
+    srcs = [(label, url.format(video[key])) for key, label, url in VIDEO_SOURCES if video.get(key)]
+    if not srcs:
+        return ""
+    tabs = "".join(f'<button type="button" role="tab" aria-selected="{"true" if i == 0 else "false"}" data-src="{esc(u)}">{esc(l)}</button>'
+                   for i, (l, u) in enumerate(srcs)) if len(srcs) > 1 else ""
+    return (f'<figure class="video">' + (f'<div class="video-tabs" role="tablist">{tabs}</div>' if tabs else "")
+            + f'<div class="video-frame"><iframe src="{esc(srcs[0][1])}" title="本页的视频版" loading="lazy" '
+            'allow="fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>'
+            '<figcaption>本页的视频版：中文《C++ 拆解室》，英文 <i>ill-formed C++</i>。</figcaption></figure>')
+
+
 def collect_pages(by_id):
     pages = {}
     for path in sorted(CONTENT.rglob("*.md")):
@@ -625,6 +644,7 @@ def collect_pages(by_id):
             "since": meta.get("since", ""), "papers": split_list(meta.get("papers")),
             "related": split_list(meta.get("related")), "order": float(meta.get("order", 999)),
             "updated": meta.get("updated", ""), "covers": split_list(meta.get("covers")), "group": meta.get("group", ""),
+            "video": dict(v.split("=", 1) for v in split_list(meta.get("video")) if "=" in v),
             "url": f"{kind}/{pid}.html",
         }
         if kind == "std" and pid not in by_id:
@@ -806,7 +826,7 @@ def build():
             head = (f'<nav class="crumbs"><a href="{root}{kind}/index.html">{label}</a></nav>'
                     f'<header class="page-head"><h1>{esc(p["title"])}</h1>'
                     + (f'<p class="page-summary">{esc(p["summary"])}</p>' if p["summary"] else "")
-                    + f'<div class="page-meta">{"".join(meta_bits)}</div></header>')
+                    + f'<div class="page-meta">{"".join(meta_bits)}</div></header>' + video_html(p["video"]))
             tail = []
             if p["related"]:
                 tail.append(related_block(p["related"], ctx, p["key"], root))

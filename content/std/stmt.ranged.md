@@ -6,7 +6,7 @@ since: c++11
 papers: P0184R0, P0962R1, P0614R1, P2718R0
 related: stmt.for, stmt.iter, class.temporary, basic.lookup.argdep, dcl.struct.bind, stmt.expand
 tags: 语句, 循环, 临时对象, 生命周期
-updated: 2026-10-19
+updated: 2026-10-21
 ---
 
 !!! tldr
@@ -228,7 +228,7 @@ void foo() {
 }
 ```
 
-`f2` 返回的是对自己形参 `t` 的引用。形参不是临时对象，不受延长；它在函数返回时或在调用所在的完整表达式结束时销毁（具体哪一个由实现定义，见 [[expr.call]]），都早于循环体执行。`g()` 的临时对象确实被延长了，但它只是用来初始化 `t` 的，和返回的引用无关。Clang 在 `f2` 的定义处给出 `-Wreturn-stack-address` 警告。
+`f2` 返回的是对自己形参 `t` 的引用。形参不是临时对象，不受延长；它在函数返回时或在调用所在的完整表达式结束时销毁（具体哪一个由实现定义，见 [[expr.call]]），都早于循环体执行。这里也没有别的临时对象可以延长：`g()` 是纯右值，直接初始化形参 `t`（[[dcl.init.general#15.6.1]]），不经过临时对象。Clang 在 `f2` 的定义处给出 `-Wreturn-stack-address` 警告。
 
 同理，在循环体里创建的临时对象，以及初始化器调用的函数内部创建的临时对象，都不在延长之列。
 
