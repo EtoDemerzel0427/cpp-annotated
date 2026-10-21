@@ -91,12 +91,13 @@
   var TABS = [
     { k: "lang", label: "核心语言" }, { k: "lib", label: "标准库" }, { k: "annex", label: "附录" },
     { k: "topics", label: "专题" }, { k: "patterns", label: "模式" }, { k: "perf", label: "性能" },
-    { k: "toolchain", label: "工程" }, { k: "history", label: "沿革" }, { k: "papers", label: "提案" }
+    { k: "toolchain", label: "工程" }, { k: "history", label: "沿革" }, { k: "papers", label: "提案" },
+    { k: "exams", label: "考卷" }
   ];
   function defaultTab() {
     var act = body.dataset.active;
     if (curPath.length) return NAV.groups[curPath[0].i] || "lang";
-    if (act === "topics" || act === "patterns" || act === "perf" || act === "toolchain" || act === "history" || act === "papers") return act;
+    if (act === "topics" || act === "patterns" || act === "perf" || act === "toolchain" || act === "history" || act === "papers" || act === "exams") return act;
     return store("tab") || "lang";
   }
   function renderSidebar(tab) {
@@ -291,6 +292,81 @@
     var q = gf.value.trim().toLowerCase();
     document.querySelectorAll(".term").forEach(function (t) { t.hidden = q && t.textContent.toLowerCase().indexOf(q) < 0; });
   });
+
+  /* ---------------- exams: <div class="quiz" data-kind="verdict|choice|open" data-answer="…"> ---------------- */
+  var quizzes = Array.prototype.slice.call(document.querySelectorAll(".prose .quiz"));
+  if (quizzes.length) (function () {
+    var VERDICT = [["ok", "良构"], ["error", "非良构"], ["ub", "未定义行为"], ["ifndr", "IFNDR"],
+                   ["unspecified", "未指明"], ["impl", "实现定义"], ["eb", "错误行为"]];
+    var KEY = "exam." + PAGE;
+    var state = {};
+    try { state = JSON.parse(store(KEY) || "{}") || {}; } catch (e) { state = {}; }
+    function save() { store(KEY, JSON.stringify(state)); }
+
+    var bar = el("div", { class: "quiz-bar", role: "status" });
+    quizzes[0].parentNode.insertBefore(bar, quizzes[0].parentNode.firstChild);
+    function refresh() {
+      var done = 0, right = 0;
+      quizzes.forEach(function (q, i) { var s = state[i]; if (s) { done++; if (s.ok) right++; } });
+      var pct = done ? Math.round(100 * right / quizzes.length) : 0;
+      bar.innerHTML = '<span class="qb-prog"><b>' + done + "</b> / " + quizzes.length + " 已答</span>" +
+        '<span class="qb-score">答对 <b>' + right + "</b></span>" +
+        (done === quizzes.length ? '<span class="qb-final">得分 ' + pct + "</span>" : "") +
+        '<button type="button" class="qb-reset">重做</button>';
+      bar.querySelector(".qb-reset").addEventListener("click", function () {
+        if (!confirm("清除本卷的全部作答记录？")) return;
+        state = {}; save(); location.reload();
+      });
+    }
+
+    quizzes.forEach(function (q, i) {
+      var kind = q.dataset.kind || "verdict";
+      var answer = (q.dataset.answer || "").trim();
+      var key = q.querySelector("details.quiz-key");
+      var num = el("span", { class: "quiz-num" }, "第 " + (i + 1) + " 题");
+      q.insertBefore(num, q.firstChild);
+      q.id = q.id || "q" + (i + 1);
+      var opts = el("div", { class: "quiz-opts" });
+      if (key) q.insertBefore(opts, key); else q.appendChild(opts);
+      var choices = kind === "verdict" ? VERDICT.filter(function (v) {
+        return !q.dataset.options || q.dataset.options.split(/[\s,]+/).indexOf(v[0]) >= 0;
+      }) : kind === "choice" ? (q.dataset.options || "A B C D").split(/[\s,]+/).map(function (c) { return [c, c]; }) : [];
+
+      function finish(pick, ok, restoring) {
+        state[i] = { p: pick, ok: ok };
+        if (!restoring) save();
+        q.classList.add("answered", ok ? "right" : "wrong");
+        if (kind === "open") opts.innerHTML = '<span class="quiz-self ' + (ok ? "ok" : "no") + '">自评：' + (ok ? "答对" : "没答对") + "</span>";
+        opts.querySelectorAll("button").forEach(function (b) {
+          b.disabled = true;
+          if (b.dataset.v === answer) b.classList.add("is-answer");
+          if (b.dataset.v === pick && pick !== answer) b.classList.add("is-wrong");
+        });
+        if (key) key.open = true;
+        refresh();
+      }
+
+      if (choices.length) {
+        choices.forEach(function (c) {
+          var b = el("button", { type: "button", class: "quiz-opt", "data-v": c[0] }, esc(c[1]));
+          b.addEventListener("click", function () { finish(c[0], c[0] === answer); });
+          opts.appendChild(b);
+        });
+        if (state[i]) finish(state[i].p, state[i].ok, true);
+      } else {  // open question: reveal, then grade yourself
+        var reveal = el("button", { type: "button", class: "quiz-opt" }, "想好了，看答案");
+        var yes = el("button", { type: "button", class: "quiz-opt self", "data-v": "y", hidden: "" }, "我答对了");
+        var no = el("button", { type: "button", class: "quiz-opt self", "data-v": "n", hidden: "" }, "没答对");
+        answer = "y";
+        reveal.addEventListener("click", function () { reveal.hidden = true; yes.hidden = no.hidden = false; if (key) key.open = true; });
+        yes.addEventListener("click", function () { finish("y", true); });
+        no.addEventListener("click", function () { finish("n", false); });
+        opts.appendChild(reveal); opts.appendChild(yes); opts.appendChild(no);
+        if (state[i]) { reveal.hidden = true; yes.hidden = no.hidden = false; finish(state[i].p, state[i].ok, true); }
+      }
+    });
+    refresh();
+  })();
 
   /* ---------------- live reload (local preview only) ---------------- */
   if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {

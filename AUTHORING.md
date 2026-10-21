@@ -210,3 +210,65 @@ clang++ -std=c++2c -O0 -fsanitize=address,undefined x.cpp -o x && ./x   # 运行
 - 区分**有文档的事实**和**流传的说法**。后者要标明"据……回忆"或"常见的说法是……"，不要写成定论。不揣测个人动机，不写人身评价；争论只陈述各方的技术理由。
 - 提案号写完后用 `python3 tools/check_refs.py --titles` 核对编号与标题是否对应。
 - 链接到本站的条款页（`[[temp.constr]]`）和专题页，让读者能从历史跳回规则本身。
+
+## 10. 考卷（exams）的写法
+
+考卷放在 `content/exams/<slug>.md`，目标是检验读者能否像 language lawyer 一样**判定一段代码并给出标准出处**。题目考的是规则的边界，不是冷知识：每题都应该有一个读过对应条款的人能推出来的唯一答案。
+
+### 10.1 题目组件
+
+每道题是一个 `quiz` 块，解析放在其中的 `details.quiz-key` 里。页面脚本会自动编号、生成作答按钮、判分并把记录存在读者浏览器里。
+
+````markdown
+<div class="quiz" data-kind="verdict" data-answer="ub" markdown="1">
+
+题干（一两句话，说明要判定什么）。
+
+```cpp
+// 代码。不要加判定标记（ok/error/ub…），否则等于把答案写在题面上；也不要在行尾写 // OK、// UB 这类注释
+```
+
+<details class="quiz-key" markdown="1"><summary>答案与解析</summary>
+
+**答案：未定义行为。**
+
+解析正文……
+
+</details>
+</div>
+````
+
+三种题型：
+
+| `data-kind` | 作答方式 | `data-answer` |
+|---|---|---|
+| `verdict` | 从判定中选一个：`ok` 良构、`error` 非良构、`ub`、`ifndr`、`unspecified`、`impl`、`eb` | 其中之一 |
+| `choice` | 单选，选项写在题干列表里（`- A. …`），按钮字母由 `data-options="A B C D"` 给出（默认 ABCD） | 一个字母 |
+| `open` | 简答 / 论证，读者看完解析后自评 | 不写 |
+
+`verdict` 题可以用 `data-options="ok error ub"` 限定可选的判定，但一般给全部七个。判定按整个程序中**最重的一项**给（程序非良构就是 `error`，哪怕运行时还会有 UB）；题干要写清楚问的是"程序"还是"某一行"。
+
+### 10.2 解析的要求
+
+- 第一行加粗给出答案，然后按推理顺序解释：先定位适用的规则，再一步步套用，最后排除干扰项（为什么不是看起来也合理的另一个选项）。
+- **每个结论都要有出处**：`[[stable.name#段号]]`，段号用 `python3 tools/eel.py <stable-name>` 核对。站内有对应讲解页时再链接过去（`[[topics/value-categories]]`）。
+- 需要时给一个"改一处就变成另一种判定"的对照代码，这是最能说明边界的写法。解析里的代码块**可以**加判定标记和 `run`。
+- 编译器与标准不一致时（接受了非良构程序、尚未实现某特性），在解析里明说。
+
+### 10.3 验证
+
+每一段题目代码都要实测，判定必须和实测结果一致，或者解释为什么不一致（UB 不保证可观察，IFNDR 不保证报错）：
+
+```bash
+clang++ -std=c++2c -Wall -Wextra -pedantic -fsyntax-only q.cpp
+clang++ -std=c++2c -O0 -fsanitize=address,undefined q.cpp -o q && ./q
+```
+
+`choice` 题如果问的是输出，要实际运行确认输出。完成后 `python3 build.py --check` 不能有本页的警告。
+
+### 10.4 组卷
+
+- 一卷 20–25 题，按主题分成三到五个二级标题（"## 一、生命周期与存储复用"）。题型大致是判定题六成、选择题两三成、简答题一成。
+- 难度从基础到刁钻递增；最后几题可以是综合题。不要出只靠记忆的题（"某特性是哪年引入的"）。
+- 页首 `!!! tldr` 写本卷考查范围和建议用时；frontmatter 用 `order` 排序，`tags` 写主题。
+- 页尾用一张表列出每题考查的条款，方便读者回查。

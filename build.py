@@ -41,6 +41,7 @@ COLLECTIONS = {
     "toolchain": ("工具链与工程", "编译器、链接器、ABI、构建系统，以及组织一个 C++ 项目的工程实践：物理设计、库边界、依赖、测试、调试和静态分析。"),
     "history": ("沿革", "一个特性或一个库是怎么走到今天的：早期的尝试、委员会里的争论与妥协、被否决的方案、后来的转机，以及还在进行中的工作。"),
     "papers": ("提案", "WG21 提案解读：一个特性从动机、设计取舍到最终措辞的来龙去脉。"),
+    "exams": ("考卷", "按主题组卷的 language lawyer 测验：每题先作答再看解析，解析给出判定和标准出处。判分只保存在你自己的浏览器里。"),
 }
 
 STATUS = {
@@ -526,6 +527,7 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
     <a href="{root}history/index.html" data-nav="history">沿革</a>
     <a href="{root}papers/index.html" data-nav="papers">提案</a>
     <a href="{root}exercises.html" data-nav="exercises">习题</a>
+    <a href="{root}exams/index.html" data-nav="exams">考卷</a>
     <a href="{root}glossary.html" data-nav="glossary">术语</a>
   </nav>
   <button class="search-btn" type="button" aria-label="搜索"><span>搜索 stable name / 关键词</span><kbd>/</kbd></button>
@@ -684,12 +686,10 @@ def build():
         import tempfile
         OUT = Path(tempfile.mkdtemp(prefix="cppstd-check-"))
     else:
-        # build next to _site and swap it in at the end, so the dev server never serves a half-built site
-        final, OUT = OUT, OUT.with_name(OUT.name + ".building")
-    if OUT.exists():
-        for child in OUT.iterdir():
-            shutil.rmtree(child) if child.is_dir() else child.unlink()
-    OUT.mkdir(exist_ok=True)
+        # build next to _site and swap it in at the end, so the dev server never serves a half-built site;
+        # a fresh directory per build, so a manual build can't collide with the watcher's
+        import tempfile
+        final, OUT = OUT, Path(tempfile.mkdtemp(prefix=OUT.name + ".building-", dir=OUT.parent))
     shutil.copytree(STATIC, OUT / "static")
 
     toc_meta, entries, by_id = load_toc()
@@ -858,8 +858,7 @@ def build():
     if "--check" in sys.argv:
         shutil.rmtree(OUT, ignore_errors=True)
     elif final is not None:
-        old_site = final.with_name(final.name + ".old")
-        shutil.rmtree(old_site, ignore_errors=True)
+        old_site = Path(str(OUT).replace(".building-", ".old-"))
         if final.exists():
             final.rename(old_site)
         OUT.rename(final)
