@@ -8,6 +8,7 @@ papers: N3055, P0135R1, P1825R0, P2266R3
 related: basic.lval, class.temporary, dcl.init.ref, class.copy.elision, dcl.type.decltype, conv.rval, expr.type, over.ics.rank, topics/type-deduction
 tags: 值类别, 移动语义, 复制消除, decltype
 updated: 2026-10-19
+video: bilibili=BV1m2n16cEz5, youtube=Vr1iS7PpJyo
 ---
 
 !!! tldr
