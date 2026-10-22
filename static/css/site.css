@@ -826,10 +826,25 @@ figure.code figcaption > .code-title { flex-shrink: 1; min-width: 0; overflow: h
 .lang-banner a { font-weight: 650; color: var(--accent); }
 .lang-banner-close { margin-left: auto; border: 0; background: none; font-size: 18px; line-height: 1; color: var(--ink-2); cursor: pointer; }
 .xref.zh-only::after { content: "中"; font-size: .62em; vertical-align: super; margin-left: 2px; color: var(--ink-3); }
-/* English edition: Source Serif 4 (the Latin sibling of the Source Han Serif used for Chinese headings) + Inter for text */
+/* English edition, after anthropic.com: a sans for headings and interface, a serif for running text.
+   Instrument Sans and Source Serif 4 stand in for the proprietary Anthropic Sans / Anthropic Serif. */
 html[lang="en"] {
-  --font-serif: "Source Serif 4", Georgia, "Source Han Serif SC", "Noto Serif SC", serif;
-  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  --font-serif: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;  /* headings, brand, cards */
+  --font-text: "Source Serif 4", Georgia, "Source Han Serif SC", serif;                         /* running text */
 }
-html[lang="en"] body { font-feature-settings: "cv11", "ss01"; }
-html[lang="en"] .hero h1, html[lang="en"] .page-head h1, html[lang="en"] .brand-name { letter-spacing: -.005em; }
+html[lang="en"] .prose { font-family: var(--font-text); font-size: 18px; line-height: 1.6; letter-spacing: 0; }
+html[lang="en"] .prose h1, html[lang="en"] .prose h2, html[lang="en"] .prose h3, html[lang="en"] .prose h4 { font-family: var(--font-serif); letter-spacing: -.01em; }
+html[lang="en"] .prose table, html[lang="en"] .prose details > summary { font-family: var(--font-sans); font-size: .9em; }
+html[lang="en"] .prose .admonition { font-family: var(--font-sans); font-size: .95em; line-height: 1.7; }
+html[lang="en"] .prose .admonition.tldr { padding: 1.2em 1.6em .5em; }
+html[lang="en"] .prose .admonition.tldr li { margin: .65em 0; }
+html[lang="en"] .prose .admonition li { margin: .4em 0; }
+/* the Chinese edition marks these titles with a character; use symbols in English */
+html[lang="en"] .admonition.note > .admonition-title::before { content: "✎"; }
+html[lang="en"] .admonition.example > .admonition-title::before { content: "▸"; }
+html[lang="en"] .admonition.history > .admonition-title::before { content: "↺"; }
+html[lang="en"] .prose .admonition.std { font-family: var(--font-text); }
+html[lang="en"] .page-summary, html[lang="en"] .hero-lede, html[lang="en"] .glossary dd { font-family: var(--font-text); line-height: 1.55; }
+html[lang="en"] .hero h1, html[lang="en"] .page-head h1 { letter-spacing: -.015em; font-weight: 650; }
+html[lang="en"] .brand-name { letter-spacing: -.005em; }

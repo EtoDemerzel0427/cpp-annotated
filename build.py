@@ -90,7 +90,7 @@ ADMONITION_TITLES = {
 # English edition: content/en/<kind>/<slug>.md translates content/<kind>/<slug>.md and renders to en/<kind>/<slug>.html.
 # Rendering helpers read LANG; it is "en" only while an English page is being rendered.
 LANG = "zh"
-EN_FONTS = "family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400&family=Inter:wght@400..700&"  # Google Fonts query, English pages only
+EN_FONTS = "family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..700&family=Instrument+Sans:wght@400..700&"  # Google Fonts query, English pages only
 EN_GLOSSARY = []  # glossary entries that have an English definition
 EN_STD = False  # whether any clause note has an English version
 EN_KINDS = []  # collections that have at least one English page, in COLLECTIONS order
