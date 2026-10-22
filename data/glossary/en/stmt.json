@@ -1,0 +1,58 @@
+[
+ {
+  "id": "substatement",
+  "def": "A statement directly contained in a statement: the statement after a label, the statements in a compound statement, the branches or loop body of a selection/iteration statement, the compound statement of an expansion statement; excluding the *init-statement* and lambda bodies. See [[stmt.pre#2]]."
+ },
+ {
+  "id": "enclose-statement",
+  "def": "The relation obtained by adding the *init-statement* and the compound statements of try blocks and handlers on top of the substatement relation and taking the transitive closure; the validity of `break`, `case`, `continue`, etc. is all judged with it. It does not penetrate lambda bodies."
+ },
+ {
+  "id": "decision-variable",
+  "def": "The variable tested in a condition of declaration form: for an ordinary declaration, the declared variable; for a structured binding declaration (C++26), the underlying unnamed variable *e*."
+ },
+ {
+  "id": "control-flow-limited-statement",
+  "def": "A statement whose `case`/`default` labels must belong to a `switch` within it, and whose labels can be referred to only by statements within it; i.e. it cannot be jumped into from outside. The branches of `if constexpr` and `if consteval` and the body of an expansion statement are such statements."
+ },
+ {
+  "id": "null-statement",
+  "def": "An expression statement `;` with the expression omitted. Commonly used as an empty loop body, and also the statement to which `[[fallthrough]]` applies."
+ },
+ {
+  "id": "compound-statement",
+  "def": "`{ ... }`, which groups a sequence of statements into one statement and introduces a block scope; since C++23 it may end with a label."
+ },
+ {
+  "id": "constexpr-if",
+  "def": "An if statement of the form `if constexpr (c)`; the condition, contextually converted to bool, must be a constant expression, and the branch not selected is a discarded statement."
+ },
+ {
+  "id": "discarded-statement",
+  "def": "The substatement of a constexpr if statement that is not selected. In a template (when the condition is not value-dependent after instantiation) it is not instantiated; odr-uses in it do not require a definition; `return` statements in it do not participate in return type deduction."
+ },
+ {
+  "id": "consteval-if",
+  "def": "An if statement of the form `if consteval { ... }` (C++23): executes the first branch (which is an immediate function context) in a manifestly constant-evaluated context, and the else branch otherwise; the branches must be compound statements."
+ },
+ {
+  "id": "trivially-empty-iteration-statement",
+  "def": "A while/do/for statement whose body is `;` or `{ }`, whose condition is an expression, and (for for) which has no iteration expression."
+ },
+ {
+  "id": "expansion-statement",
+  "def": "C++26's `template for (decl : init) { ... }`: at compile time, the compound statement is instantiated N times, once per element, and the loop variable may have a different type in each copy. There are three kinds: enumerating, iterating, and destructuring."
+ },
+ {
+  "id": "expansion-iterable",
+  "def": "An expression of non-array type whose begin/end are in member form or for which ADL finds viable begin/end candidates; an expansion statement with it as the initializer is an iterating expansion statement."
+ },
+ {
+  "id": "active-variable",
+  "def": "A block variable with automatic storage duration is active at positions within its scope after its *init-declarator*. When control transfers from P to Q, variables active at P but not at Q are destroyed, and those active at Q but not at P are initialized; if the latter initialization is not vacuous, the transfer must not be a jump."
+ },
+ {
+  "id": "declaration-statement",
+  "def": "A *block-declaration* appearing in a block, introducing new names in the block."
+ }
+]

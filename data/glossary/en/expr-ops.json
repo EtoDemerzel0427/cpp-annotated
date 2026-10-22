@@ -1,0 +1,30 @@
+[
+ {
+  "id": "truncation-toward-zero",
+  "def": "The rounding of integer division `/`: the fractional part of the algebraic quotient is discarded (`-7 / 2 == -3`). Mandatory since C++11; the identity `(a/b)*b + a%b == a` implies that the result of `%` has the same sign as the dividend."
+ },
+ {
+  "id": "comparison-category-type",
+  "def": "The three class types `std::strong_ordering`, `std::weak_ordering`, `std::partial_ordering`, used as the result types of `<=>`. They are not predefined: their declarations from `<compare>` must be available before using the built-in `<=>`, otherwise the program is ill-formed."
+ },
+ {
+  "id": "short-circuit-evaluation",
+  "def": "Built-in `&&` does not evaluate its right operand when the left operand is `false`, nor `||` when it is `true`, and the left operand is sequenced before the right one. Overloaded `&&`/`||` lose short-circuiting (but since C++17 keep the ordering)."
+ },
+ {
+  "id": "yield-expression",
+  "def": "`co_yield e`, equivalent to `co_await p.yield_value(e)` (where `p` is the promise object), but without going through `await_transform`. It may appear only in a suspension context, at the level of an assignment-expression."
+ },
+ {
+  "id": "throw-expression",
+  "def": "`throw e` or `throw`, of type `void`. With an operand, it copy-initializes the exception object from the operand (with the static type after decay and removal of top-level cv); without an operand, it rethrows the currently handled exception, or calls `std::terminate` if there is none."
+ },
+ {
+  "id": "rethrow",
+  "def": "`throw;` with no operand: reactivates the currently handled exception with the existing exception object, creating no new object and not slicing; if no exception is being handled, `std::terminate` is called."
+ },
+ {
+  "id": "compound-assignment",
+  "def": "`E1 op= E2`, equivalent to `E1 = E1 op E2` except that `E1` is evaluated only once. With respect to an indeterminately-sequenced function call it is a single evaluation; the result is an lvalue referring to `E1`."
+ }
+]

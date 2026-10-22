@@ -1,0 +1,102 @@
+[
+ {
+  "id": "preprocessing-translation-unit",
+  "def": "A source file together with all headers and source files recursively included via `#include`, minus any lines skipped by conditional inclusion directives. See [[lex.separate]]."
+ },
+ {
+  "id": "logical-source-line",
+  "def": "A line formed by splicing together several physical source lines after phase 2 deletes each \"backslash + optional whitespace + new-line\". Preprocessing directives operate on logical source lines."
+ },
+ {
+  "id": "translation-character-set",
+  "def": "Consists of one character for each abstract Unicode character assigned to a code point, plus one for each unassigned Unicode scalar value; i.e. in one-to-one correspondence with Unicode scalar values. After phase 1, the characters in the source are elements of it."
+ },
+ {
+  "id": "basic-character-set",
+  "def": "A 99-character subset of the translation character set: the 95 printable ASCII characters plus horizontal tab, vertical tab, form feed, and new-line. Since C++26 it includes `$`, `@`, and `` ` ``."
+ },
+ {
+  "id": "basic-literal-character-set",
+  "def": "The basic character set plus the four control characters NUL, BEL, BS, CR. Every literal encoding must encode each of them as a single non-negative code unit."
+ },
+ {
+  "id": "code-unit",
+  "def": "An integer value of character type. The characters in a literal are encoded as one or more code units according to its literal encoding."
+ },
+ {
+  "id": "literal-encoding",
+  "def": "The encoding, determined by the encoding prefix, used to encode the characters of a character literal or string literal into a sequence of code units: the ordinary literal encoding (no prefix), the wide literal encoding (`L`), and UTF-8/16/32 (`u8`/`u`/`U`). The first two are implementation-defined."
+ },
+ {
+  "id": "universal-character-name",
+  "def": "A way of naming any element of the translation character set using basic characters: `\\uXXXX`, `\\UXXXXXXXX`, `\\u{...}` (C++23), `\\N{name}` (C++23). Outside of literals it must not designate a basic character or a control character."
+ },
+ {
+  "id": "preprocessing-token",
+  "def": "The minimal lexical unit in phases 3–5: header names, import/module/export placeholder tokens, identifiers, preprocessing numbers, character/string literals, preprocessing operators or punctuators, and other single non-whitespace characters. Converted to tokens in phase 6."
+ },
+ {
+  "id": "maximal-munch",
+  "def": "Informal term: the next preprocessing token is the longest sequence of characters that could constitute a preprocessing token, even if that would cause subsequent analysis to fail (except in cases such as raw strings, `<::`, `[::`)."
+ },
+ {
+  "id": "pp-number",
+  "def": "A preprocessing token that begins with a digit or \". digit\" and may continue with identifier characters, `.`, `'`, and `e`/`E`/`p`/`P` followed by a sign. It has no type or value until it is converted to an integer or floating-point literal in phase 6."
+ },
+ {
+  "id": "alternative-token",
+  "def": "An alternative spelling of certain operators and punctuators, such as `<%` (`{`), `<:` (`[`), `%:` (`#`), `and` (`&&`), `compl` (`~`). Apart from its stringized form it is exactly the same as the primary token."
+ },
+ {
+  "id": "identifier-with-special-meaning",
+  "def": "`final`, `override`, `import`, `module`, `pre`, `post`, which have a special meaning in particular contexts and are ordinary identifiers elsewhere. When ambiguous they are interpreted as ordinary identifiers by default; they cannot be used as macro names."
+ },
+ {
+  "id": "reserved-identifier",
+  "def": "An identifier reserved to the implementation when it appears as a token: those containing `__` or beginning with `_` followed by an uppercase letter are reserved everywhere; those beginning with `_` are reserved in the global namespace. Using them is IFNDR."
+ },
+ {
+  "id": "keyword",
+  "def": "The identifiers in Table 5 that are unconditionally treated as keywords in phases 6 and 7 (except in attribute tokens), plus the import/module/export placeholder keywords that have no spelling."
+ },
+ {
+  "id": "multicharacter-literal",
+  "def": "A character literal containing more than one c-char, such as `'ab'`. It must not have an encoding prefix; it is conditionally-supported, has type `int`, and has an implementation-defined value."
+ },
+ {
+  "id": "numeric-escape-sequence",
+  "def": "An octal (`\\101`, `\\o{101}`) or hexadecimal (`\\x41`, `\\x{41}`) escape sequence; it gives the value of one code unit directly rather than a character to be encoded."
+ },
+ {
+  "id": "conditional-escape-sequence",
+  "def": "A backslash followed by a basic character that has not been given a meaning (such as `\\q`, `\\e`). Conditionally-supported, with an implementation-defined value."
+ },
+ {
+  "id": "raw-string-literal",
+  "def": "A string literal with `R` in its prefix, such as `R\"d(...)d\"`: it contains no escape sequences or UCNs, line splicing is reverted, and the delimiter is at most 16 characters."
+ },
+ {
+  "id": "narrow-string-literal",
+  "def": "Collective name for ordinary string literals and UTF-8 string literals."
+ },
+ {
+  "id": "string-literal-object",
+  "def": "The object with static storage duration obtained by evaluating a string literal; it is a potentially non-unique object, whether multiple evaluations yield the same object is unspecified, and modifying it is UB."
+ },
+ {
+  "id": "unevaluated-string",
+  "def": "A string literal that is never evaluated, appearing in a `static_assert` message, `[[deprecated]]`, `extern \"C\"`, etc. (C++26). It must not have an encoding prefix or numeric/conditional escapes, and does not go through a literal encoding."
+ },
+ {
+  "id": "significand",
+  "def": "The digit part of a floating-point literal before the exponent (including the decimal point), interpreted in decimal or hexadecimal as a real number s; the scaled value of the literal is s×10^e or s×2^e."
+ },
+ {
+  "id": "user-defined-literal",
+  "def": "An integer, floating-point, character, or string literal with a ud-suffix, such as `12_km`, `\"abc\"s`; it is rewritten into a call to a literal operator (template) `operator\"\"X`."
+ },
+ {
+  "id": "ud-suffix",
+  "def": "The identifier at the end of a user-defined literal. Suffixes not beginning with `_` are reserved for the standard, and those containing `__` are reserved for the implementation."
+ }
+]

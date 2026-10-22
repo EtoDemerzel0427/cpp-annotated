@@ -1,0 +1,66 @@
+[
+ {
+  "id": "structured-binding-declaration",
+  "def": "A *simple-declaration* or condition with a *structured-binding-declaration*, such as `auto [a, b] = e;`. The specifiers can only be `constexpr`, `constinit`, `static`, `thread_local`, `auto`, and cv-qualifiers, and it contains at most one pack."
+ },
+ {
+  "id": "typedef-declaration",
+  "def": "A declaration whose specifier sequence contains `typedef`; each *declarator-id* in it is declared to be a typedef-name ([[dcl.typedef]])."
+ },
+ {
+  "id": "function-declaration",
+  "def": "A declaration that is not a typedef declaration and in which the type associated with the *declarator-id* is a function type. The classification is made declarator by declarator."
+ },
+ {
+  "id": "object-declaration",
+  "def": "A declaration that is not a typedef declaration and in which the type associated with the *declarator-id* is an object type or a **reference type**. If the type is neither a function nor an object/reference (e.g. `void`), the program is ill-formed."
+ },
+ {
+  "id": "static-assert-fails",
+  "def": "The condition of a `static_assert`, contextually converted to `bool`, is `false`, and it is not in the context of a template definition; the program is then ill-formed. Since C++26 the message can be a computed string."
+ },
+ {
+  "id": "type-alias",
+  "def": "A name declared by `typedef` or an *alias-declaration* (`using X = T;`), i.e. a *typedef-name*; it **does not introduce a new type**, and its underlying entity is the aliased type."
+ },
+ {
+  "id": "typedef-name-for-linkage",
+  "def": "An unnamed class or unnamed enumeration defined in a typedef declaration takes the first typedef-name for that type in the declaration as its name for linkage purposes, such as `S` in `typedef struct { int x; } S;`. Since C++20 such an unnamed class must be \"C-compatible\" (no member functions, base classes, default member initializers, or lambdas)."
+ },
+ {
+  "id": "constexpr-function",
+  "def": "A function declared with `constexpr` or `consteval` (so immediate functions are also constexpr functions). It is implicitly inline and can appear in constant expressions; otherwise it behaves the same as the equivalent ordinary function."
+ },
+ {
+  "id": "constexpr-suitable",
+  "def": "In the current draft, a function is constexpr-suitable simply if it **is not a coroutine**; a non-templated constexpr function must satisfy this. All other restrictions are deferred to be checked during actual constant evaluation ([[expr.const.core]])."
+ },
+ {
+  "id": "inline-function",
+  "def": "A function declared with `inline` (or implicitly inline, such as a member function defined in its class, or a constexpr function). With external or module linkage it can be defined in multiple TUs, yet remains the same entity with the same address; inline substitution is only a non-binding hint."
+ },
+ {
+  "id": "inline-variable",
+  "def": "A variable declared with `inline` (C++17), or a static data member whose first declaration has `constexpr`. Like inline functions it enjoys the ODR exemption: it can be defined in multiple TUs, and the whole program has only one object."
+ },
+ {
+  "id": "deducible-template",
+  "def": "A template that can be used as a placeholder for a deduced class type (CTAD): a class template, a type template template parameter, or an alias template whose defining-type-id has the form `simple-template-id` (referring to another deducible template)."
+ },
+ {
+  "id": "deduced-class-type-placeholder",
+  "def": "A deducible template name (or splice) without a template argument list, such as `std::pair` in `std::pair p(1, 2);`; it is replaced by the result of overload resolution per [[over.match.class.deduct]]. It can be used only in initializing declarations of variables (`cv T`), `new`, functional casts, and template parameters."
+ },
+ {
+  "id": "pack-index",
+  "def": "The value V of the constant expression `I` in `P...[I]`, which must satisfy 0 ≤ V < `sizeof...(P)`; out of range is ill-formed. The *pack-index-specifier* denotes the V-th type in the pack and is itself a pack expansion (C++26)."
+ },
+ {
+  "id": "generic-parameter-type-placeholder",
+  "def": "A placeholder type of the form `type-constraint(opt) auto` in a function parameter, lambda parameter, or template parameter; a function with one is an abbreviated function template, and a lambda with one is a generic lambda."
+ },
+ {
+  "id": "placeholder-type-deduction",
+  "def": "The process of replacing a type containing a placeholder type with the deduced type. `auto` follows the rules for template argument deduction from a function call (with `= {…}` it deduces `std::initializer_list<U>`); `decltype(auto)` follows the rules of `decltype(E)`."
+ }
+]

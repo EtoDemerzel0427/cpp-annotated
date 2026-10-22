@@ -1,0 +1,34 @@
+[
+ {
+  "id": "polymorphic-function-wrapper",
+  "def": "A class template that stores (or refers to), with a fixed type, any callable object satisfying a given call signature: `function`, `move_only_function`, `copyable_function`, `function_ref`."
+ },
+ {
+  "id": "type-erasure",
+  "def": "The technique of hiding concrete types known at compile time behind a run-time dispatch mechanism (virtual functions, function pointer tables, or thunks), so that objects of different types can be stored and used through a single type."
+ },
+ {
+  "id": "small-object-optimization",
+  "def": "The implementation technique of storing sufficiently small target objects directly in a buffer inside the wrapper to avoid heap allocation. For owning function wrappers, the standard lists it only as recommended practice, and notes that it can be used only for types that are nothrow move constructible."
+ },
+ {
+  "id": "double-wrapping",
+  "def": "Constructing one polymorphic function wrapper from another by wrapping the former as a whole as the target object in another layer; the standard recommends that implementations avoid it, and for this purpose allows the arguments of the inner and outer calls to alias each other."
+ },
+ {
+  "id": "inv-quals",
+  "def": "The qualifiers used when invoking the target object in move_only_function/copyable_function: cv& when the signature has no ref-qualifier, cv ref otherwise. The target is invoked as static_cast<F inv-quals>(f)."
+ },
+ {
+  "id": "is-callable-from",
+  "def": "An exposition-only variable template: requires the target type VT to be invocable both with the signature's cv ref and with inv-quals, with the result convertible to R (non-throwing for a noexcept signature). It is the core constraint of the converting constructor and the in_place_type constructor."
+ },
+ {
+  "id": "bound-entity",
+  "def": "An exposition-only member of function_ref: a value of an unspecified trivially copyable type, storing an object pointer or function pointer, passed together with the arguments to thunk-ptr on invocation."
+ },
+ {
+  "id": "thunk-ptr",
+  "def": "An exposition-only member of function_ref: a function pointer of type R(*)(BoundEntityType, Args&&...) noexcept(noex), pointing to a small function instantiated at construction for the specific target, responsible for recovering the target from bound-entity and invoking it."
+ }
+]

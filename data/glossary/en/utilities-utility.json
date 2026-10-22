@@ -1,0 +1,46 @@
+[
+ {
+  "id": "swap-two-step",
+  "def": "The idiom for swapping values in generic code: first `using std::swap;`, then an unqualified call `swap(a, b)`, letting ADL find the type's own `swap` and falling back to `std::swap` if none is found. C++20's `std::ranges::swap` CPO packages it into a single call."
+ },
+ {
+  "id": "piecewise-construction",
+  "def": "The way of constructing a `pair` with `piecewise_construct` as the first argument followed by two `tuple`s: the elements of the two `tuple`s are forwarded to the constructors of `first` and `second` respectively, and the element types need not be copyable or movable."
+ },
+ {
+  "id": "tuple-protocol",
+  "def": "An open protocol consisting of `std::tuple_size<E>` (complete, with a `value`), `std::tuple_element<I, E>`, and a member or ADL-visible `get<I>`; user types can implement it, and structured bindings bind element-wise based on it."
+ },
+ {
+  "id": "tuple-like",
+  "def": "Exposition-only concept with a closed list: `remove_cvref_t<T>` is a specialization of `array`, `complex`, `pair`, `tuple`, or `ranges::subrange`. The converting constructors/assignments/comparisons of `tuple`, `tuple_cat`, `apply`, and `make_from_tuple` accept only it; user types cannot join."
+ },
+ {
+  "id": "pair-like",
+  "def": "Exposition-only concept: satisfies *tuple-like* and `tuple_size_v<remove_cvref_t<T>> == 2`. A `pair` can be constructed and assigned from any pair-like that is not a `subrange`."
+ },
+ {
+  "id": "conditionally-explicit",
+  "def": "`explicit(see below)` in the library wording: whether a constructor is explicit is determined by a compile-time condition (implemented with `explicit(bool)` since C++20), usually \"if and only if the corresponding conversion for some element is not implicit\", making the implicit convertibility of a wrapper type consistent with its elements."
+ },
+ {
+  "id": "implicitly-default-constructible",
+  "def": "A type that can be copy-list-initialized from empty braces `{}` (its default constructor is not explicit). The default constructor of `pair`/`tuple` is explicit when some element does not have this property."
+ },
+ {
+  "id": "synth-three-way",
+  "def": "An exposition-only library function object: if `t < u` and `u < t` satisfy *boolean-testable* while `t <=> u` is not usable, it synthesizes a `weak_ordering` from `<`; otherwise it uses `<=>` directly. The `<=>` of `pair`, `tuple`, and containers use it to stay compatible with old types that only have `<`."
+ },
+ {
+  "id": "unwrap-ref-decay",
+  "def": "A type transformation that first applies `decay_t` and then unwraps `reference_wrapper<X>` into `X&`. `make_pair` and `make_tuple` use it to determine element types, so `std::ref(x)` produces a reference element; CTAD does not do this unwrapping."
+ },
+ {
+  "id": "constexpr-param",
+  "def": "An exposition-only concept in `<utility>`: `requires { typename constant_wrapper<T::value>; }`. Every type with a static `value` that can be wrapped in a `constant_wrapper` (including `integral_constant`) satisfies it, and the operators of `cw-operators` rely on it to preserve constness."
+ },
+ {
+  "id": "dangling-reference-member",
+  "def": "A reference element of a wrapper type is bound to a temporary during construction and dangles as soon as construction ends. Since C++23, constructors of `pair`/`tuple` that would create such a binding are defined as deleted, the criterion being `reference_constructs_from_temporary_v`."
+ }
+]

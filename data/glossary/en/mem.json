@@ -1,0 +1,42 @@
+[
+ {
+  "id": "uses-allocator-construction",
+  "def": "Constructing T with an allocator alloc and arguments args...: if T uses an allocator compatible with alloc, the allocator is passed in following the leading convention T(allocator_arg, alloc, args...) or the trailing convention T(args..., alloc); otherwise it is ignored; pair is handled recursively member by member. The construct of polymorphic_allocator and scoped_allocator_adaptor performs it."
+ },
+ {
+  "id": "valueless",
+  "def": "The state of an indirect or polymorphic object that has no owned object; it can arise only after being moved from, and can be queried with valueless_after_move(). Dereferencing a valueless object violates a precondition."
+ },
+ {
+  "id": "deleter",
+  "def": "The mechanism for disposing of the object owned by a unique_ptr: a function object (or an lvalue reference to a function or function object) which, when called with the stored pointer, properly disposes of the object; by default default_delete, which calls delete."
+ },
+ {
+  "id": "unique-pointer",
+  "def": "An object that stores a pointer to a second object p and disposes of p through its associated deleter when it is itself destroyed; it is then said to own p. Every specialization of unique_ptr has these strict ownership semantics: movable but not copyable."
+ },
+ {
+  "id": "empty-shared-ptr",
+  "def": "A shared_ptr that owns no pointer; use_count() is 0. \"Empty\" is independent of get() == nullptr: the aliasing constructor can yield an empty shared_ptr with a non-null stored pointer, and constructing from nullptr with a deleter can yield a non-empty shared_ptr storing a null pointer."
+ },
+ {
+  "id": "compatible-pointer-type",
+  "def": "In the smart pointer clauses, Y* is compatible with T* if Y* is convertible to T*, or Y is U[N] and T is cv U[]. The converting constructors and assignments of shared_ptr/weak_ptr are constrained on this."
+ },
+ {
+  "id": "enables-shared-from-this",
+  "def": "A step of shared_ptr constructors: if Y has an unambiguous and accessible base class that is a specialization of enable_shared_from_this, and its weak-this has expired, weak-this is made to share ownership with the newly created shared_ptr. It does not happen with private inheritance."
+ },
+ {
+  "id": "default-memory-resource-pointer",
+  "def": "A global pointer used by certain facilities (such as a default-constructed polymorphic_allocator) when the interface does not explicitly provide a memory resource, initially new_delete_resource(); it is read and written by set_default_resource/get_default_resource without introducing data races."
+ },
+ {
+  "id": "pool-resource-classes",
+  "def": "Collective name for synchronized_pool_resource and unsynchronized_pool_resource: pools organized by block size, each replenished by geometrically growing chunks; oversized requests go directly to the upstream resource, and all memory is returned on destruction."
+ },
+ {
+  "id": "fancy-pointer",
+  "def": "The industry's general name for the case where an allocator's pointer type is not a raw pointer (but a class type, such as an offset pointer into shared memory); the standard has no such term, the related interfaces are described by pointer_traits and allocator_traits, and std::to_address converts back to a raw pointer."
+ }
+]

@@ -1,0 +1,50 @@
+[
+ {
+  "id": "format-string",
+  "def": "A sequence consisting of replacement fields, the escape sequences `{{`/`}}`, and other ordinary characters; whether it is a \"format string for args\" depends on the number of arguments and on how each argument's formatter interprets its *format-spec*. If it is not a format string, passing it via `format_string` is ill-formed at compile time, and passing it via `vformat` throws `format_error`."
+ },
+ {
+  "id": "replacement-field",
+  "def": "A part of a format string of the form `{ arg-id(opt) format-specifier(opt) }`, which is replaced by the formatted result of the corresponding argument."
+ },
+ {
+  "id": "automatic-indexing",
+  "def": "When all *arg-id*s in a format string (including those nested in a *format-spec*) are omitted, arguments 0, 1, 2, … are used in order; mixing this with manual numbering makes it not a format string."
+ },
+ {
+  "id": "std-format-spec",
+  "def": "The format specification syntax the standard library provides for arithmetic, character, string, and pointer types: `[[fill]align][sign][#][0][width][.precision][L][type]`."
+ },
+ {
+  "id": "field-width",
+  "def": "A width measured in terminal columns (field width units); with UTF encodings it is estimated from the first code point of each extended grapheme cluster, with East Asian wide characters and several emoji ranges counting as 2 columns."
+ },
+ {
+  "id": "escaped-string",
+  "def": "The debug representation produced by the `?` type: quoted, with tabs, newlines, quotes, backslashes, and non-printable/separator characters and invalid code units written as escapes such as `\\t`, `\\u{..}`, `\\x{..}`."
+ },
+ {
+  "id": "debug-enabled-specialization",
+  "def": "A formatter specialization that additionally provides a public constexpr member `set_debug_format()`; calling it is equivalent to setting the type to `?`. Range and tuple formatters call it on their elements by default."
+ },
+ {
+  "id": "constexpr-enabled-specialization",
+  "def": "A formatter specialization whose `format` member function is declared constexpr; a call to a formatting function can be a constant subexpression only if all formatters it uses are such specializations."
+ },
+ {
+  "id": "shortest-round-trip",
+  "def": "The representation output by floating-point `to_chars` without precision that has the fewest characters and that `from_chars` on the same implementation can read back exactly to the original value; if there are several candidates, the one with the smallest difference from the original value is chosen, with remaining ties resolved by round-to-nearest."
+ },
+ {
+  "id": "execution-policy",
+  "def": "An object passed as the first argument to a parallel algorithm, whose type (`sequenced_policy`, etc.) declares what kind of parallelization/vectorization the algorithm is permitted, and hence the requirements imposed on the element access functions."
+ },
+ {
+  "id": "element-access-function",
+  "def": "The operations invoked by a parallel algorithm during its execution that are provided by the user or determined by the iterator/element types: iterator operations, operations on elements, and user-provided function objects and the operations they require."
+ },
+ {
+  "id": "vectorization-unsafe",
+  "def": "A standard library function specified to synchronize with other invocations (other than memory allocation/deallocation and lock-free atomic read-modify-write), such as `mutex::lock`; calling one in user code of an `unseq`/`par_unseq` algorithm is UB."
+ }
+]

@@ -1,0 +1,42 @@
+[
+ {
+  "id": "ctor-initializer",
+  "def": "The list of *mem-initializer*s after the colon in a constructor definition, specifying initializers for direct base classes, virtual base classes, and non-static data members, or delegating to another constructor of the same class. The order in which they are written does not affect the order of initialization."
+ },
+ {
+  "id": "delegating-constructor",
+  "def": "A constructor whose *mem-initializer-id* names the class itself; that *mem-initializer* must be the only one, and the constructor it selects is called the target constructor. The object is initialized once the target constructor returns; if the delegating constructor's body then throws, the object's destructor is invoked."
+ },
+ {
+  "id": "target-constructor",
+  "def": "The constructor selected by overload resolution to which a delegating constructor delegates initialization. Delegating to itself, directly or indirectly, is IFNDR."
+ },
+ {
+  "id": "copy-elision",
+  "def": "In four contexts — `return`/`throw` of a local object, copying coroutine parameters, and catching by value in `catch` — the implementation is permitted to omit creating a class object from a source object of the same type, even if the constructor/destructor has side effects. It is optional and forbidden in constant evaluation; since C++17, initializing an object from a prvalue of the same type involves no copy at all and does not fall under this."
+ },
+ {
+  "id": "defaulted-comparison-operator-function",
+  "def": "A non-template member or friend comparison operator of class `C`, defined as `= default` in `C` or where `C` is complete, whose two parameters are both `const C&` or both `C` (the implicit object parameter counts as the first)."
+ },
+ {
+  "id": "usable-comparison",
+  "def": "`a @ b` is usable if, when an operand is of class or enumeration type, overload resolution on it yields a usable candidate; otherwise if it is a valid expression. The conditions for deleting defaulted comparisons are all phrased in these terms."
+ },
+ {
+  "id": "expanded-list-of-subobjects",
+  "def": "The direct base class subobjects in declaration order, followed by the direct non-static data members, with arrays recursively expanded into their elements. Defaulted `==` and `<=>` compare element by element along this list."
+ },
+ {
+  "id": "synthesized-three-way-comparison",
+  "def": "The synthesized three-way comparison for type `R`: if `a <=> b` is usable and can be `static_cast` to `R`, use it; otherwise, if `a <=> b` has a viable candidate, it is not defined; otherwise the value of `R` is synthesized from `==` and `<` (plus `b < a` for `partial_ordering`)."
+ },
+ {
+  "id": "common-comparison-type",
+  "def": "The \"weakest\" of a set of comparison categories: `partial_ordering` if present, otherwise `weak_ordering` if present, otherwise (including the empty list) `strong_ordering`. A defaulted `<=>` with `auto` return type deduces to it."
+ },
+ {
+  "id": "secondary-comparison-operator",
+  "def": "The relational operators `<` `>` `<=` `>=` and `!=`. Their defaulted versions return `x @ y` obtained via the rewritten candidates (`<=>` or `==`)."
+ }
+]

@@ -1,0 +1,82 @@
+[
+ {
+  "id": "container",
+  "def": "An object that stores other objects and controls their allocation and deallocation through construction, destruction, insertion, and erasure; its type must meet the named requirements of [container.reqmts]: member types, begin/end, constant-time size, == comparing sizes first, constant-time swap (except for array and inplace_vector), etc."
+ },
+ {
+  "id": "reversible-container",
+  "def": "A container whose iterators are of the bidirectional or random-access category and that provides reverse_iterator and rbegin/rend/crbegin/crend. forward_list and the unordered containers are not reversible containers."
+ },
+ {
+  "id": "allocator-aware-container",
+  "def": "A container that obtains memory and constructs/destroys elements through an allocator via allocator_traits, meeting [container.alloc.reqmts]: copy construction uses select_on_container_copy_construction, and the allocator is replaced on assignment or swap only if POCCA/POCMA/POCS is true. All containers in this clause except array and inplace_vector are."
+ },
+ {
+  "id": "contiguous-container",
+  "def": "A container whose iterator and const_iterator meet the Cpp17RandomAccessIterator requirements and model contiguous_iterator: array, vector (for elements other than bool), inplace_vector, basic_string."
+ },
+ {
+  "id": "sequence-container",
+  "def": "A container that organizes a finite number of objects of the same type into a strictly linear arrangement, with positions determined by how they were inserted; the basic ones are vector, inplace_vector, forward_list, list, deque, while array and hive provide only limited sequence operations."
+ },
+ {
+  "id": "associative-container",
+  "def": "A container that organizes elements by key using a comparison object that induces a strict weak ordering, providing logarithmic-time lookup: set, multiset, map, multimap; iteration is in non-descending order of keys."
+ },
+ {
+  "id": "unordered-associative-container",
+  "def": "A container that organizes elements into buckets using a hash function and a key equality predicate: unordered_set/map and their multi versions; lookup is constant on average and linear in the worst case; rehashing invalidates iterators but not references."
+ },
+ {
+  "id": "iterator-invalidation",
+  "def": "A container operation causes previously obtained iterators, pointers, or references to no longer be guaranteed to refer to the original element (or to be usable). The general container rule is \"not invalidated unless otherwise specified\"; each container's insertion, erasure, reallocation, and rehash clauses give the specific rules."
+ },
+ {
+  "id": "node-handle",
+  "def": "A move-only object that owns a single element extracted from an associative or unordered container (together with its node and allocator), which can be inserted into another container with compatible nodes without copying or moving the element; modifying the key through key() is permitted."
+ },
+ {
+  "id": "default-inserted",
+  "def": "An element is initialized by allocator_traits<A>::construct(m, p); for std::allocator this is value-initialization, while a custom allocator may make it default-initialization instead. T being constructible this way is called Cpp17DefaultInsertable."
+ },
+ {
+  "id": "cpp17-copy-insertable",
+  "def": "T is move-insertable, and allocator_traits<A>::construct(m, p, v) is well-formed and makes *p equivalent to v with v unchanged. Unlike is_copy_constructible, it is defined \"via the allocator\", and it often appears as a precondition of container operations."
+ },
+ {
+  "id": "unique-keys",
+  "def": "The property of an associative or unordered container containing at most one element for each key (by the equivalence relation): set, map, unordered_set, unordered_map."
+ },
+ {
+  "id": "equivalent-keys",
+  "def": "The property of an associative or unordered container allowing multiple elements with equivalent keys: multiset, multimap and their unordered versions; in ordered containers, insertion and erasure preserve the relative order of equivalent elements."
+ },
+ {
+  "id": "equivalent-key-group",
+  "def": "In an unordered container with equivalent keys, a group of elements whose keys are equivalent to each other and which are adjacent in iteration order; modifying operations and rehash preserve the relative order within a group, and operator== compares group by group as permutations."
+ },
+ {
+  "id": "comparison-object",
+  "def": "The object of type Compare in an ordered associative container; it must induce a strict weak ordering and always return the same result for the same pair of keys. Two keys are equivalent if and only if comp(k1,k2) and comp(k2,k1) are both false."
+ },
+ {
+  "id": "key-equality-predicate",
+  "def": "The object of type Pred in an unordered container; it must be an equivalence relation on Key and must be consistent with the hash function: equivalent keys have the same hash value."
+ },
+ {
+  "id": "bucket",
+  "def": "The unit in which an unordered container organizes its elements: keys with the same hash value are in the same bucket; the number of buckets grows automatically on insertion so that the average number of elements per bucket does not exceed the maximum load factor."
+ },
+ {
+  "id": "load-factor",
+  "def": "The average number of elements per bucket in an unordered container, size()/bucket_count(); the container tries to keep it no greater than max_load_factor() (initially 1.0 for standard containers)."
+ },
+ {
+  "id": "rehash",
+  "def": "An unordered container changes its number of buckets and redistributes the elements among the buckets; this invalidates all iterators and changes the order of elements, but does not invalidate pointers and references. It is guaranteed not to occur on insertion when (N+n) <= z*B."
+ },
+ {
+  "id": "element-block",
+  "def": "A block of memory in which a hive stores elements; blocks containing elements are active blocks, those containing none are reserved blocks. Block capacity is constrained by the minimum/maximum limits of hive_limits, and erasure only marks elements to be skipped without moving other elements."
+ }
+]

@@ -1,0 +1,42 @@
+[
+ {
+  "id": "signal-safe",
+  "def": "An evaluation that may be performed in a signal handler: it calls no standard library functions other than plain lock-free atomic operations and functions explicitly marked as signal-safe, accesses no objects with thread storage duration, does not use `dynamic_cast`, throw exceptions, or enter a try block, and does not trigger or wait for the dynamic initialization of static variables. A signal handler containing an evaluation that is not signal-safe is UB."
+ },
+ {
+  "id": "plain-lock-free-atomic-operation",
+  "def": "An operation on `atomic_flag`, `is_lock_free`/`atomic_is_lock_free`, or an atomic operation on a lock-free atomic object; they may be used in signal handlers."
+ },
+ {
+  "id": "substitutability",
+  "def": "If, whenever `a == b`, every function f that reads only comparison-salient state accessible through public const members has `f(a) == f(b)`, then equality is said to imply substitutability. `strong_ordering` requires substitutability; `weak_ordering` does not."
+ },
+ {
+  "id": "required-behavior",
+  "def": "Semantic requirements in the library clauses on replaceable functions and handler functions (such as `operator new`, `new_handler`, `terminate_handler`), which are equally binding on replacement versions provided by the program; violating them is undefined behavior."
+ },
+ {
+  "id": "default-behavior",
+  "def": "The description in the library clauses of what the implementation's own replaceable function or handler function does, e.g. the default `operator new` repeatedly calls the new_handler, and the default `terminate_handler` calls `abort`. No longer applicable once replaced."
+ },
+ {
+  "id": "new-handler",
+  "def": "The handler function called when allocation by `operator new` fails; it must free up memory and return, throw an exception of the `bad_alloc` family, or terminate the program. Its initial value is a null pointer; it is installed with `set_new_handler`."
+ },
+ {
+  "id": "terminate-handler",
+  "def": "The handler function called by `std::terminate`; it must terminate the program and not return. The default version calls `abort`; it is replaced with `set_terminate`."
+ },
+ {
+  "id": "coroutine-handle",
+  "def": "An object of type `coroutine_handle<P>` that non-owningly refers to a suspended or executing coroutine (essentially the address of the coroutine frame), used to resume or destroy the coroutine and to access its promise."
+ },
+ {
+  "id": "coroutine-traits",
+  "def": "`std::coroutine_traits<R, Args...>`: the compiler uses it to find the promise type from the coroutine's return type and parameter types; the primary template forwards `R::promise_type`."
+ },
+ {
+  "id": "c-headers",
+  "def": "Headers of the form `<name.h>`, such as `<stdio.h>`, provided only for C interoperability; they guarantee to place names in the global namespace, whereas `<cname>` guarantees to place them in `std`."
+ }
+]

@@ -1,0 +1,62 @@
+[
+ {
+  "id": "models-concept",
+  "def": "A set of template arguments models a library concept if and only if it satisfies the concept (the constraint expression is true) and meets all the semantic requirements given in the concept's specification. If they satisfy but do not model it while the validity or meaning of the program depends on this, the program is IFNDR."
+ },
+ {
+  "id": "equality-preserving",
+  "def": "Given equal inputs (operands), the expression yields equal outputs (the result and any modified operands); it is also required to be stable: two evaluations on the same input objects with no intervening explicit modification yield equal outputs. Expressions in library requires-expressions are required to be equality-preserving by default."
+ },
+ {
+  "id": "expression-domain",
+  "def": "The set of input values for which an expression is required to be well-defined. The operations required by a concept need not be total functions; e.g. NaN is not in the domain of < for double, which does not prevent double from modeling totally_ordered."
+ },
+ {
+  "id": "implicit-expression-variation",
+  "def": "For an expression in a library requires-expression that does not modify some const lvalue operand, there is an implicit requirement that the variations replacing that operand with a non-const lvalue or a (possibly const) rvalue are also valid and have the same semantics; the extent to which an implementation checks the syntax of these variations is unspecified."
+ },
+ {
+  "id": "common-reference-type",
+  "def": "If common_reference_t<T, U> is well-formed and is C, and convertible_to from both T and U to C is modeled, then C is the common reference type of T and U; designed to treat \"references\" and \"values\" uniformly for proxy iterators."
+ },
+ {
+  "id": "common-type",
+  "def": "If T and U can both be explicitly converted to some third type C, then C is their common type; it is not necessarily unique. common_with selects it via common_type_t and adds compatibility requirements with the common reference."
+ },
+ {
+  "id": "exchanges-values",
+  "def": "An operation exchanges the values denoted by t1 and u1 if it does not modify witness objects t2 and u2 that record the original values, and afterwards t1 equals u2 and u1 equals t2 (compared in the common reference type if the types differ); a self-swap must leave the value unchanged."
+ },
+ {
+  "id": "customization-point-object",
+  "def": "A function object of literal class type (such as ranges::swap) that interacts with program-defined types and imposes semantic requirements on that interaction; its type must model semiregular and be a structural and trivially copyable type, and all its instances are equal."
+ },
+ {
+  "id": "boolean-testable",
+  "def": "Exposition-only concept: the type is convertible to bool, and the result of !e is also convertible to bool; semantically it also requires that ! really negates, and that lookup such as ADL finds no \"disqualifying declarations\" hijacking && and ||, so the logical operators resolve to the built-in operators."
+ },
+ {
+  "id": "strict-weak-ordering",
+  "def": "A relation that is irreflexive (!comp(x, x)) and for which both comp and equiv(a, b) = !comp(a, b) && !comp(b, a) are transitive; equiv is therefore an equivalence relation, and comp induces a strict total ordering on the equivalence classes. Comparators for algorithms such as sort must satisfy it."
+ },
+ {
+  "id": "error-category",
+  "def": "A singleton object derived from std::error_category that identifies the source and encoding of a family of error codes: equality is determined by address, and it provides name(), message(), and default_error_condition and equivalent for mapping error codes to error conditions."
+ },
+ {
+  "id": "error-code",
+  "def": "A value type consisting of an integer value and a pointer to an error category, holding the exact, platform-dependent error actually obtained by an operation; the value 0 means no error. Comparison with an error_code is exact; comparison with an error_condition goes through the category's equivalent semantics."
+ },
+ {
+  "id": "error-condition",
+  "def": "A portable abstraction consisting of an integer value and an error category, representing \"which kind of error\" a caller cares about (e.g. errc::timed_out), used for semantic comparison with error_code; the default category is generic_category()."
+ },
+ {
+  "id": "invocation-sequence",
+  "def": "The invocation sequence of the current evaluation x0 in the current thread is the sequence of evaluations (x0, …, xn) in which each xi is within the function invocation x(i+1); a stacktrace is an approximate representation of it."
+ },
+ {
+  "id": "stacktrace-entry",
+  "def": "An element of a stacktrace representing one evaluation, represented by std::stacktrace_entry: a lightweight handle that may be empty, which can be queried for a description, source file, and line number, returning an empty string or 0 when the information is unavailable."
+ }
+]

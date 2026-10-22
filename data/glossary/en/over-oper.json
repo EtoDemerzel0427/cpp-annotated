@@ -1,0 +1,46 @@
+[
+ {
+  "id": "operator-function",
+  "def": "A function declared with an operator-function-id (`operator` followed by an overloadable operator) as its name, or a specialization of an operator function template; it \"implements\" the operator in its name and is usually invoked implicitly via an operator expression."
+ },
+ {
+  "id": "prefix-unary-operator-function",
+  "def": "A function named `operator@` (where `@` is a prefix unary operator): either a non-static member function with no non-object parameters, or a non-member function with exactly one parameter."
+ },
+ {
+  "id": "binary-operator-function",
+  "def": "A function named `operator@` (where `@` is a binary operator): either a non-static member function with exactly one non-object parameter, or a non-member function with exactly two parameters."
+ },
+ {
+  "id": "comparison-operator-function",
+  "def": "Collective name for equality operator functions (`==`, `!=`), relational operator functions (`<`, `>`, `<=`, `>=`), and three-way comparison operator functions (`<=>`); they can be defaulted."
+ },
+ {
+  "id": "promoted-integral-type",
+  "def": "A cv-unqualified integral type that is unchanged by integral promotion, such as `int`, `long`, excluding `char`, `short`, `bool`, etc. The arithmetic built-in candidates are generated only for such types."
+ },
+ {
+  "id": "literal-suffix-identifier",
+  "def": "The ud-suffix or identifier in a literal-operator-id, i.e. `_km` in `operator\"\"_km`. Those not beginning with an underscore or containing `__` are reserved, and declarations using them are IFNDR."
+ },
+ {
+  "id": "literal-operator",
+  "def": "A namespace-scope function declared with a literal-operator-id as its name; its parameter list must be one of 13 fixed forms; used to implement user-defined literals."
+ },
+ {
+  "id": "literal-operator-template",
+  "def": "A function template declared with a literal-operator-id as its name; its function parameter list must be empty, and it must be a numeric literal operator template or a string literal operator template."
+ },
+ {
+  "id": "raw-literal-operator",
+  "def": "A literal operator with a single `const char*` parameter; it receives the uninterpreted spelling of an integer or floating-point literal."
+ },
+ {
+  "id": "numeric-literal-operator-template",
+  "def": "A literal operator template whose template parameter list has a single constant template parameter pack with element type `char` (`template<char...>`); the characters of the integer or floating-point literal are passed as template arguments."
+ },
+ {
+  "id": "string-literal-operator-template",
+  "def": "A literal operator template whose template parameter list has a single constant template parameter of class type (C++20); the string literal itself is the template argument for that parameter."
+ }
+]

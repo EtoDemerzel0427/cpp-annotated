@@ -1,0 +1,30 @@
+[
+ {
+  "id": "static-extent",
+  "def": "A template argument of `extents` (or the `Extent` of `span`) that is not equal to `dynamic_extent`: the length of that dimension is fixed at compile time and occupies no storage in the object."
+ },
+ {
+  "id": "dynamic-extent",
+  "def": "An extent template argument whose value is `dynamic_extent` (i.e. `numeric_limits<size_t>::max()`): the length of that dimension is supplied at run time and stored in the object."
+ },
+ {
+  "id": "multidimensional-index-space",
+  "def": "The Cartesian product of a number of half-open integer intervals `[Lᵢ, Uᵢ)`. The number of intervals is the rank; the size is the product of the interval lengths, and is 1 when the rank is 0. `extents` represents such a space (with lower bounds always 0)."
+ },
+ {
+  "id": "layout-mapping",
+  "def": "A callable object mapping a multidimensional index to a one-dimensional offset; it must provide `extents()`, `required_span_size()`, and queries for properties such as unique/exhaustive/strided. The `LayoutPolicy::mapping<E>` of `mdspan` is such a type."
+ },
+ {
+  "id": "accessor-policy",
+  "def": "A type specifying how to obtain an element reference from a data handle `p` and offset `i` (`access(p, i)`) and how to advance the handle (`offset(p, i)`); the data handle need not be a pointer, nor the reference `T&`."
+ },
+ {
+  "id": "accessible-range",
+  "def": "For a given data handle and accessor, `[0, N)` is its accessible range if the access function yields a valid reference for every `i ∈ [0, N)`. A precondition of the `mdspan` constructors requires `[0, required_span_size())` to be an accessible range."
+ },
+ {
+  "id": "borrowed-range",
+  "def": "A range whose iterators' validity does not depend on the lifetime of the range object itself (e.g. `span`, `string_view`, lvalue references). Ranges algorithms return real iterators rather than `ranges::dangling` for rvalue borrowed ranges."
+ }
+]

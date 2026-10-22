@@ -1,0 +1,34 @@
+[
+ {
+  "id": "proxy-reference",
+  "def": "A class object returned by `operator[]` when a real reference cannot be returned (e.g. a single bit is not addressable), which reads the referenced element through a conversion function and writes it through an assignment operator, such as `bitset<N>::reference`, `vector<bool>::reference`. `auto` deduction yields the proxy itself."
+ },
+ {
+  "id": "bit-value",
+  "def": "When converting between a `bitset` and an integer, the integer value `1 << pos` corresponding to position `pos`; the integer value corresponding to multiple bits is the sum of their bit values. Bit 0 is the least significant bit."
+ },
+ {
+  "id": "toggle",
+  "def": "Changing the value of a bit from 0 to 1 or from 1 to 0; `bitset::flip` and `^=` are specified in terms of it."
+ },
+ {
+  "id": "type-punning",
+  "def": "Interpreting the bits of an object as a value of another type. Doing so via a `reinterpret_cast` pointer or an inactive union member is usually UB; the portable way is `std::memcpy` or `std::bit_cast`."
+ },
+ {
+  "id": "big-endian",
+  "def": "A byte order in which the most significant byte of a multi-byte scalar comes first in storage, with the remaining bytes in descending order of significance."
+ },
+ {
+  "id": "little-endian",
+  "def": "A byte order in which the least significant byte of a multi-byte scalar comes first in storage, with the remaining bytes in ascending order of significance. x86 and common ARM configurations are little-endian."
+ },
+ {
+  "id": "mixed-endian",
+  "def": "An execution environment in which scalar types are neither all big-endian nor all little-endian (e.g. 32-bit integers on the PDP-11). In that case `std::endian::native` equals neither `big` nor `little`."
+ },
+ {
+  "id": "constant-when",
+  "def": "A library function specification element listing the conditions required for a call to be a constant subexpression; e.g. `bit_cast` requires that neither `To` nor `From` has a constexpr-unknown representation."
+ }
+]

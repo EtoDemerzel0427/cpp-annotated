@@ -1,0 +1,114 @@
+[
+ {
+  "id": "execution-resource",
+  "def": "A program entity that manages a (possibly dynamic) set of execution agents and performs parallel work on behalf of callers, such as the current thread, a system thread pool, or an external accelerator. Execution resources execute asynchronous operations and can be valid or invalid."
+ },
+ {
+  "id": "asynchronous-operation",
+  "def": "A unit of program execution that is explicitly created, explicitly started at most once, and once started eventually completes exactly once; it completes with a set of result datums and a disposition that is one of success (value), failure (error), or cancellation (stopped). It may complete on a different execution resource and may create child operations."
+ },
+ {
+  "id": "async-result",
+  "def": "The completion disposition of an asynchronous operation (value / error / stopped) together with its result datums. A value completion can carry any number of datums, an error completion exactly one, and a stopped completion none."
+ },
+ {
+  "id": "child-operation",
+  "def": "An asynchronous operation created by another asynchronous operation (the parent operation); if started, it must complete before the parent operation completes. This is the basis of structured concurrency in std::execution."
+ },
+ {
+  "id": "operation-state",
+  "def": "The state object associated with an asynchronous operation, produced by connect(sender, receiver), which owns the receiver. It must live until the asynchronous operation completes; once a completion operation has executed it is invalidated, and accessing any part of it afterwards is UB."
+ },
+ {
+  "id": "execution-environment",
+  "def": "A queryable object representing the execution-time properties of an asynchronous operation's caller (such as a stop token, allocator, or scheduler). The environment of an asynchronous operation equals that of its receiver and is obtained with get_env(rcvr)."
+ },
+ {
+  "id": "receiver",
+  "def": "An aggregation of three completion handlers (value, error, stopped) representing the continuation of an asynchronous operation; it has an environment and is owned by the operation state. Its type must derive receiver_concept, be nothrow movable, and must not be a final class."
+ },
+ {
+  "id": "completion-function",
+  "def": "The three customization point objects set_value, set_error, set_stopped, whose first argument is the receiver (which must be a non-const rvalue) and whose remaining arguments are the result datums; calling one notifies the receiver that the asynchronous operation has completed. A valid invocation of one is called a completion operation."
+ },
+ {
+  "id": "completion-tag",
+  "def": "The unqualified type of a completion function: set_value_t, set_error_t, set_stopped_t. Completion signatures use it as the return type, e.g. set_value_t(int)."
+ },
+ {
+  "id": "async-lifetime",
+  "def": "The lifetime of an asynchronous operation: from the beginning of the execution of its start operation until the beginning of the execution of its completion operation. If the lifetime of the operation state ends before it, the behavior is undefined; the operation state may be destroyed during the execution of the completion operation."
+ },
+ {
+  "id": "sender",
+  "def": "A factory for one or more asynchronous operations: connecting it with a receiver yields an operation state, which, once started, \"sends\" the results to the receiver via completion functions. A sender itself only describes work and does not perform it; it has a queryable object called its attributes."
+ },
+ {
+  "id": "scheduler",
+  "def": "A lightweight handle to an execution resource providing a uniform schedule interface; schedule(sch) returns a schedule sender whose operation completes with an empty value on an execution agent of that resource. It is copyable and equality-comparable, and equality means the same execution resource."
+ },
+ {
+  "id": "schedule-sender",
+  "def": "The result of a schedule expression. Its asynchronous operation, on success, executes a value completion with no datums on an execution agent of the scheduler's associated execution resource, and its value completion scheduler attribute equals the scheduler that produced it."
+ },
+ {
+  "id": "completion-scheduler",
+  "def": "A scheduler whose execution resource is used to execute the completion operations of a given disposition. A sender can report it through queries on its attributes such as get_completion_scheduler<set_value_t>; once reported, completing elsewhere is UB."
+ },
+ {
+  "id": "sender-attributes",
+  "def": "A queryable object associated with a sender that describes the characteristics of the sender and the asynchronous operations it produces, obtained with get_env(sndr), such as the completion scheduler or completion domain. Note that it is not the environment on the receiver side."
+ },
+ {
+  "id": "completion-signature",
+  "def": "A function type describing one kind of completion operation, of the form set_value_t(Vs...), set_error_t(E), set_stopped_t(). The sender type together with the environment type determines the set of all possible completion signatures of the asynchronous operation, represented by completion_signatures<...>."
+ },
+ {
+  "id": "non-dependent-sender",
+  "def": "A sender type whose completion signatures can be determined without depending on the execution environment; i.e. get_completion_signatures<Sndr>() does not exit with dependent_sender_error. Otherwise it is a dependent_sender, such as read_env(get_scheduler)."
+ },
+ {
+  "id": "sender-adaptor",
+  "def": "A sender algorithm that constructs and returns a parent sender from one or more child senders (and other arguments), such as then, let_value, when_all. The parent sender's asynchronous operation is the parent operation of the operations created by the child senders. The other two kinds of sender algorithms are sender factories (such as just) and sender consumers (such as sync_wait)."
+ },
+ {
+  "id": "queryable-object",
+  "def": "A read-only collection of key-value pairs whose keys are customization point objects called query objects (such as get_stop_token). A query q(env, args...) is equality-preserving, does not modify its arguments, and is equivalent to env.query(q, args...) (if the latter is well-formed)."
+ },
+ {
+  "id": "forwarding-query",
+  "def": "A query object q for which forwarding_query(q) is true: adaptors forward only such queries when passing a receiver's environment to child operations (FWD-ENV). It suffices to derive from forwarding_query_t or have a member query(forwarding_query) returning true."
+ },
+ {
+  "id": "permissible-completion",
+  "def": "A completion operation whose completion signature appears in completion_signatures_of_t<Sndr, Env>. The semantic requirement of sender_in<Sndr, Env> is that, once connected and started, all potentially evaluated completion operations are permissible completions."
+ },
+ {
+  "id": "pipeable-sender-adaptor-closure-object",
+  "def": "A function object c that accepts a sender and returns a sender, such that c(sndr) is equivalent to sndr | c; two closures can be composed as c | d. Calls like then(f) that \"omit the first argument\" return such a closure."
+ },
+ {
+  "id": "execution-domain",
+  "def": "An empty tag type (domain tag) associated with an execution resource, used to select the implementation of sender algorithms: before connect, transform_sender calls the transform_sender of the completion domain and starting domain to rewrite the sender. The default is default_domain."
+ },
+ {
+  "id": "inlines-the-receiver",
+  "def": "All objects constructed from rcvr during the evaluation of connect(sndr, rcvr) end their lifetimes within that evaluation, i.e. the operation state does not store the receiver and rebuilds it on demand with Rcvr::make_receiver_for(addressof(op)) (inlinable_receiver)."
+ },
+ {
+  "id": "async-scope",
+  "def": "An object that tracks a set of asynchronous operations associated with it (associations), such as counting_scope; it can join to wait for all associated operations to finish, and can close to refuse new associations. spawn, spawn_future, and associate establish associations with it through scope tokens."
+ },
+ {
+  "id": "scope-token",
+  "def": "A copyable handle satisfying scope_token: try_associate() attempts to obtain an association with its associated scope (returning a scope_association object; engaged means success), and wrap(sndr) wraps a sender without changing its completion signatures."
+ },
+ {
+  "id": "scope-association",
+  "def": "A move-only RAII object satisfying scope_association: when engaged it owns one association with some async scope and releases it on destruction (decrementing the scope's count). Default-constructed and moved-from objects are not engaged."
+ },
+ {
+  "id": "exec-awaitable",
+  "def": "An expression that can be the operand of co_await in a given context. The sender concepts recognize awaitables as senders, whose completion signatures are set_value_t(await-result), set_error_t(exception_ptr), set_stopped_t()."
+ }
+]

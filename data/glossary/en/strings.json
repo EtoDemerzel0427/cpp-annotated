@@ -1,0 +1,18 @@
+[
+ {
+  "id": "char-like-type",
+  "def": "A non-array, trivially copyable, standard-layout, trivially default constructible type; its objects are called char-like objects or \"characters\", and it is the element type of `basic_string`/`basic_string_view`. Broader than the core language's \"character types\"; it can be a user-defined struct."
+ },
+ {
+  "id": "character-traits",
+  "def": "A class providing members such as `eq`/`lt`/`compare`/`length`/`find`/`copy`/`move`/`assign` and `int_type`/`eof()` for some character type, used as the `traits` template argument of `basic_string`, `basic_string_view`, and iostreams; its `char_type` must be the same as the character type, and the expressions in the requirements table must not throw exceptions."
+ },
+ {
+  "id": "null-terminator",
+  "def": "The object with value `charT()` pointed to by `data() + size()` in a `basic_string`; it exists at all times, making `c_str()` constant time. Modifying it to a value other than `charT()` is undefined behavior. `basic_string_view` has no such guarantee."
+ },
+ {
+  "id": "short-string-optimization",
+  "def": "The implementation technique of storing short character sequences directly inside the `basic_string` object without heap allocation. The standard does not require it but permits it, which is also why move assignment and `swap` of `basic_string` may invalidate iterators; in libc++ `std::string` is 24 bytes and can store 22 `char`s in the object."
+ }
+]

@@ -1,0 +1,18 @@
+[
+ {
+  "id": "deprecated",
+  "def": "Annex D's classification of a class of features: still normative in the current edition, but identified as candidates for removal from future revisions. An implementation may add the `[[deprecated]]` attribute to the corresponding library names. See [[depr.general]]."
+ },
+ {
+  "id": "trigraph",
+  "def": "A three-character sequence beginning with `??` (e.g. `??=` for `#`, `??/` for `\\`), which in C++14 and earlier was replaced by a single character in translation phase 1; since C++17 it is no longer a required feature. See [[diff.cpp14]]."
+ },
+ {
+  "id": "tentative-definition",
+  "def": "A C concept: a file-scope object declaration without an initializer and without `extern` (or with `static`); it may appear multiple times in the same translation unit and the occurrences are ultimately merged into one definition. C++ has no such concept: each such declaration is a definition. See [[diff.iso]]."
+ },
+ {
+  "id": "dynamic-exception-specification",
+  "def": "The C++98 exception specification of the form `throw(T1, T2, ...)`, listing the exception types a function is allowed to throw; a violation calls `std::unexpected`. Deprecated in C++11; the form with types was removed in C++17 and `throw()` in C++20; the replacement is `noexcept`. See [[diff.cpp14]], [[diff.cpp17]]."
+ }
+]

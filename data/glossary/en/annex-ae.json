@@ -1,0 +1,18 @@
+[
+ {
+  "id": "uax31",
+  "def": "The Unicode annex on identifiers and syntax characters; it gives the default identifier syntax `<Start> <Continue>*` and optional conformance requirements R1–R8. C++ conforms to R1 (default identifiers, with the mathematical-notation profile and additionally allowing a leading `_`) and R4 (equivalence determined by NFC). See [[uaxid]]."
+ },
+ {
+  "id": "xid-start",
+  "def": "Unicode character properties: XID_Start is roughly the letter-like characters; XID_Continue adds digits, combining marks, connector punctuation, etc.; the prefix X means the set is closed under NFKC normalization. The first character of a C++ identifier is taken from XID_Start (plus `_` and mathematical start characters), subsequent characters from XID_Continue."
+ },
+ {
+  "id": "nfc",
+  "def": "One of the Unicode normalization forms: canonical decomposition followed by canonical composition, so that `e` + U+0301 and the precomposed `é` (U+00E9) yield the same code point sequence. C++ requires identifiers to already be in NFC, otherwise the program is ill-formed; compatibility equivalence (NFKC) is not used, so `ﬁ` and `fi` are different identifiers."
+ },
+ {
+  "id": "most-vexing-parse",
+  "def": "Informal term: code of the form `S w(int());` or `T t(U(x));` is parsed, by the \"if it can be a declaration, it is a declaration\" disambiguation rule, as a function declaration rather than an object definition. See [[dcl.ambig.res]], [[stmt.ambig]]."
+ }
+]

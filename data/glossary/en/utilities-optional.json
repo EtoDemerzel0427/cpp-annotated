@@ -1,0 +1,30 @@
+[
+ {
+  "id": "optional-object",
+  "def": "An object that contains storage for another object and manages its lifetime; the contained object may be initialized after it and destroyed before it, and its initialization state is tracked by it."
+ },
+ {
+  "id": "contained-value",
+  "def": "The active exposition-only member val of optional<T>; an optional<T> contains a value if and only if val is the active member. For optional<T&>, it refers to the reference *val."
+ },
+ {
+  "id": "valid-contained-type",
+  "def": "An lvalue reference type, or a complete non-array object type, that after removing cvref is not in_place_t or nullopt_t; instantiating optional with any other type is ill-formed."
+ },
+ {
+  "id": "converts-from-any-cvref",
+  "def": "An exposition-only variable template: whether T can be constructed from or implicitly converted from any cv/reference form of W. When true, the value-wise converting constructors of optional/expected step aside."
+ },
+ {
+  "id": "valid-value-type-for-expected",
+  "def": "remove_cv_t<T> is void, or is a complete non-array object type that is not in_place_t, unexpect_t, or a specialization of unexpected."
+ },
+ {
+  "id": "valid-unexpected-argument",
+  "def": "A non-array, non-cv-qualified object type that is not a specialization of unexpected; a definition instantiating unexpected with any other type is ill-formed, and this is also expected's requirement on E."
+ },
+ {
+  "id": "reinit-expected",
+  "def": "An exposition-only function template: replaces the old object with a new one in expected's union storage, providing the strong exception guarantee through three branches: nothrow construction / nothrow move / backup and roll back."
+ }
+]

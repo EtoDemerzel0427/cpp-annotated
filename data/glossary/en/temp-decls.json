@@ -1,0 +1,74 @@
+[
+ {
+  "id": "primary-template",
+  "def": "A template declaration in which the template name is not followed by a template argument list; its template argument list is that of its own template-head. Partial specializations are always relative to the primary template."
+ },
+ {
+  "id": "separately-instantiated-construct",
+  "def": "The default arguments, noexcept-specifiers, and function contract specifiers of a templated function. For purposes of name lookup and instantiation, they (as well as type-constraints and requires-clauses) are each separate definitions, instantiated on demand."
+ },
+ {
+  "id": "class-template",
+  "def": "A template that specifies the layout and operations of an unbounded set of related types; each specialization is a distinct class type."
+ },
+ {
+  "id": "deduction-guide",
+  "def": "A declaration of the form `template-name(parameters) -> simple-template-id;` that maps constructor arguments to a class template specialization during class template argument deduction; it is not found by name lookup — all reachable guides are considered."
+ },
+ {
+  "id": "member-template",
+  "def": "A template declared within a class or class template (member function templates, member class templates, etc.). A member function template cannot be virtual, and a destructor cannot be a template."
+ },
+ {
+  "id": "template-parameter-pack",
+  "def": "A template parameter that accepts zero or more template arguments, such as `class... Ts`."
+ },
+ {
+  "id": "function-parameter-pack",
+  "def": "A function parameter that accepts zero or more function arguments, such as `Ts... ts`; its declaration is itself a pack expansion."
+ },
+ {
+  "id": "init-capture-pack",
+  "def": "A lambda capture of the form `...xs = expr`, introducing one init-capture for each element of the pack expansion in the initializer (C++20)."
+ },
+ {
+  "id": "pack",
+  "def": "Collective name for template parameter packs, function parameter packs, init-capture packs, and structured binding packs; a pack name may appear only within a pack expansion."
+ },
+ {
+  "id": "pack-expansion",
+  "def": "A construct consisting of a pattern and an ellipsis; when instantiated, the pattern is instantiated once for each element of the pack, producing a (possibly empty) list; it may appear only in the contexts enumerated by the standard."
+ },
+ {
+  "id": "unexpanded-pack",
+  "def": "A pack in the pattern of a pack expansion that is not expanded by any nested pack expansion; all unexpanded packs in the same pack expansion must have the same number of elements and are expanded in lockstep."
+ },
+ {
+  "id": "partial-specialization",
+  "def": "A class template or variable template declaration in which the template name is followed by an argument list containing template parameters; it provides an alternative definition when the arguments of a specialization match it. Each partial specialization is a distinct template."
+ },
+ {
+  "id": "non-specialized-argument",
+  "def": "A constant template argument in the argument list of a partial specialization that is exactly the name of a constant template parameter; all other constant template arguments are specialized."
+ },
+ {
+  "id": "more-specialized",
+  "def": "Template F is more specialized than G if F is at least as specialized as G and G is not at least as specialized as F; partial specializations are compared by rewriting them as function templates."
+ },
+ {
+  "id": "expression-equivalent-template",
+  "def": "Two expressions involving template parameters are equivalent if function definitions containing them would satisfy the ODR (with template parameters renamed by position); compared by token structure, dependent names compare only by name, and lambdas are never equivalent."
+ },
+ {
+  "id": "functionally-equivalent",
+  "def": "Two non-equivalent expressions involving template parameters that yield the same result for any template arguments (or, for unevaluated operands, perform the same operations); template-heads that accept the same set of arguments. Being functionally equivalent but not equivalent results in IFNDR."
+ },
+ {
+  "id": "partial-ordering",
+  "def": "When several function templates can all generate viable specializations, the process of determining which is more specialized by transforming the templates with synthesized unique types and deducing in both directions; if deduction succeeds in both directions, constraints decide."
+ },
+ {
+  "id": "alias-template",
+  "def": "The name of a family of types declared by `template<...> using N = type;`; its specializations are equivalent to the substituted types, it cannot be specialized, and it cannot be deduced from a type."
+ }
+]

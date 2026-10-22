@@ -1,0 +1,94 @@
+[
+ {
+  "id": "preprocessing",
+  "def": "Collective name for the four capabilities an implementation has in translation phase 4: conditionally processing or skipping parts of the source, including other source files, importing macros from header units, and macro replacement. It is called \"pre\"processing because conceptually it happens before the translation of the resulting translation unit."
+ },
+ {
+  "id": "preprocessing-directive",
+  "def": "A sequence of preprocessing tokens that, at the start of phase 4, begins with a directive-introducing token at the start of a line and extends to the first following new-line. The determination is purely lexical; macro expansion can neither create nor eliminate directives."
+ },
+ {
+  "id": "directive-introducing-token",
+  "def": "The first token of a preprocessing directive: a `#` at the start of the file or after whitespace containing a new-line; or `import` or `module` followed on the same logical line by particular tokens, and `export` followed by either of those two forms."
+ },
+ {
+  "id": "conditionally-supported-directive",
+  "def": "A directive whose token after `#` does not begin with any standard directive name (e.g. `#ident`, `#assert`). It is conditionally-supported with implementation-defined semantics; whether or not the implementation supports it, it counts as a preprocessing directive."
+ },
+ {
+  "id": "header-search",
+  "def": "For a character sequence, a search through a sequence of places for a header uniquely identified by it; how the places are determined and how headers are identified are implementation-defined. Used by `#include <...>`."
+ },
+ {
+  "id": "source-file-search",
+  "def": "A search, in an implementation-defined manner, for a source file named by a character sequence; if unsupported or if it fails, the result is that of a header search for the same sequence. Used by `#include \"...\"`."
+ },
+ {
+  "id": "bracket-resource-search",
+  "def": "The resource search used by `#embed <...>`: a search through an implementation-defined sequence of places for a resource uniquely identified by the character sequence."
+ },
+ {
+  "id": "quote-resource-search",
+  "def": "The resource search used by `#embed \"...\"`: a search, in an implementation-defined manner, for a resource named by the character sequence; if unsupported or if it fails, it falls back to a bracket resource search."
+ },
+ {
+  "id": "resource-count",
+  "def": "The number of elements `#embed` actually produces: with `limit`, max(min(limit, resource size in bytes − offset), 0); otherwise max(resource size in bytes − offset, 0). If it is 0, the resource is empty."
+ },
+ {
+  "id": "point-of-macro-import",
+  "def": "The position immediately after the terminating new-line of an import directive that imports a header unit; macros from the header unit are visible in the importer from this point on. An import of a named module or partition has no point of macro import."
+ },
+ {
+  "id": "macro-definition",
+  "def": "Each `#define` directive encountered while preprocessing each translation unit produces a distinct macro definition; it has at most one point of definition and one point of undefinition in each translation unit, and can be imported via header units."
+ },
+ {
+  "id": "macro-point-of-definition",
+  "def": "The position at which a macro definition takes effect in translation unit T: if the `#define` is in T itself, that directive; otherwise the point of macro import of the first header unit in T containing its point of definition (except for macros whose names are the same as a keyword, module, or import)."
+ },
+ {
+  "id": "point-of-undefinition",
+  "def": "The first `#undef` of the macro after the point of definition, or the point of macro import of the first header unit containing its point of undefinition, whichever is earlier."
+ },
+ {
+  "id": "active-macro-definition",
+  "def": "A macro definition that has a point of definition before a given position and no point of undefinition before it. Multiple active macro definitions of the same name must be valid redefinitions of each other when the macro is replaced or redefined."
+ },
+ {
+  "id": "macro-name",
+  "def": "The identifier immediately following `define`. There is one namespace for macro names, and they are not subject to scope."
+ },
+ {
+  "id": "object-like-macro",
+  "def": "A macro defined by `#define identifier replacement-list`: thereafter each instance of the macro name is replaced by the replacement list and rescanned. There must be whitespace between the macro name and the replacement list."
+ },
+ {
+  "id": "function-like-macro",
+  "def": "A macro defined with a `(` immediately following the macro name with no preceding whitespace, followed by a parameter list; it constitutes an invocation and is replaced only if the next preprocessing token after the macro name is `(`."
+ },
+ {
+  "id": "variable-arguments",
+  "def": "In an invocation of a variadic macro, all the arguments after the named parameters together with the commas between them, merged into one unit, referred to by `__VA_ARGS__`."
+ },
+ {
+  "id": "character-string-literal",
+  "def": "A string-literal with no encoding prefix. The `#` operator produces one, and the file name in `#line` must be one."
+ },
+ {
+  "id": "stringizing-argument",
+  "def": "The argument token sequence corresponding to the operand of the `#` operator with placemarkers removed; whitespace within it is normalized to single spaces before being spliced into the string literal."
+ },
+ {
+  "id": "placemarker",
+  "def": "A temporary token internal to phase 4: it replaces a parameter adjacent to `##` whose argument is empty, or `__VA_OPT__` when the variable arguments are empty; it disappears when concatenated with another token, and all remaining ones are deleted before rescanning."
+ },
+ {
+  "id": "line-number",
+  "def": "The line number of the current physical source line: one plus the number of new-lines read or introduced in phase 1 while processing the source file up to the current preprocessing token. `#line` can change the presumed line number."
+ },
+ {
+  "id": "destringize",
+  "def": "What `_Pragma` does to its string literal: delete the encoding prefix and the leading and trailing quotes, replace `\\\"` with `\"` and `\\\\` with `\\`, then split the result into preprocessing tokens as in phase 3 and execute it as a pragma directive."
+ }
+]

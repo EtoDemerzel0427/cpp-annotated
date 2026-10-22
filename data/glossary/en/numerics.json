@@ -1,0 +1,62 @@
+[
+ {
+  "id": "numeric-type",
+  "def": "A cv-unqualified object type meeting Cpp17DefaultConstructible, Cpp17CopyConstructible, Cpp17CopyAssignable, and Cpp17Destructible; complex and valarray may be instantiated only with numeric types, and the behavior is undefined if operations on these types throw exceptions."
+ },
+ {
+  "id": "floating-point-environment",
+  "def": "Collective term for the floating-point status flags (divide-by-zero, inexact, invalid, overflow, underflow) and floating-point control modes (such as rounding direction), read and written via <cfenv>. It has thread storage duration; a new thread inherits the creator's environment at the time the thread/jthread is constructed; whether FENV_ACCESS is supported is implementation-defined."
+ },
+ {
+  "id": "seed-sequence",
+  "def": "An object that consumes a sequence of integer data and, on request, produces any number of unsigned integers in [0, 2^32), used to supply initial state to random number engines; its generate may depend on the history of previous calls. std::seed_seq is the seed sequence provided by the standard."
+ },
+ {
+  "id": "uniform-random-bit-generator",
+  "def": "A function object returning unsigned integers, each value in its range [G::min(), G::max()] being (ideally) equally probable; min/max must be static constant expressions with min < max. Since C++20 expressed by the concept uniform_random_bit_generator; the named requirement additionally needs a nested result_type."
+ },
+ {
+  "id": "random-number-engine",
+  "def": "A deterministic URBG that additionally meets requirements for seeding, equality comparison, and stream input/output. Its specification gives the size of the state, the transition algorithm TA, and the generation algorithm GA; two engines are equal if and only if the infinite sequences they will produce are the same."
+ },
+ {
+  "id": "random-number-engine-adaptor",
+  "def": "An engine that takes the output of another engine (the base engine) and applies an algorithm to it to obtain different randomness properties, such as discard_block_engine, independent_bits_engine, shuffle_order_engine; its state includes the base engine's state, and base() returns the base engine."
+ },
+ {
+  "id": "random-number-distribution",
+  "def": "A function object that, called with a URBG as argument, returns values distributed according to some probability density function or discrete probability function; it may have internal state (cleared by reset), and its parameters are bundled as param_type. The algorithms producing each distribution are implementation-defined, so results are not reproducible across implementations."
+ },
+ {
+  "id": "transition-algorithm",
+  "def": "The algorithm TA by which a random number engine advances its state e_i to the successor state e_{i+1}; together with the generation algorithm GA it fully determines the engine's output sequence. e() advances to TA(e_i) and returns GA(e_i)."
+ },
+ {
+  "id": "linear-algebra-value-type",
+  "def": "The value_type of the input/output mdspans and the Scalar template parameters in <linalg>; it must model the scalar concept composed of semiregular and others, and a value-initialized object must act as the additive identity."
+ },
+ {
+  "id": "mdspan-overlap",
+  "def": "Two mdspans overlap if there exist multidimensional indices for each such that the elements refer to the same object; if they have the same extents and refer to the same element index by index, they alias, which is a special case of overlap. Output parameters in <linalg> must not overlap other mdspan parameters unless explicitly permitted."
+ },
+ {
+  "id": "vectorizable-type",
+  "def": "A type that can be an element of a std::simd data-parallel type: all standard integer types, character types, float and double, the defined float16_t/float32_t/float64_t, and complex whose components are vectorizable floating-point types."
+ },
+ {
+  "id": "data-parallel-type",
+  "def": "All enabled specializations of basic_vec and basic_mask; consisting of a number of elements of the same element type, where the number of elements (the width) is constant for each type. The applications of an element-wise operation are unsequenced with respect to each other."
+ },
+ {
+  "id": "simd-abi-tag",
+  "def": "A type indicating the size and binary representation of a data-parallel object; together with the element type it determines the width. native-abi<T> is an implementation-defined tag that is the most efficient for the target platform, and deduce-abi-t<T, N> gives a tag with width N."
+ },
+ {
+  "id": "value-preserving-conversion",
+  "def": "A std::simd term: a conversion from an arithmetic type U to a vectorizable type T is value-preserving if all possible values of U can be represented by T. Broadcast constructors and loads accept only value-preserving conversions by default; otherwise an explicit conversion or flag_convert is required."
+ },
+ {
+  "id": "checked-integer-operation",
+  "def": "C23 <stdckdint.h>'s ckd_add, ckd_sub, ckd_mul: compute a op b as if with infinite precision, write the result modulo-wrapped into *result, and return whether the mathematical result cannot be represented in the type of *result (i.e. whether it overflowed). In C++, all three types are required to be signed or unsigned integer types."
+ }
+]

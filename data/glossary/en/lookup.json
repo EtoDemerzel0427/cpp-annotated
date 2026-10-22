@@ -1,0 +1,82 @@
+[
+ {
+  "id": "name-lookup",
+  "def": "The process of associating a use of a name with a set of declarations of that name; overload resolution and access checking come only afterwards. See [[basic.lookup]]."
+ },
+ {
+  "id": "overload-set",
+  "def": "When the declarations found by name lookup are all functions or function templates, the set is called an overload set and is handed to overload resolution ([[over.match]]) to choose from."
+ },
+ {
+  "id": "program-point",
+  "def": "A position between tokens in a translation unit: at least one before the first token, between each pair of adjacent tokens, and after the last token. Name lookup always proceeds \"from some program point\"."
+ },
+ {
+  "id": "precedes",
+  "def": "A declaration X precedes a program point P if P follows X in the same TU; or X inhabits a class scope and is reachable from P; or X comes from an imported TU and is exported (or is in the same module and does not have internal linkage). It is the precise replacement for the old standard's \"visible\"."
+ },
+ {
+  "id": "single-search",
+  "def": "A single search for a name N in a scope S from P: finds all declarations in S that bind a name the same as N and that precede P; non-dependent using-declarators are replaced by the declarations they name."
+ },
+ {
+  "id": "type-only-lookup",
+  "def": "A lookup that considers only types and templates whose specializations are types; if both a type alias and its underlying entity are found, the alias is discarded. Used for elaborated type specifiers such as `struct X` and for base specifiers."
+ },
+ {
+  "id": "search-in-scope",
+  "def": "For a non-class scope, simply a single search; for a class scope, if nothing is found in the class itself, the results of each direct non-dependent base class are recursively merged according to the lookup set algorithm."
+ },
+ {
+  "id": "lookup-set",
+  "def": "The lookup set S(N,C) for a name N in class C, consisting of a declaration set and a subobject set, used to compute the result of a search in class scope and any ambiguity."
+ },
+ {
+  "id": "declaration-set",
+  "def": "Part of a lookup set: the member declarations named N that were found (type declarations replaced by their types); when a merge conflicts it becomes an \"invalid\" set, indicating ambiguity."
+ },
+ {
+  "id": "subobject-set",
+  "def": "Part of a lookup set: the (base class) subobjects in which the declarations were found; used during merging to determine dominance."
+ },
+ {
+  "id": "active-using-directive",
+  "def": "In scope S at program point P, a using-directive that precedes P and inhabits S or a namespace nominated by a using-directive that is active in S. This definition makes using-directives transitive."
+ },
+ {
+  "id": "unqualified-search",
+  "def": "A search in scope S plus the namespaces contained in S that are nominated by active using-directives; if nothing is found, continue in the parent scope of S."
+ },
+ {
+  "id": "unqualified-name",
+  "def": "A name that does not immediately follow a *nested-name-specifier* or the `.`/`->` of a member access (possibly with `template` or `~` in between); by default it is subject to unqualified name lookup."
+ },
+ {
+  "id": "argument-dependent-lookup",
+  "def": "In an unqualified function call, if ordinary lookup finds no class member, block-scope function declaration, or non-function, then functions are additionally searched for in the associated namespaces of the argument types, and friends of associated classes are collected."
+ },
+ {
+  "id": "associated-entities",
+  "def": "A set of classes, enumerations, and templates determined by the argument types of a function call (such as the class itself, the class it is a member of, base classes, and the associated entities of template type arguments); typedefs do not affect it."
+ },
+ {
+  "id": "associated-namespaces",
+  "def": "The innermost enclosing non-inline namespaces of the associated entities, together with their inline namespace sets; ADL searches in them."
+ },
+ {
+  "id": "member-qualified-name",
+  "def": "The *unqualified-id* after `.`/`->` in a class member access expression, or a component name of a nested-name-specifier of the form `type-name ::`/`namespace-name ::` there; the lookup context is the type of the object expression."
+ },
+ {
+  "id": "qualified-name",
+  "def": "A member-qualified name, or the terminal name of a construct such as a *qualified-id*, *using-declarator*, or *typename-specifier* that has a *nested-name-specifier*."
+ },
+ {
+  "id": "lookup-context",
+  "def": "Where a qualified name is looked up: for a member-qualified name, the type of the object expression; for other qualified names, the type, template, or namespace named by the preceding nested-name-specifier."
+ },
+ {
+  "id": "qualified-name-lookup",
+  "def": "A search of the associated scope of a class, namespace, or enumeration; for namespaces, the inline namespace set is also searched, and if nothing is found the search proceeds transitively through using-directives."
+ }
+]

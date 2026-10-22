@@ -1,0 +1,82 @@
+[
+ {
+  "id": "module-unit",
+  "def": "A translation unit that contains a *module-declaration* (`export module M;`, `module M:P;`, etc.)."
+ },
+ {
+  "id": "named-module",
+  "def": "The collection of all module units with the same *module-name*. Dots in a module name carry no hierarchical meaning."
+ },
+ {
+  "id": "module-interface-unit",
+  "def": "A module unit whose *module-declaration* begins with `export`; `export` declarations can appear only in its purview."
+ },
+ {
+  "id": "module-implementation-unit",
+  "def": "A module unit that is not an interface unit (`module M;` or an implementation partition `module M:P;`). It cannot be exported; an implementation unit without a partition name cannot be imported and implicitly imports the primary interface unit."
+ },
+ {
+  "id": "primary-module-interface-unit",
+  "def": "The module interface unit without a partition name; each named module has exactly one (IFNDR if violated). Interface partitions must be exported by it directly or indirectly."
+ },
+ {
+  "id": "module-partition",
+  "def": "A module unit whose *module-declaration* contains `:P`, divided into interface partitions and implementation partitions; it can be imported only by units of the same module with `import :P;`, and is invisible outside the module."
+ },
+ {
+  "id": "purview",
+  "def": "The purview of a module unit is the token sequence from the *module-declaration* to the end of the TU (excluding the global module fragment, including the private module fragment); the purview of a named module is the set of purviews of all its module units."
+ },
+ {
+  "id": "global-module",
+  "def": "The collection of all global module fragments and all non-module TUs (including header units); it has no name and no interface unit. Declarations in traditional code are all attached to it."
+ },
+ {
+  "id": "attached",
+  "def": "Every declaration is attached to one module: declarations of namespaces, of type/namespace aliases, and within a language linkage specification are attached to the global module; a friend that names an existing entity follows the named entity; the rest follow the purview they appear in. Same-named entities attached to different modules are different entities."
+ },
+ {
+  "id": "exported-declaration",
+  "def": "A declaration within an *export-declaration* that inhabits a namespace scope, a namespace definition containing an exported declaration, or a declaration in a header unit that introduces a name. Name lookup in importers can find it; it cannot declare a name with internal linkage (except in header units)."
+ },
+ {
+  "id": "header-unit",
+  "def": "A TU imported by `import <h>;` or `import \"h\";`, synthesized from an importable header via translation phases 1–7: it has an independent macro environment, all its declarations are implicitly exported and attached to the global module, and its macros are visible to direct importers."
+ },
+ {
+  "id": "importable-header",
+  "def": "An implementation-defined set of headers that can be imported as header units, including at least all importable C++ library headers (Table 24 in [[headers]])."
+ },
+ {
+  "id": "interface-dependency",
+  "def": "A TU has an interface dependency on U if it imports U (including the implicit import by a *module-declaration*), or has an interface dependency on some TU that depends on U. A TU must not have an interface dependency on itself (circular imports are prohibited)."
+ },
+ {
+  "id": "global-module-fragment",
+  "def": "The part of a module unit between `module;` and the *module-declaration*, which may contain only preprocessing directives; the declarations in it (via `#include`) are attached to the global module, and those not used by the purview are discarded."
+ },
+ {
+  "id": "decl-reachable",
+  "def": "A relation between declarations in the same TU: D is mentioned by S, named by an expression in S, found by conservative lookup for a dependent call in S, etc., closed under rules for classes and members, templates and specializations, and so on. Used to determine whether declarations in the global module fragment are discarded."
+ },
+ {
+  "id": "discarded-declaration",
+  "def": "A declaration in the global module fragment that is not decl-reachable from any declaration in the TU's *declaration-seq*. It is neither reachable nor visible outside that module unit."
+ },
+ {
+  "id": "private-module-fragment",
+  "def": "The part after `module :private;`, which may appear only in a primary interface unit that is the module's only unit; declarations in it are not reachable from other TUs and are not subject to exposure checks."
+ },
+ {
+  "id": "instantiation-context",
+  "def": "The set of program points that determines which declarations ADL for dependent names can find and which declarations are reachable; for nested instantiations it includes the end of the module's primary interface unit."
+ },
+ {
+  "id": "necessarily-reachable",
+  "def": "A TU that is necessarily reachable from a point P: a module interface unit on which the TU containing P has an interface dependency before P, or a TU directly imported before P."
+ },
+ {
+  "id": "reachable-declaration",
+  "def": "The semantic properties of a declaration (definition, completeness, default arguments, etc.) take effect at a point. A declaration is reachable from P if it precedes P in the same TU, or is in a reachable TU, is not discarded, and is not in a private module fragment. Unrelated to whether it is exported."
+ }
+]

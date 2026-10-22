@@ -1,0 +1,62 @@
+[
+ {
+  "id": "template-instantiation",
+  "def": "The act of substituting template arguments into a template (or a member definition of a class template, or a member template) to generate a concrete function, variable, class, or member definition. It can be implicit instantiation or explicit instantiation."
+ },
+ {
+  "id": "specialization",
+  "def": "A class, variable, function, or class member instantiated from a templated entity, or an explicit specialization thereof. `std::vector<int>` is a specialization of `std::vector` regardless of where its definition comes from."
+ },
+ {
+  "id": "implicit-instantiation",
+  "def": "The compiler automatically generates a definition from the template when a specialization is used in a way that requires its definition (or, for a class, a complete type); instantiating a class template generates only the declarations of its members, and member definitions are instantiated separately on demand."
+ },
+ {
+  "id": "declared-specialization",
+  "def": "A specialization for which a reachable explicit instantiation definition or explicit specialization declaration exists, or for which a reachable explicit instantiation declaration exists and which is not an inline function, an entity with a deduced type, a potentially-constant variable, or a specialization of a templated class. Declared specializations are not implicitly instantiated."
+ },
+ {
+  "id": "default-argument-instantiation",
+  "def": "The lookup, checking, and instantiation performed for a default argument when a templated function is called in a way that requires the use of that default argument; each default argument is instantiated independently, and unused default arguments do no harm even if ill-formed."
+ },
+ {
+  "id": "explicit-instantiation",
+  "def": "A declaration of the form `template declaration`, requesting that the definition of a specialization be generated from the template at this point (an explicit instantiation definition); with `extern` it is an explicit instantiation declaration."
+ },
+ {
+  "id": "explicit-instantiation-declaration",
+  "def": "An explicit instantiation beginning with `extern template`, indicating that the definition is provided by an explicit instantiation definition elsewhere and is not generated in this translation unit; if used, the program must contain a corresponding explicit instantiation definition, otherwise IFNDR."
+ },
+ {
+  "id": "explicit-specialization",
+  "def": "A declaration introduced by `template<>` that provides a complete replacement definition for a given set of template arguments (colloquially a full specialization). It is an ordinary entity and does not inherit the template's inline/constexpr; its declaration must be reachable before any use that would cause implicit instantiation."
+ },
+ {
+  "id": "function-template-specialization",
+  "def": "A function instantiated from a function template, or an explicit specialization of a function template; its template arguments can be explicitly specified, deduced, or taken from default template arguments."
+ },
+ {
+  "id": "deduction-substitution-loci",
+  "def": "The places into which template arguments are substituted during deduction: the function type excluding the noexcept-specifier, the explicit-specifier, template parameter declarations, and the template argument list of a partial specialization. Substitution proceeds in lexical order and stops at the first failure."
+ },
+ {
+  "id": "immediate-context",
+  "def": "The deduction substitution loci themselves, excluding lambda bodies and separately instantiated constructs. Only invalid types or expressions arising in the immediate context cause deduction failure (SFINAE); errors in side effects such as instantiating a class template are hard errors."
+ },
+ {
+  "id": "sfinae",
+  "def": "Non-standard term: when substitution of template arguments produces an invalid type or expression in the immediate context, deduction fails and the function template is silently removed from the candidate set, rather than making the program ill-formed."
+ },
+ {
+  "id": "forwarding-reference",
+  "def": "An rvalue reference `T&&` to a cv-unqualified template parameter (except one representing a class template parameter in CTAD), as well as `auto&&`; when the argument is an lvalue, `T` is deduced as an lvalue reference type and, after reference collapsing, binds to the lvalue. Colloquially a universal reference."
+ },
+ {
+  "id": "at-least-as-specialized",
+  "def": "In partial ordering, function template F is at least as specialized as G if, for each pair of types used for ordering, F's type is at least as specialized as G's (deducing G from F's transformed type succeeds); if the converse does not hold, F is more specialized."
+ },
+ {
+  "id": "non-deduced-context",
+  "def": "Parts of a type that do not participate in template argument deduction and only use values deduced elsewhere or explicitly specified, such as the prefix of a qualified name (`typename A<T>::type`), decltype expressions, subexpressions involving template parameters, and function parameter packs that are not trailing."
+ }
+]

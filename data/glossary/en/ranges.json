@@ -1,0 +1,70 @@
+[
+ {
+  "id": "range-concept",
+  "def": "A type modeling the `std::ranges::range` concept: for an lvalue of it, `ranges::begin` yields an iterator and `ranges::end` yields a sentinel that forms a `sentinel_for` with it, both in amortized O(1) without modifying the range; when the iterator is a forward iterator, `begin` must also be equality-preserving."
+ },
+ {
+  "id": "reified-object",
+  "def": "The object corresponding to a subexpression E in [range.access]: if E is a glvalue, the object it refers to; otherwise the result of applying the temporary materialization conversion to E. All range access CPOs call `begin()`/`size()` etc. on an lvalue designating it."
+ },
+ {
+  "id": "range-view",
+  "def": "A range modeling `std::ranges::view`: movable, declared via `enable_view`, with O(1) move construction, O(N+M) total cost for destroying N copies and M moved-from objects, and O(1) copying when copyable. The underlying range an adaptor holds by value is always a view."
+ },
+ {
+  "id": "viewable-range",
+  "def": "A range that can be safely converted to a view by `views::all`: a view itself (constructible from the argument), a non-view lvalue, or a movable non-view rvalue that is not an `initializer_list`. All range adaptors require it for their first argument."
+ },
+ {
+  "id": "common-range",
+  "def": "A range for which `ranges::begin` and `ranges::end` return the same type (`iterator_t<R>` and `sentinel_t<R>` are the same); C++17-style iterator-pair interfaces require it, and `views::common` can turn a view into one."
+ },
+ {
+  "id": "sized-range",
+  "def": "A range whose number of elements can be computed by `ranges::size` in amortized O(1), with a result equal to `ranges::distance(begin, end)`; a type can opt out by specializing `disable_sized_range`."
+ },
+ {
+  "id": "constant-range",
+  "def": "An input range whose elements cannot be modified through its iterators (the iterators are constant iterators). Introduced in C++23; `views::as_const` can convert any input range into one."
+ },
+ {
+  "id": "simple-view",
+  "def": "Exposition-only concept: view V and const V have the same iterator type and the same sentinel type. Adaptors pair `begin() requires (!simple-view<V>)` with `begin() const`, so that only the const implementation remains when the underlying view is simple."
+ },
+ {
+  "id": "range-adaptor",
+  "def": "A facility that transforms a range into a view with custom behavior (such as `views::filter`, `views::transform`), declared in `std::ranges::views`, which can be chained with `|` into lazily evaluated pipelines."
+ },
+ {
+  "id": "range-adaptor-object",
+  "def": "A customization point object that accepts a viewable_range as its first argument and returns a view; when it takes only one argument it is itself a closure object, and with multiple arguments, calling it with the arguments other than the range produces a closure object that binds those arguments by value (partial application)."
+ },
+ {
+  "id": "range-adaptor-closure-object",
+  "def": "A unary function object C accepting one range argument such that `C(R)` is equivalent to `R | C`; two closure objects compose as `C | D` into a new closure whose call pattern is `d(c(arg))`. Since C++23 user types can become closure objects via the CRTP base class `range_adaptor_closure`."
+ },
+ {
+  "id": "range-factory",
+  "def": "A facility that creates a view directly without taking an underlying range, such as `views::empty`, `views::single`, `views::iota`, `views::repeat`, `views::istream`; they are the sources of pipelines."
+ },
+ {
+  "id": "movable-box",
+  "def": "An exposition-only class template that behaves like `optional<T>`, except that default construction constructs a value, and when T is not assignable, assignment is emulated by \"destroy and then reconstruct in place\"; adaptors use it to store non-assignable function objects such as lambdas, keeping the view movable. Named copyable-box before C++23."
+ },
+ {
+  "id": "non-propagating-cache",
+  "def": "An exposition-only class template that behaves like `optional<T>`, except that copying/moving does not propagate the contained value (both the target and the moved-from source become empty); views use it to temporarily store iterators or prvalue inner ranges, so the cache belongs only to the current view object."
+ },
+ {
+  "id": "begin-caching",
+  "def": "To meet the range concept's requirement that \"begin is amortized O(1)\", `filter_view`, `drop_view`, `drop_while_view`, `reverse_view`, `split_view`, `chunk_by_view`, etc. compute and cache the result on the first `begin()`; consequently they (usually) have no const `begin()`, and modifying the underlying range after caching yields stale results."
+ },
+ {
+  "id": "ranges-dangling",
+  "def": "An empty class constructible from any arguments and supporting no operations; ranges algorithms that return iterators or subranges return it instead when the argument is a non-borrowed rvalue range, making the use of dangling iterators a compile error."
+ },
+ {
+  "id": "range-generator",
+  "def": "`std::generator<Ref, Val, Alloc>`: a coroutine return type that is also a move-only view modeling view and input_range; each `co_yield` produces one element, and `co_yield ranges::elements_of(r)` produces the elements of r one by one (nested generators recurse at O(1) per step)."
+ }
+]

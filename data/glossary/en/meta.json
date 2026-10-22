@@ -1,0 +1,26 @@
+[
+ {
+  "id": "base-characteristic",
+  "def": "The specialization of `integral_constant` from which a unary/binary type trait is publicly and unambiguously derived (directly or indirectly); the trait's `value`, `type`, and `value_type` all come from it, but the trait itself is a different type."
+ },
+ {
+  "id": "cpp17-unary-type-trait",
+  "def": "The requirements a class template describing a property of a single type must meet: it takes one type argument (possibly with additional helper arguments), is default constructible and copy constructible, and derives from its base characteristic without hiding the base characteristic's member names."
+ },
+ {
+  "id": "cpp17-binary-type-trait",
+  "def": "The requirements a class template describing a relationship between two types must meet: it takes two type arguments (possibly with additional helper arguments); otherwise the same as a unary type trait."
+ },
+ {
+  "id": "cpp17-transformation-trait",
+  "def": "The requirements a class template modifying some property of a type must meet: it takes one type argument (possibly with additional helper arguments), and declares a public nested type `type` as a synonym for the modified type."
+ },
+ {
+  "id": "enumerable-type",
+  "def": "A type that is enumerable from program point P: a class type that is complete at P, or an enumeration type whose definition is reachable from P where P is not within its enum-specifier. `members_of` and `enumerators_of` require their arguments to be enumerable."
+ },
+ {
+  "id": "access-context",
+  "def": "A value of `std::meta::access_context`: consisting of a scope (a namespace, class, or function, or the null reflection) and a designating class, which determines from which location's access permissions reflection member queries are performed; constructed by `current()`, `unprivileged()`, `unchecked()`, and `via()`."
+ }
+]

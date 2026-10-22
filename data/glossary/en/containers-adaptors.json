@@ -1,0 +1,14 @@
+[
+ {
+  "id": "container-adaptor",
+  "def": "A class template that holds one or more underlying containers (template parameters `Container`/`KeyContainer`/`MappedContainer`) and exposes only a narrowed interface: `stack`, `queue`, `priority_queue`, and `flat_map`, `flat_multimap`, `flat_set`, `flat_multiset`. Complexity, exception, and iterator invalidation rules are delegated to the underlying containers."
+ },
+ {
+  "id": "flat-container",
+  "def": "Collective name for `flat_map`, `flat_multimap`, `flat_set`, `flat_multiset`: they implement the associative container interface on top of sorted random-access sequence containers (by default `vector`). Lookup is binary search and traversal is contiguous; single-element insertion/erasure is linear; they do not meet the associative-container invalidation and node-handle requirements, and are not allocator-aware containers."
+ },
+ {
+  "id": "sorted-unique",
+  "def": "The tag types `sorted_unique_t`, `sorted_equivalent_t` and their constants `std::sorted_unique`, `std::sorted_equivalent`. Passing one to a flat container's constructor or `insert` promises the library that the data is already sorted by `key_comp()` (the former also requires no equal elements), so sorting is skipped; if the promise does not hold, the behavior is undefined."
+ }
+]

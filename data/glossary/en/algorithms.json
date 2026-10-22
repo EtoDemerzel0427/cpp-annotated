@@ -1,0 +1,38 @@
+[
+ {
+  "id": "parallel-algorithm",
+  "def": "An algorithm function template listed in the standard that has a template parameter named `ExecutionPolicy` or one constrained by the exposition-only concept *execution-policy*. Its first function parameter is an execution policy, which determines where and in what order the element access functions are executed."
+ },
+ {
+  "id": "execution-policy-template-parameter",
+  "def": "The template parameter of a parallel algorithm that is named `ExecutionPolicy` or constrained by *execution-policy*; the overload participates in overload resolution only if `is_execution_policy_v<remove_cvref_t<Ep>>` is satisfied."
+ },
+ {
+  "id": "projection",
+  "def": "The optional callable argument `proj` (default `identity`) of `std::ranges` algorithms: the algorithm first transforms an element with `invoke(proj, *i)` and then hands it to the predicate or comparator. It can be a member pointer, as in `ranges::sort(v, {}, &T::key)`."
+ },
+ {
+  "id": "sorted-with-respect-to",
+  "def": "For every position `i` in the sequence and every later position `i + n`, `invoke(comp, invoke(proj, *(i + n)), invoke(proj, *i))` is false — that is, there are no inversions; equivalent elements may sit next to each other."
+ },
+ {
+  "id": "partitioned-with-respect-to",
+  "def": "The sequence `[start, finish)` has a split point `n` such that `f(*(start + i))` is true if and only if `i < n`; i.e. all elements for which the expression is true come first. This is the real precondition of the binary-search family of algorithms."
+ },
+ {
+  "id": "heap-with-respect-to",
+  "def": "In the random-access range `[a, b)`, for all 0 < i < N the parent element `a[(i−1)/2]` is not \"less than\" `a[i]`, and the first element can be removed by `pop_heap` and a new element added by `push_heap` in O(log N). With the default `less` it is a max-heap."
+ },
+ {
+  "id": "generalized-noncommutative-sum",
+  "def": "Mathematical notation in `<numeric>` used to define the scan family: a reduction with `op` that preserves element order but allows arbitrary parenthesization. The result is unique only if `op` is associative."
+ },
+ {
+  "id": "generalized-sum",
+  "def": "*GENERALIZED_NONCOMMUTATIVE_SUM* over an arbitrary permutation of the elements: both order and parenthesization are unspecified. `reduce` and `transform_reduce` are defined in terms of it; the result is unique only if `op` is both associative and commutative (floating-point addition is not)."
+ },
+ {
+  "id": "saturation-arithmetic",
+  "def": "The mathematical result of the integer operation is computed as if with infinite precision; if it is not representable in the result type, the result is whichever of that type's maximum and minimum values is closer to the mathematical result, instead of wrapping around or being UB. C++26's `saturating_add` and friends provide these semantics."
+ }
+]

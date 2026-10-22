@@ -1,0 +1,126 @@
+[
+ {
+  "id": "injected-class-name",
+  "def": "The class name as also bound in the scope of the class (template) itself; access checking treats it as a public member. In a class template, used without arguments it refers to the current specialization."
+ },
+ {
+  "id": "unnamed-class",
+  "def": "A class defined by a class definition whose *class-head* omits the class name, as in `struct { int x; } v;`. It cannot be `final` and cannot have static data members."
+ },
+ {
+  "id": "class-definition",
+  "def": "A *class-specifier*, i.e. `class-head { member-specification }`. Once the closing brace is seen, the class is regarded as defined (complete)."
+ },
+ {
+  "id": "trivially-copyable-class",
+  "def": "A class that has at least one eligible copy/move constructor or assignment operator, all of whose eligible such functions are trivial, and that has a trivial, non-deleted destructor. Its objects can be copied byte-wise with their values preserved."
+ },
+ {
+  "id": "standard-layout-class",
+  "def": "A class with no virtual functions/virtual base classes, no reference members, the same access control for all data members, all of them concentrated in one class of the inheritance hierarchy, at most one base class subobject of any given type, and no base class conflicting with M(S); its first non-bit-field member has the same address as the object."
+ },
+ {
+  "id": "standard-layout-struct",
+  "def": "A standard-layout class defined with `struct` or `class`; common initial sequences and layout-compatible classes are defined in terms of it. One defined with `union` is called a standard-layout union."
+ },
+ {
+  "id": "implicit-lifetime-class",
+  "def": "An aggregate whose destructor is not user-provided, or a class that has at least one trivial eligible constructor and a trivial, non-deleted destructor; its objects can be implicitly created by `malloc`, `memcpy`, etc."
+ },
+ {
+  "id": "direct-member",
+  "def": "A member first declared in the *member-specification* of class X (including anonymous union members and their direct members); inherited members and members introduced by using-declarations are not."
+ },
+ {
+  "id": "user-declared",
+  "def": "A direct member or friend declared by some *member-declaration*. Declarations with `= default` and `= delete` are user-declared too; this is the criterion used by the rules for implicitly declaring special member functions."
+ },
+ {
+  "id": "complete-class-context",
+  "def": "Function bodies, default arguments, default template arguments, `noexcept` specifiers, contract specifiers, and default member initializers within a class's member-specification; within them all members of the class are visible and the class is regarded as complete."
+ },
+ {
+  "id": "default-member-initializer",
+  "def": "The *brace-or-equal-initializer* in a non-static data member declaration (`int x = 0;`/`int x{0};`), used when a constructor does not initialize that member."
+ },
+ {
+  "id": "common-initial-sequence",
+  "def": "For two standard-layout structs, the longest sequence of members, starting from the first, in which corresponding members are layout-compatible and have the same alignment (and are either both not bit-fields or bit-fields of the same width); it may be read through an inactive member of a union."
+ },
+ {
+  "id": "layout-compatible-classes",
+  "def": "Two standard-layout structs whose common initial sequence comprises all members and bit-fields; or two standard-layout unions with the same number of members whose corresponding members (in any order) are layout-compatible."
+ },
+ {
+  "id": "data-member-description",
+  "def": "In C++26 reflection, a six-tuple (type, name, alignment, bit-field width, whether no_unique_address, annotations) describing a potential non-static data member, used by `std::meta::define_aggregate`."
+ },
+ {
+  "id": "nested-class",
+  "def": "A class declared within another class. It is a member of the enclosing class, but its objects have no implicit association with objects of the enclosing class."
+ },
+ {
+  "id": "bit-field",
+  "def": "A non-static data member of integral or enumeration type declared with `: width`; its layout and alignment are implementation-defined, its address cannot be taken, and a non-const reference cannot bind to it."
+ },
+ {
+  "id": "unnamed-bit-field",
+  "def": "A bit-field that omits the identifier; it is not a member, cannot be initialized, and cannot be cv-qualified. A width of 0 causes the next bit-field to be aligned at an allocation unit boundary."
+ },
+ {
+  "id": "special-member-function",
+  "def": "Default constructors, copy/move constructors, copy/move assignment operators, and prospective destructors; when the program does not declare them, they may be implicitly declared and are implicitly defined when needed."
+ },
+ {
+  "id": "eligible-special-member-function",
+  "def": "A special member function that is not deleted, whose constraints are satisfied, and for which there is no special member function of the same kind whose constraints are satisfied and that is more constrained; properties such as trivially copyable look only at eligible ones."
+ },
+ {
+  "id": "potentially-constructed-subobjects",
+  "def": "The direct non-static data members of a class, its non-virtual direct base classes, and (if the class is not abstract) its virtual base classes. Whether a defaulted special member function is deleted is decided on this basis."
+ },
+ {
+  "id": "default-constructor",
+  "def": "A constructor each of whose parameters (other than a function parameter pack) has a default argument, including a constructor with no parameters. It is implicitly declared when there is no user-declared constructor at all."
+ },
+ {
+  "id": "copy-constructor",
+  "def": "A non-template constructor whose first parameter is `cv X&` and whose remaining parameters all have default arguments. A constructor template is never a copy constructor."
+ },
+ {
+  "id": "move-constructor",
+  "def": "A non-template constructor whose first parameter is `cv X&&` and whose remaining parameters all have default arguments. It is implicitly declared only if there is no user-declared copy constructor, copy assignment operator, move assignment operator, or destructor."
+ },
+ {
+  "id": "copy-assignment-operator",
+  "def": "A non-static non-template `operator=` with exactly one non-object parameter of type `X` or `cv X&`. The by-value parameter version is also a copy assignment operator."
+ },
+ {
+  "id": "move-assignment-operator",
+  "def": "A non-static non-template `operator=` with exactly one non-object parameter of type `cv X&&`."
+ },
+ {
+  "id": "prospective-destructor",
+  "def": "A member function declared as `~ClassName`; a class can have several (distinguished by constraints), and at the end of the class definition one of them is selected by overload resolution to be the destructor."
+ },
+ {
+  "id": "selected-destructor",
+  "def": "The one chosen at the end of the class definition by overload resolution among the prospective destructors with an empty argument list, i.e. the class's destructor; it may be deleted."
+ },
+ {
+  "id": "potentially-invoked",
+  "def": "A destructor is invoked, or may be invoked for exception unwinding in a new-expression, return, aggregate initialization, constructor, or throw; a potentially invoked destructor must not be deleted and must be accessible."
+ },
+ {
+  "id": "user-defined-conversion",
+  "def": "A type conversion of class objects specified by a (non-explicit) constructor or a conversion function. At most one is implicitly applied to a single value."
+ },
+ {
+  "id": "converting-constructor",
+  "def": "A constructor that is not `explicit`; it specifies an implicit conversion from its parameter types to its class type (since C++11 including multi-parameter constructors, used in list-initialization)."
+ },
+ {
+  "id": "conversion-function",
+  "def": "A non-static member function of the form `operator T()` with no non-object parameters, specifying a conversion from its class to `T`; it can be explicit, virtual, or a template."
+ }
+]

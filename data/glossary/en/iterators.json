@@ -1,0 +1,74 @@
+[
+ {
+  "id": "iterator-value-type",
+  "def": "The object type `T` corresponding to `*i` for an input iterator `i`; since C++20 queried with `iter_value_t<I>`, which for `const int*` is `int` (cv removed)."
+ },
+ {
+  "id": "iterator-difference-type",
+  "def": "The signed-integer-like type associated with each iterator type, used to represent the distance between two iterators; queried with `iter_difference_t<I>`, and it may be an implementation-provided integer-class type."
+ },
+ {
+  "id": "mutable-iterator",
+  "def": "An iterator that also meets the output iterator requirements, i.e. the element it points to can be modified through it, such as `vector<int>::iterator`."
+ },
+ {
+  "id": "constant-iterator",
+  "def": "An iterator that is not a mutable iterator: the element it points to cannot be modified through it, such as `vector<int>::const_iterator`. C++23's `basic_const_iterator` can wrap any input iterator into a constant iterator."
+ },
+ {
+  "id": "past-the-end-value",
+  "def": "An iterator value pointing past the last element of a sequence, analogous to a pointer past the end of an array. The library never assumes past-the-end values are dereferenceable."
+ },
+ {
+  "id": "dereferenceable-iterator",
+  "def": "An iterator value for which the expression `*i` is defined. Dereferenceable values are always non-singular; past-the-end values are not dereferenceable."
+ },
+ {
+  "id": "singular-value",
+  "def": "An iterator value not associated with any sequence (such as a default-initialized pointer or iterator). The results of almost all expressions on it are undefined; only destruction, assignment of a non-singular value, and (when value-initialized) use as the source of a copy/move are allowed."
+ },
+ {
+  "id": "reachable-sentinel",
+  "def": "If a finite number of applications of `++i` to an iterator `i` makes `i == s`, the sentinel `s` is said to be reachable from `i`; then `[i, s)` is a valid range."
+ },
+ {
+  "id": "valid-range",
+  "def": "A range `[i, s)` whose sentinel is reachable from the starting iterator. The result of calling a library function on an invalid range is undefined."
+ },
+ {
+  "id": "counted-range",
+  "def": "A range denoted by an iterator plus an element count, `i+[0, n)`: the `n` elements starting from the element pointed to by `i`. If `n == 0` it is empty; otherwise it is valid if and only if `i` is dereferenceable and `++i+[0, n-1)` is valid."
+ },
+ {
+  "id": "invalid-iterator",
+  "def": "An iterator that may be singular, such as an iterator invalidated by a container operation. Dereferencing an invalidated iterator is undefined behavior."
+ },
+ {
+  "id": "constexpr-iterator",
+  "def": "An iterator all of whose operations provided to meet its iterator category requirements are constexpr functions, such as `int*`, `reverse_iterator<int*>`."
+ },
+ {
+  "id": "integer-class-type",
+  "def": "An implementation-defined type that behaves like an integer and is wider than all integer types of the same signedness (not necessarily a class type), usable as a difference type, such as the difference type of `iota_view<long long>`."
+ },
+ {
+  "id": "integer-like-type",
+  "def": "A type other than cv `bool` that models `integral`, or an integer-class type; further divided into signed-integer-like and unsigned-integer-like. An iterator's difference type must be a signed-integer-like type."
+ },
+ {
+  "id": "multi-pass-guarantee",
+  "def": "A semantic guarantee of forward iterators: `a == b` implies `++a == ++b`, and incrementing a copy of `a` does not affect `*a`. It allows the same sequence to be traversed multiple times."
+ },
+ {
+  "id": "iterator-category-tag",
+  "def": "The six empty classes such as `input_iterator_tag`, which express the inclusion relations between categories through inheritance; iterators declare them via `iterator_traits<I>::iterator_category` (and `iterator_concept`), used for compile-time tag dispatch."
+ },
+ {
+  "id": "insert-iterator",
+  "def": "An output iterator adaptor that translates an assignment `*it = x` into a `push_back`, `push_front`, or `insert` on a container, making copying algorithms work in insert mode rather than overwrite mode."
+ },
+ {
+  "id": "end-of-stream-iterator",
+  "def": "The value a stream iterator has after reaching end of stream or a read failure, obtained by default construction (or construction from `default_sentinel`), used as the end of an input range."
+ }
+]

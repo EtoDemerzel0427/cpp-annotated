@@ -1,0 +1,54 @@
+[
+ {
+  "id": "function-object-type",
+  "def": "An object type that can be the type of the postfix-expression in a function call expression: function pointers, classes with a member operator(), and classes convertible to function pointers. Pointers to members are not function object types."
+ },
+ {
+  "id": "call-signature",
+  "def": "The name of a return type followed by a parenthesized, comma-separated list of zero or more argument types, such as int(double, char)."
+ },
+ {
+  "id": "callable-type",
+  "def": "A function object type or a pointer-to-member type; objects of such a type are called callable objects and are uniformly invoked through INVOKE."
+ },
+ {
+  "id": "call-wrapper",
+  "def": "An object of a type (a call wrapper type) that holds a target object and supports forwarding calls to it; it at least meets Cpp17MoveConstructible and Cpp17Destructible."
+ },
+ {
+  "id": "target-object",
+  "def": "The callable object held by a call wrapper, or an object representing a callable object (such as the pointer in a reference_wrapper)."
+ },
+ {
+  "id": "bound-argument-entities",
+  "def": "A sequence of objects and references additionally held by a call wrapper and passed to the target along with the call, such as 1 and 2 in bind_front(f, 1, 2)."
+ },
+ {
+  "id": "state-entities",
+  "def": "Collective name for the target object and bound argument entities of a call wrapper; copying/moving the wrapper is done state entity by state entity."
+ },
+ {
+  "id": "argument-forwarding-call-wrapper",
+  "def": "A call wrapper that accepts an arbitrary argument list and forwards the call arguments by reference (rvalues as rvalue references, lvalues as lvalue references), such as the return value of bind."
+ },
+ {
+  "id": "perfect-forwarding-call-wrapper",
+  "def": "An argument forwarding call wrapper that also forwards its state entities according to the cv-qualification and value category of the wrapper itself (cv T& for an lvalue call, cv T&& otherwise); a call is expression-equivalent to its call pattern."
+ },
+ {
+  "id": "call-pattern",
+  "def": "The expression defining the call semantics of a perfect forwarding call wrapper, such as invoke(fd, bound_args..., call_args...); an actual call is expression-equivalent to that expression with its entities replaced by the forwarded references."
+ },
+ {
+  "id": "simple-call-wrapper",
+  "def": "A perfect forwarding call wrapper that meets Cpp17CopyConstructible and Cpp17CopyAssignable and whose copy/move constructors and assignments are all non-throwing constexpr functions, such as the return value of mem_fn."
+ },
+ {
+  "id": "transparent-comparator",
+  "def": "A comparison function object with a member type is_transparent (such as less<>); associative containers use it to enable member template overloads that look up with arguments other than key_type (heterogeneous lookup)."
+ },
+ {
+  "id": "disabled-hash-specialization",
+  "def": "hash<Key> when neither the library nor the user provides a specialization: the type exists, but it is not default constructible, copyable, movable, or assignable, and is not a function object type, so it can be safely detected with SFINAE."
+ }
+]

@@ -1,0 +1,26 @@
+[
+ {
+  "id": "execution-character-set",
+  "def": "The character set used by C/C++ library functions to interpret sequences of `char` (and `wchar_t`, corresponding to the execution wide-character set) at run time; it is a superset of the basic literal character set, its encoding is locale-specific, changes with `setlocale`, and can be unrelated to any literal encoding."
+ },
+ {
+  "id": "registered-character-encoding",
+  "def": "A character encoding scheme in the IANA Character Sets registry; `std::text_encoding::id` provides an enumerator for every registered encoding except NATS-DANO and NATS-DANO-ADD, whose value is the IANA MIB number."
+ },
+ {
+  "id": "facet",
+  "def": "A class derived from `std::locale::facet` that contains a public `static std::locale::id id;` declaration, or a class publicly derived from another facet; a locale indexes its facets by the facet's `id`. A derived facet that does not redeclare `id` shares the same slot as its base class."
+ },
+ {
+  "id": "named-locale",
+  "def": "A `std::locale` constructed from a name string, or composed from parts of two named locales; such locales can be compared for equality by name, and `locale::global` calls `setlocale` only for them. All other locales are unnamed, and `name()` returns \"*\"."
+ },
+ {
+  "id": "ready-match-results",
+  "def": "The state of a `match_results` after it has been modified by a completed regular expression match and its result state is fully established; a default-constructed object is not ready, and calling most member functions on it is undefined behavior."
+ },
+ {
+  "id": "zero-length-match",
+  "def": "The case where, in the match held by a `regex_iterator`, `match[0].matched` is true and `match[0].first == match[0].second`; `operator++` handles it specially to guarantee that iteration advances."
+ }
+]

@@ -1,0 +1,98 @@
+[
+ {
+  "id": "templated-entity",
+  "def": "A template itself, an entity defined or created in a templated entity, a member of a templated entity and its enumerators, the closure type of a lambda in the declaration of a templated entity, and an entity defined in an expansion statement. It is the scope of applicability of rules such as trailing requires-clauses and discarded statements. See [[temp.pre#8]]."
+ },
+ {
+  "id": "variable-template",
+  "def": "A template introduced by a template declaration of a variable, such as `template<class T> constexpr T pi = ...;`; a variable template at class scope is called a static data member template (C++14)."
+ },
+ {
+  "id": "constant-template-parameter",
+  "def": "A template parameter introduced by a *parameter-declaration*, such as `int N`, `auto V`. Called a non-type template parameter (NTTP) in C++23 and earlier."
+ },
+ {
+  "id": "template-template-parameter",
+  "def": "Collective name for type template template parameters, variable template template parameters (C++26), and concept template parameters (C++26): their arguments are templates."
+ },
+ {
+  "id": "immediately-declared-constraint",
+  "def": "The constraint expression `C<T, A...>` that a type-constraint `C<A...>` imposes on a type `T` (the constrained type inserted as the first argument); if `T` is a pack, it is `(C<T, A...> && ...)`."
+ },
+ {
+  "id": "structural-type",
+  "def": "A type usable as the type of a constant template parameter: a scalar type, an lvalue reference type, or a literal class type all of whose base classes and non-static data members are public, non-mutable, and recursively of structural type (or arrays thereof)."
+ },
+ {
+  "id": "template-parameter-object",
+  "def": "An object with static storage duration and `const` type designated by a constant template parameter of class type; there is exactly one such object for each set of template-argument-equivalent values."
+ },
+ {
+  "id": "default-template-argument",
+  "def": "A template argument given after `=` in a template parameter. A parameter pack cannot have one; they are merged across declarations; in class/variable/alias templates every subsequent parameter must have a default argument or be a pack, while function templates have no such restriction."
+ },
+ {
+  "id": "valid-template-id",
+  "def": "A *template-id* with an appropriate number of arguments, each argument matching its corresponding parameter, successful substitution into subsequent parameters, and (when not dependent) satisfied associated constraints. A *simple-template-id* for a non-function template must be valid."
+ },
+ {
+  "id": "concept-id",
+  "def": "A *simple-template-id* whose *template-name* is a concept name, such as `std::integral<int>`. It is a prvalue of type `bool` and does not name any specialization; it is `true` when the normalized constraint of the concept is satisfied."
+ },
+ {
+  "id": "candidate-initializer",
+  "def": "The *id-expression* of an invented temporary variable `constexpr T v = A;` used to determine the value of a constant template parameter of class type (or with braced initialization); the template parameter object is copy-initialized from a candidate initializer that is template-argument-equivalent to it."
+ },
+ {
+  "id": "constraint",
+  "def": "An abstract structure imposing requirements on template arguments, composed of conjunctions, disjunctions, atomic constraints, concept-dependent constraints, and fold expanded constraints; obtained by normalizing a constraint expression, with no direct syntactic counterpart."
+ },
+ {
+  "id": "atomic-constraint",
+  "def": "A constraint consisting of an expression and a parameter mapping. Two atomic constraints are identical if and only if they come from the same appearance of the same expression and their mappings are equivalent; when it is checked for satisfaction, the expression must be a constant expression of exactly type `bool`."
+ },
+ {
+  "id": "parameter-mapping",
+  "def": "The mapping, in an atomic constraint, from the template parameters appearing in the expression to template arguments, composed layer by layer as concept-ids are inlined during normalization."
+ },
+ {
+  "id": "constraint-satisfaction",
+  "def": "Whether a constraint holds for given template arguments: conjunctions/disjunctions short-circuit from left to right; an atomic constraint is not satisfied if substitution fails in the immediate context, and is otherwise evaluated as a `bool` constant expression."
+ },
+ {
+  "id": "concept-dependent-constraint",
+  "def": "An atomic constraint whose expression is a concept-id whose concept is dependent (a concept template parameter); its normalization is deferred until instantiation, and it makes the enclosing declaration not eligible for subsumption (C++26)."
+ },
+ {
+  "id": "fold-expanded-constraint",
+  "def": "A constraint obtained by normalizing `(E && ...)` or `(E || ...)`: the constraint `C` is checked for each element of the pack in turn, with short-circuiting; two fold expanded constraints expanding the same pack can be compared for subsumption (C++26)."
+ },
+ {
+  "id": "associated-constraints",
+  "def": "All the constraints of a declaration: the normal form of the conjunction formed, in order, by type-constraints, the requires-clause, type-constraints in function parameters, and the trailing requires-clause."
+ },
+ {
+  "id": "normalization",
+  "def": "The process of turning a constraint expression into a constraint: parentheses are transparent, `&&`/`||` are split into conjunctions/disjunctions, non-dependent concept-ids are inlined with their parameter mappings composed, `&&`/`||` folds become fold expanded constraints, and all other expressions become atomic constraints."
+ },
+ {
+  "id": "subsumes",
+  "def": "Constraint P subsumes Q: every clause of the disjunctive normal form of P shares at least one identical atomic constraint (or comparable fold expanded constraint) with every clause of the conjunctive normal form of Q. I.e. implication judged only by structure and atomic identity."
+ },
+ {
+  "id": "more-constrained",
+  "def": "D1 is at least as constrained as D2 (both are constrained and D1's associated constraints are eligible for subsumption and subsume D2's, or D2 is unconstrained), but not vice versa. Used in overload resolution and various partial orderings."
+ },
+ {
+  "id": "template-argument-equivalent",
+  "def": "The relation under which two constant template argument values are considered the same: they have the same type and compare item by item according to that type — integers by value, floating-point by being identical, pointers by pointer value, class types recursively subobject by subobject — independent of `operator==`."
+ },
+ {
+  "id": "prototype-parameter",
+  "def": "The first template parameter declared in a concept definition; type-constraints and `C auto` substitute the constrained type into this position."
+ },
+ {
+  "id": "type-concept",
+  "def": "A concept whose prototype parameter is a type template parameter; only type concepts can be used as type-constraints or constrained placeholders."
+ }
+]

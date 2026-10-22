@@ -1,0 +1,114 @@
+[
+ {
+  "id": "name",
+  "def": "An identifier (other than in a label, a goto target, a module name, or an attribute token), *conversion-function-id*, *operator-function-id*, or *literal-operator-id*. Every name is introduced by some declaration."
+ },
+ {
+  "id": "entity",
+  "def": "A variable, structured binding, result binding, function, enumerator, type, type alias, non-static data member, bit-field, template, namespace, namespace alias, template parameter, function parameter, or *init-capture*. Objects and values are not entities."
+ },
+ {
+  "id": "variable",
+  "def": "An object or reference (other than a non-static data member) introduced by a declaration that is not the *parameter-declaration* of a template parameter. Static data members and function parameters are variables."
+ },
+ {
+  "id": "underlying-entity",
+  "def": "By default the underlying entity of an entity is the entity itself; the underlying entity of a type alias or namespace alias is the type/namespace it stands for. A name **denotes** the underlying entity."
+ },
+ {
+  "id": "local-entity",
+  "def": "A variable with automatic storage duration, a structured binding whose corresponding variable is such an entity, a result binding, or `*this`. Only local entities are subject to the odr-usable and lambda capture rules."
+ },
+ {
+  "id": "redeclaration",
+  "def": "A declaration of an entity X is a redeclaration if another declaration of X is reachable from it; otherwise it is the **first declaration**."
+ },
+ {
+  "id": "definition",
+  "def": "By default a declaration also defines the entity it declares, unless it falls under one of the 22 exceptions in [[basic.def#2]] (no function body, `extern` without an initializer, non-inline static member in a class, typedef, using, etc.)."
+ },
+ {
+  "id": "definable-item",
+  "def": "What the ODR governs: class types, enumeration types, functions, variables, templated entities, default arguments, and default template arguments."
+ },
+ {
+  "id": "potentially-evaluated",
+  "def": "An expression that is not an unevaluated operand (of `sizeof`, `decltype`, `noexcept`, etc.) or a subexpression thereof. An expression inside `if (false)` is still potentially evaluated."
+ },
+ {
+  "id": "potential-results",
+  "def": "The set of *id-expression*s/*splice-expression*s obtained by recursing through parentheses, array subscripts, non-static member access, `.*`, glvalue conditional expressions, and the right operand of a comma; used to determine whether a variable is only read for its value."
+ },
+ {
+  "id": "odr-use",
+  "def": "A variable is odr-used when it is named by a potentially-evaluated expression, unless one of the exceptions applies (such as \"only reading a value known at compile time\" or \"discarded-value with no lvalue-to-rvalue conversion\"); a function is odr-used when it is named in a potentially-evaluated way (or is a virtual function that is not pure). A non-inline function or variable that is odr-used must have exactly one definition."
+ },
+ {
+  "id": "odr-usable",
+  "def": "The condition under which a local entity can be odr-used in a scope: only block scopes, contract-assertion scopes, lambda/requires parameter scopes, or the scope of a lambda that captures it intervene. Odr-using a local entity where it is not odr-usable is ill-formed."
+ },
+ {
+  "id": "definition-domain",
+  "def": "A *private-module-fragment*, or the part of a TU outside the private module fragment. The definition of an inline function or variable must be reachable from the end of every definition domain in which it is odr-used."
+ },
+ {
+  "id": "scope",
+  "def": "Since C++23, a **region** of the program (possibly discontiguous) introduced by a declaration, parameter list, statement, handler, lambda, or contract assertion; scopes form a tree rooted at the global scope."
+ },
+ {
+  "id": "intervening-scope",
+  "def": "A scope X intervenes between a program point P and a scope S (that does not contain P) if X is or contains S but does not contain P. Used in determinations such as odr-usability."
+ },
+ {
+  "id": "inhabit",
+  "def": "A declaration inhabits the immediate scope at its locus. By default this is also its **target scope**, in which the name is bound."
+ },
+ {
+  "id": "target-scope",
+  "def": "The scope a declaration \"targets\", by default the scope it inhabits; block-scope `extern`/function declarations, friend declarations, declarations with qualified names, etc. are exceptions that target a larger scope. An entity belongs to the target scope of its declarations."
+ },
+ {
+  "id": "correspond",
+  "def": "Two declarations correspond if they introduce the same name (or both declare constructors/destructors), are not \"type vs. non-type\", do not involve a using-declarator, and, for functions, are corresponding overloads. Corresponding declarations are either redeclarations of the same entity or potentially conflict."
+ },
+ {
+  "id": "corresponding-overloads",
+  "def": "Two function declarations whose non-object-parameter-type-lists are the same, whose trailing requires-clauses are equivalent, and (when both are non-static members) whose object parameters correspond; function templates additionally require corresponding signatures and equivalent template-heads."
+ },
+ {
+  "id": "potentially-conflict",
+  "def": "Two declarations correspond but make the name denote different entities. If a name in the same scope is bound to two potentially conflicting declarations, the program is ill-formed (unless the latter is a name-independent declaration)."
+ },
+ {
+  "id": "name-independent-declaration",
+  "def": "C++26: a declaration whose name is `_` of an automatic variable (not a parameter), a structured binding not at namespace scope, a result binding, an init-capture, or a non-static data member. Such declarations can be repeated without conflicting."
+ },
+ {
+  "id": "locus",
+  "def": "The program point at which a declaration takes effect (\"precedes\" subsequent code). The locus of a declarator is after the complete declarator and before its initializer; that of a class name is right after the name in the class-head; that of a range-for loop variable is after the initializer to the right of the colon."
+ },
+ {
+  "id": "splice-specifier",
+  "def": "C++26's `[: r :]`, where `r` is a constant expression of type `std::meta::info`; it designates the underlying entity of the entity represented by `r`, or (if it is not an entity) that construct itself."
+ },
+ {
+  "id": "linkage",
+  "def": "A property of a name that determines whether declarations of the same name in different scopes/TUs can denote the same entity: external linkage, module linkage, internal linkage, or no linkage."
+ },
+ {
+  "id": "internal-linkage",
+  "def": "The name can be referred to by declarations in other scopes only within its own TU. Sources: explicit `static`, non-template non-volatile const variables at namespace scope (with exceptions), anonymous union members, and everything in an unnamed namespace."
+ },
+ {
+  "id": "module-linkage",
+  "def": "C++20: the linkage of a namespace-scope name that is attached to a named module and not exported; it can only be referred to by TUs of the same module."
+ },
+ {
+  "id": "tu-local",
+  "def": "Entities with internal linkage, entities with no linkage defined within a TU-local entity, unnamed types used only to declare TU-local entities, specializations of TU-local templates, etc.; a value is also TU-local when it refers to or represents such an entity."
+ },
+ {
+  "id": "exposure",
+  "def": "A declaration that names a TU-local entity (ignoring non-inline function bodies, initializers, friends, and read-only constant references), or a definition that initializes a constexpr variable to a TU-local value. An exposure of a non-TU-local entity in a module interface is ill-formed; elsewhere it is deprecated."
+ }
+]

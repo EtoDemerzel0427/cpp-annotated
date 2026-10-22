@@ -1,0 +1,90 @@
+[
+ {
+  "id": "value-category",
+  "def": "Every expression belongs to exactly one of lvalue, xvalue, prvalue; this static property is called its value category. Together with the type it determines reference binding, overload resolution, and the result of `decltype`."
+ },
+ {
+  "id": "glvalue",
+  "def": "An expression whose evaluation determines the identity of an object, function, non-static data member, or direct base class relationship; i.e. the collective name for lvalues and xvalues."
+ },
+ {
+  "id": "prvalue",
+  "def": "An expression whose evaluation initializes an object (its result object) or computes the value of an operand of an operator, or an expression of type cv `void`. Since C++17 a prvalue is not itself an object."
+ },
+ {
+  "id": "xvalue",
+  "def": "A glvalue that denotes an object whose resources can be reused, e.g. `std::move(x)`, a call to a function returning `T&&`, or a member of a materialized temporary."
+ },
+ {
+  "id": "lvalue",
+  "def": "A glvalue that is not an xvalue. Variable names (including variables of rvalue reference type), `*p`, `++i`, and string literals are all lvalues."
+ },
+ {
+  "id": "rvalue",
+  "def": "A prvalue or an xvalue; an expression that can bind to an rvalue reference."
+ },
+ {
+  "id": "result-object",
+  "def": "The object initialized by a prvalue, provided by the context in which the prvalue appears (a variable, return value, parameter, or materialized temporary). A prvalue of cv `void` has no result object."
+ },
+ {
+  "id": "temporary-materialization-conversion",
+  "def": "The standard conversion of a prvalue of type `T` to an xvalue: the prvalue is evaluated with a newly created temporary object as its result object. Requires `T` to be complete, and for class types requires the destructor to be usable."
+ },
+ {
+  "id": "type-accessible",
+  "def": "An object with dynamic type Tobj is type-accessible through a glvalue of type Tref if and only if Tref is similar to Tobj, to the signed/unsigned type corresponding to Tobj, or to one of `char`/`unsigned char`/`std::byte`. Reading or writing an object through a glvalue through which it is not type-accessible is UB (the strict aliasing rule)."
+ },
+ {
+  "id": "modifiable-lvalue",
+  "def": "An lvalue whose type is neither const-qualified nor a function type. Built-in assignment, increment, and decrement require a modifiable lvalue."
+ },
+ {
+  "id": "composite-pointer-type",
+  "def": "The common type to which two pointer (or pointer-to-member, `std::nullptr_t`) operands are uniformly converted, used by `==`, `<`, `<=>`, `?:`, etc.; determined in order by null pointer constants, `void*`, noexcept, base/derived, and similar types."
+ },
+ {
+  "id": "unevaluated-operand",
+  "def": "An operand that is not evaluated, such as the operand of `sizeof`, `decltype`, `noexcept`, or non-polymorphic `typeid`. Names in it do not constitute odr-uses, but semantic checking proceeds as usual."
+ },
+ {
+  "id": "discarded-value-expression",
+  "def": "An expression evaluated only for its side effects, with its result discarded, such as an expression statement, the left operand of a comma, or `(void)e`. The lvalue-to-rvalue conversion is applied only to volatile glvalues of particular forms; prvalues of object type are materialized."
+ },
+ {
+  "id": "standard-conversion-sequence",
+  "def": "A sequence of standard conversions in a fixed order: at most one lvalue transformation (lvalue-to-rvalue/array-to-pointer/function-to-pointer), at most one promotion or conversion, at most one function pointer conversion, and at most one qualification conversion."
+ },
+ {
+  "id": "contextually-converted-to-bool",
+  "def": "An expression `E` in an `if` condition, `!`, `&&`, etc. is converted to `bool` if and only if `bool t(E);` is well-formed; because this is direct-initialization, `explicit` conversion functions are considered."
+ },
+ {
+  "id": "lvalue-to-rvalue-conversion",
+  "def": "The standard conversion of a glvalue of non-function, non-array type to a prvalue, which in essence reads the object's value; for non-class types cv is removed, while for class types the result object is copy-initialized."
+ },
+ {
+  "id": "similar-types",
+  "def": "Two types are similar if they are the same after erasing the cv-qualifiers at every level (and allowing array bounds to differ between known and unknown). E.g. `int**` and `const int* const*`."
+ },
+ {
+  "id": "qualification-combined-type",
+  "def": "The type obtained from two similar types by taking the union of cv-qualifiers at each level (and unknown array bounds), then adding `const` to every intermediate level outside any level that changed; `T1` can be qualification-converted to `T2` if and only if their qualification-combined type is `T2`."
+ },
+ {
+  "id": "integral-promotion",
+  "def": "The standard conversion of integers of rank lower than `int`, bit-fields, character types, `bool`, and unscoped enumerations to `int` (or `unsigned int`, etc.); in overload resolution it ranks as a \"promotion\", better than an ordinary conversion."
+ },
+ {
+  "id": "null-pointer-constant",
+  "def": "An integer literal with value zero, or a prvalue of type `std::nullptr_t`. `'\\0'`, `false`, and const variables with value 0 are not."
+ },
+ {
+  "id": "usual-arithmetic-conversions",
+  "def": "The algorithm by which binary arithmetic, comparison, bitwise operators, and `?:` bring two arithmetic or enumeration operands to a common type; for integers, each is first integrally promoted, then they are merged by signedness and rank."
+ },
+ {
+  "id": "arithmetic-expression",
+  "def": "A unary `+`/`-`, additive, or multiplicative expression all of whose operands are of arithmetic type. If its mathematical result is neither within the range of representable values of its type nor ±∞ or NaN of that type, the behavior is undefined."
+ }
+]

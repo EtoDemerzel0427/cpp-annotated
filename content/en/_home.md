@@ -1,0 +1,3 @@
+This site reads the C++ standard the way a language lawyer does. The clause notes follow the current working draft section by section: what each rule says, why it is written that way, and how it interacts with the rest of the standard. Every claim points at a paragraph of the draft, and every example is marked well-formed, ill-formed or undefined, ready to run on Compiler Explorer.
+
+Around the clause notes are topic pages that follow one rule across many clauses, idioms and patterns, performance measurements, toolchain and engineering practice, the history of major features, explanations of WG21 papers, and self-graded quizzes. The site started in Chinese; every page is also available in English, and the 中文 button at the top switches between the two.

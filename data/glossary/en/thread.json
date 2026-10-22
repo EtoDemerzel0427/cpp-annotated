@@ -1,0 +1,102 @@
+[
+ {
+  "id": "execution-agent",
+  "def": "An entity such as a thread that can perform work in parallel with other execution agents; implementations or users may also introduce other kinds of agents, such as processes or thread-pool tasks. The requirements on lockable types and the \"ownership\" of mutexes are both framed in terms of execution agents."
+ },
+ {
+  "id": "native-resolution",
+  "def": "The finest timing resolution an implementation can provide in timeout functions, depending on the operating system and hardware."
+ },
+ {
+  "id": "timeout-related-exception",
+  "def": "Exceptions thrown during the execution of a function that takes a timeout argument by a clock, time point, or duration (usually a user-defined rep or clock); the function propagates them as-is. The clock and duration types provided by the implementation do not throw."
+ },
+ {
+  "id": "stop-state",
+  "def": "The state jointly referred to by stop_source, stop_token, and stop_callback: it records whether a stop request has been made and maintains the list of registered callbacks. The stop_* family shares ownership of it; inplace_stop_source owns it exclusively."
+ },
+ {
+  "id": "stop-request",
+  "def": "An asynchronous request, made through a stop source, that an operation stop executing as soon as possible; it is visible to all associated tokens, cannot be withdrawn once made, and subsequent stop requests have no effect. The first stop request synchronously executes the registered callbacks."
+ },
+ {
+  "id": "detached-thread",
+  "def": "A thread of execution not represented by any std::thread object, e.g. after calling detach(). A detached thread lacks the synchronization edge \"completion synchronizes with the return of join\"."
+ },
+ {
+  "id": "coherence-ordered-before",
+  "def": "A relation between two atomic operations on the same atomic object: A is a modification read by B, A precedes B in the modification order, A reads a modification that precedes B, or it holds transitively through modifications. The single total order S of seq_cst must be consistent with it."
+ },
+ {
+  "id": "atomic-modify-write-operation",
+  "def": "An atomic read-modify-write operation with weaker synchronization requirements (such as store_add, store_max) that does not return the old value, cannot act as the reading side in fence synchronization, and does not count as an execution step; intended to be implemented with hardware mechanisms that are not ordered by acquire fences."
+ },
+ {
+  "id": "out-of-thin-air",
+  "def": "A value that circularly depends on its own computation, such as two threads each writing the value they read to the other and getting 42 out of nowhere. The standard requires, in a recommended-practice clause, that implementations not produce such values."
+ },
+ {
+  "id": "address-free",
+  "def": "Atomic operations still communicate atomically when the same memory location is accessed via two different addresses, without depending on per-process state; this is the prerequisite for using atomic objects in memory shared between processes. Lock-free operations should be address-free (recommended practice)."
+ },
+ {
+  "id": "atomic-waiting-operation",
+  "def": "The wait of atomic, atomic_ref, atomic_flag and their non-member versions: repeatedly reads the atomic object and compares it with the old value by value representation; if equal it blocks until unblocked by an atomic notifying operation or spuriously."
+ },
+ {
+  "id": "eligible-to-be-unblocked",
+  "def": "If an atomic waiting operation blocks after observing a modification X, and there is a modification Y later than X in the modification order that happens before some atomic notifying operation, then the waiting operation is eligible to be unblocked by that notification. This definition rules out lost wake-ups in the \"modify, then notify\" case."
+ },
+ {
+  "id": "mutex-ownership",
+  "def": "An execution agent owns a mutex from a successful call to one of its locking functions until it calls unlock. Relocking a non-recursive mutex, unlocking a mutex not owned, and terminating a thread while owning one all violate the requirements and are undefined behavior."
+ },
+ {
+  "id": "lock-object",
+  "def": "An object that holds a reference to a lockable object and may unlock it upon its own destruction, such as lock_guard, scoped_lock, unique_lock, shared_lock; a lock does not manage the lifetime of the lockable object."
+ },
+ {
+  "id": "spurious-wakeup",
+  "def": "A waiting function unblocking and returning without having been notified. The wait of condition variables and atomic wait both explicitly permit it, so a wait on a condition variable must be written in a loop that checks the condition (or use the overload with a predicate)."
+ },
+ {
+  "id": "barrier-phase",
+  "def": "A segment of a barrier's lifetime: once the expected count has been decremented to zero by arrive/arrive_and_drop, a phase completion step is executed once, the count is reset, and the next phase begins."
+ },
+ {
+  "id": "phase-completion-step",
+  "def": "Executed once by one of the participating threads at the end of each barrier phase: it calls the completion function and then unblocks the threads blocked at the phase synchronization point; its end strongly happens before the return of the unblocked calls."
+ },
+ {
+  "id": "shared-state",
+  "def": "The state used by future, promise, packaged_task, and async to communicate a result: it contains state information and a (possibly not yet evaluated) result — a value or an exception. It is ready only when it holds a retrievable result."
+ },
+ {
+  "id": "asynchronous-return-object",
+  "def": "An object that reads a result from a shared state, such as future and shared_future; its member functions that may block waiting for the shared state to become ready are called waiting functions."
+ },
+ {
+  "id": "asynchronous-provider",
+  "def": "An object that provides a result to a shared state, such as promise and packaged_task. When an asynchronous provider is destroyed without having provided a result, it abandons the shared state, storing a broken_promise error."
+ },
+ {
+  "id": "abandon-shared-state",
+  "def": "An asynchronous provider stores a future_error with error condition broken_promise into a shared state that is not ready, makes it ready, and then releases the shared state; the destructors of promise and packaged_task do this."
+ },
+ {
+  "id": "deferred-function",
+  "def": "The function and copies of its arguments stored in the shared state when async is called with the launch::deferred policy; it is invoked in the waiting thread on the first call to a non-timed waiting function on an asynchronous return object sharing that state."
+ },
+ {
+  "id": "region-of-rcu-protection",
+  "def": "The region (read-side critical section) from a lock on an rcu_domain to the corresponding unlock. If a retire does not strongly happen before the start of the region, the end of the region strongly happens before the scheduled deletion."
+ },
+ {
+  "id": "hazard-pointer",
+  "def": "A single-writer multiple-reader pointer owned by at most one thread. The owner makes it point to an object to inform threads that may delete that object that the object cannot yet be safely reclaimed."
+ },
+ {
+  "id": "protection-epoch",
+  "def": "The time segments into which a hazard pointer's life from creation to destruction is divided; in each epoch it is either associated with one hazard-protectable object or unassociated. Changing the association begins a new epoch. Epochs that began before retirement defer the reclamation of the object."
+ }
+]

@@ -1,0 +1,38 @@
+[
+ {
+  "id": "indirection",
+  "def": "The unary `*` operation: the operand is a prvalue pointer to an object or function type `T`, and the result is an lvalue of type `T` designating the object or function pointed to; if the pointer does not point to an object or function, the behavior is UB (except in the case of `typeid`)."
+ },
+ {
+  "id": "suspension-context",
+  "def": "The context within a function in which `co_await` may appear: a potentially-evaluated position within a function body or lambda body that is not in a handler, a default argument, the initializer of a static/thread-local variable, or a contract predicate. See [[expr.await]]."
+ },
+ {
+  "id": "suspend-point",
+  "def": "The point after a coroutine suspends in a `co_await` and before control returns to its caller or resumer; no scope is exited when control returns."
+ },
+ {
+  "id": "allocated-type",
+  "def": "The type of the object a *new-expression* attempts to create; it must be a complete object type and not an abstract class (or array thereof). It determines whether `operator new` or `operator new[]` is called, regardless of how the expression is written."
+ },
+ {
+  "id": "placement-new-expression",
+  "def": "A *new-expression* with a *new-placement* (extra arguments in parentheses), which are passed to the allocation function, such as `new (buf) T`, `new (std::nothrow) T`."
+ },
+ {
+  "id": "single-object-delete-expression",
+  "def": "A *delete-expression* of the form `delete p`; the operand must be a null pointer, the result of a non-array `new`, or a pointer to a base class subobject thereof, otherwise UB."
+ },
+ {
+  "id": "array-delete-expression",
+  "def": "A *delete-expression* of the form `delete[] p`; the operand must be a null pointer or the result of an array `new` (not a non-allocating form), and the dynamic type must be similar to the static type, otherwise UB."
+ },
+ {
+  "id": "deleted-object",
+  "def": "The object destroyed by a *delete-expression*: for a single-object delete, the most derived object if the static type of the object pointed to by the operand has a virtual destructor, otherwise that object itself; for an array delete, the array object. Its address and size are passed to the deallocation function."
+ },
+ {
+  "id": "reflection-operator",
+  "def": "C++26's unary `^^` operator, whose result is a prvalue of type `std::meta::info` representing the construct its operand designates: a namespace, type, template, variable, function, etc."
+ }
+]

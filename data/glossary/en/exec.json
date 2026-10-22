@@ -1,0 +1,146 @@
+[
+ {
+  "id": "constituent-expression",
+  "def": "The expressions actually evaluated when an expression, conversion, braced list, or `=` initializer is broken down; e.g. the constituent expressions of `B b = {5, {1+1}};` are `5` and `1+1`."
+ },
+ {
+  "id": "immediate-subexpression",
+  "def": "The constituent expressions of the operands of an expression E, functions implicitly invoked by E, the default arguments and default member initializers used, etc.; their transitive closure is the subexpressions. Expressions within a lambda body are not subexpressions of the lambda-expression."
+ },
+ {
+  "id": "full-expression",
+  "def": "An expression that is not a subexpression of another expression, as well as unevaluated operands, constant expressions, immediate invocations, init-declarators, implicit destructor calls, contract predicates, etc. Adjacent full-expressions are strictly sequenced, and temporaries are usually destroyed at the end of the full-expression."
+ },
+ {
+  "id": "side-effect",
+  "def": "A change in the state of the execution or translation environment: reading a volatile glvalue, modifying an object, producing an injected declaration, calling a library I/O function, or calling a function that does any of these."
+ },
+ {
+  "id": "value-computation",
+  "def": "The \"compute the result\" part of an evaluation: for a glvalue, determining the object it designates; for a prvalue, obtaining the value. It is described separately from the initiation of side effects and is the basis of the sequencing rules."
+ },
+ {
+  "id": "sequenced-before",
+  "def": "An asymmetric, transitive, partial relation between evaluations within a single thread; if A is sequenced before B, A must be executed before B. Full-expressions separated by semicolons, the left operands of `&&` `||` `,`, etc. all establish this relation."
+ },
+ {
+  "id": "unsequenced",
+  "def": "Neither of two evaluations is sequenced before the other in either direction, so they may overlap. Unsequenced conflicting accesses to the same memory location (that are not potentially concurrent) are UB."
+ },
+ {
+  "id": "indeterminately-sequenced",
+  "def": "One of two evaluations is sequenced before the other, but it is unspecified which; they do not overlap. A function call and evaluations outside it, and the initializations of the parameters, are related this way."
+ },
+ {
+  "id": "thread-of-execution",
+  "def": "A single flow of control within a program, starting with the initial invocation of a specific top-level function and recursively including every function invocation subsequently executed."
+ },
+ {
+  "id": "conflict",
+  "def": "Two evaluations access the same memory location and at least one of them modifies it (or starts/ends an object's lifetime). It is a conflict even if the modification changes no bits."
+ },
+ {
+  "id": "modification-order",
+  "def": "The total order of all modifications to a particular atomic object; the modification orders of different objects need not be combinable into a single total order."
+ },
+ {
+  "id": "release-sequence",
+  "def": "A maximal contiguous subsequence of an atomic object's modification order headed by a release operation and followed only by atomic read-modify-write operations. An acquire that reads any value in it synchronizes with that release."
+ },
+ {
+  "id": "synchronizes-with",
+  "def": "A cross-thread ordering edge established between library operations, such as a release store and an acquire load that reads its value (or a value in its release sequence), or a mutex unlock and a subsequent lock."
+ },
+ {
+  "id": "happens-before",
+  "def": "The transitive closure of the union of sequenced before and synchronizes with. It determines which write a non-atomic read can see, and whether there is a data race."
+ },
+ {
+  "id": "strongly-happens-before",
+  "def": "The part of happens before that the seq_cst total order S can respect: a synchronization edge counts directly only when both ends are seq_cst operations. Also used to describe the order of initialization and destruction."
+ },
+ {
+  "id": "visible-side-effect",
+  "def": "With respect to a read B, the write A that happens before B with no other write in between; a read of a non-atomic scalar obtains the value stored by A."
+ },
+ {
+  "id": "potentially-concurrent",
+  "def": "Two actions that are performed by different threads, or that are unsequenced with at least one performed by a signal handler (and they are not both performed by the same signal handler invocation)."
+ },
+ {
+  "id": "data-race",
+  "def": "Two potentially concurrent conflicting actions, at least one of which is not atomic, and neither of which happens before the other. Any data race results in undefined behavior."
+ },
+ {
+  "id": "trivial-infinite-loop",
+  "def": "An iteration statement with an empty body whose controlling expression, evaluated as a constant expression, is `true`, such as `while (true);`, `for (;;) {}`. Since C++26 its statement is treated as a call to `std::this_thread::yield` and is no longer UB."
+ },
+ {
+  "id": "execution-step",
+  "def": "Termination of the thread, a volatile access, completion of a library I/O call, or completion of an atomic or synchronization operation (other than modify-write). When a thread makes progress, an execution step occurs."
+ },
+ {
+  "id": "lock-free-execution",
+  "def": "Execution of an atomic function that is defined or indicated to be lock-free. When only one unblocked thread remains it must complete (obstruction-free), and under concurrency at least one should complete."
+ },
+ {
+  "id": "concurrent-forward-progress",
+  "def": "As long as the thread has not terminated, the implementation guarantees that it will eventually make progress. General-purpose implementations should provide this guarantee for `std::thread`."
+ },
+ {
+  "id": "parallel-forward-progress",
+  "def": "No progress is guaranteed before the thread executes its first execution step; afterwards it provides the concurrent forward progress guarantee; typical examples are thread pool tasks and `execution::par`."
+ },
+ {
+  "id": "weakly-parallel-forward-progress",
+  "def": "The implementation does not guarantee that the thread will eventually make progress; a typical example is threads created by the library under `execution::par_unseq`."
+ },
+ {
+  "id": "forward-progress-delegation",
+  "def": "When thread P blocks waiting on a set of threads S, the implementation must ensure that the forward progress guarantee of at least one thread in S is no weaker than P's; `sync_wait` and parallel algorithms both block this way."
+ },
+ {
+  "id": "static-initialization",
+  "def": "Collective name for zero-initialization and constant initialization of variables with static/thread storage duration; it strongly happens before any dynamic initialization, is in practice performed by the loader, and has no ordering problems."
+ },
+ {
+  "id": "dynamic-initialization",
+  "def": "All initialization other than static initialization. Dynamic initialization of non-block variables is divided into ordered, partially-ordered, and unordered; ordered variables in different TUs are indeterminately sequenced with respect to each other."
+ },
+ {
+  "id": "appearance-ordered",
+  "def": "Declaration D precedes E in the same TU, or the TU containing E has an interface dependency on the TU containing D and D comes first; used to determine the order of dynamic initialization."
+ },
+ {
+  "id": "non-initialization-odr-use",
+  "def": "An odr-use not caused directly or indirectly by the initialization of a non-block variable with static/thread storage duration; deferred dynamic initialization must happen before such a use."
+ },
+ {
+  "id": "static-initialization-order-fiasco",
+  "def": "The initialization order of ordered-initialized global variables in different TUs is indeterminate, so when the initialization of one uses another it may read an object that has not been constructed. Remedies: `constinit`, function-local statics, the nifty counter, modules."
+ },
+ {
+  "id": "contract-assertion",
+  "def": "An assertion introduced by `pre`, `post`, or `contract_assert` that describes a property the program is expected to satisfy at a given point; the predicate is a `bool` full-expression in which outer variables are implicitly const."
+ },
+ {
+  "id": "evaluation-semantic",
+  "def": "The manner in which a given evaluation of a contract assertion is carried out: ignore, observe, enforce, or quick-enforce, implementation-defined. The last three are checking semantics; enforce and quick-enforce are terminating semantics."
+ },
+ {
+  "id": "contract-violation",
+  "def": "Under a checking semantic, the predicate is false, evaluation of the predicate throws an exception, or, in manifestly constant evaluation, the predicate is not a core constant expression."
+ },
+ {
+  "id": "contract-terminated",
+  "def": "Termination of the program due to a contract violation: by calling `std::terminate`, calling `std::abort`, or terminating execution directly, implementation-defined."
+ },
+ {
+  "id": "contract-violation-handler",
+  "def": "A function named `::handle_contract_violation` with a parameter of type `const std::contracts::contract_violation&`, called on a violation under the observe/enforce semantics; whether it is replaceable is implementation-defined."
+ },
+ {
+  "id": "evaluate-in-sequence",
+  "def": "Evaluating a sequence of contract assertions in order, where each assertion may be repeated an implementation-defined number of times, but the first occurrences of the assertions keep the original order."
+ }
+]

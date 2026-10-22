@@ -1,0 +1,162 @@
+[
+ {
+  "id": "object-representation",
+  "def": "The sequence of `sizeof(T)` `unsigned char` objects occupied by a non-bit-field complete object of complete object type `T`; the object representation of a bit-field is the bits it occupies."
+ },
+ {
+  "id": "value-representation",
+  "def": "The set of bits in the object representation that actually participate in representing a value of the type."
+ },
+ {
+  "id": "padding-bits",
+  "def": "Bits that are in the object representation but are not part of the value representation. Padding bits of integer types only form alternative representations of the same value and do not cause traps."
+ },
+ {
+  "id": "incompletely-defined-object-type",
+  "def": "A class that has been declared but not defined, an enumeration in certain contexts, an array of unknown bound, or an array of incomplete element type. Its size and layout are unknown."
+ },
+ {
+  "id": "incomplete-type",
+  "def": "Collective name for incompletely-defined object types and cv `void`; it cannot be used to define objects, as the operand of `sizeof`, etc. A class can become complete after its definition, whereas `void` and `T[]` are never complete."
+ },
+ {
+  "id": "object-type",
+  "def": "A (possibly cv-qualified) type that is not a function type, not a reference type, and not cv `void`; it includes incomplete class and array types."
+ },
+ {
+  "id": "scalar-type",
+  "def": "Arithmetic types, enumeration types, pointer types, pointer-to-member types, `std::meta::info`, `std::nullptr_t`, and cv-qualified versions of these."
+ },
+ {
+  "id": "trivially-copyable-type",
+  "def": "Scalar types, trivially copyable class types, arrays of such types, and cv-qualified versions of these; the values of their objects can be copied by copying the underlying bytes (e.g. with `memcpy`), see [[basic.types.trivial]]."
+ },
+ {
+  "id": "standard-layout-type",
+  "def": "Scalar types, standard-layout class types, arrays of such types, and cv-qualified versions of these; their layout is C-compatible, and pointers to the first member and to the object are interconvertible."
+ },
+ {
+  "id": "implicit-lifetime-type",
+  "def": "Scalar types, implicit-lifetime class types, **any** array type, and cv-qualified versions of these; operations such as `malloc` and `memcpy` can implicitly create objects of these types in storage ([[intro.object]])."
+ },
+ {
+  "id": "literal-type",
+  "def": "cv `void`, a scalar, a reference, an array of literal type, or a class type that has a `constexpr` destructor and satisfies the conditions of [[basic.types.general#8]]; it indicates that objects of the type \"can possibly\" be created in constant expressions."
+ },
+ {
+  "id": "layout-compatible-types",
+  "def": "The same type ignoring cv-qualification, layout-compatible enumerations, or layout-compatible standard-layout class types. Distinct scalar types (such as `int` and `unsigned`) are never layout-compatible."
+ },
+ {
+  "id": "acquire-value-representation",
+  "def": "For an object of trivially copyable type, its value is replaced by an unspecified value, from the subset of values corresponding to that value representation, that gives the program defined behavior (an angelic choice). Caused by operations such as a `memcpy` round trip or `bit_cast`."
+ },
+ {
+  "id": "fundamental-type",
+  "def": "The types described in [[basic.fundamental]]: integer, character, `bool`, floating-point, `void`, `std::nullptr_t`, `std::meta::info`."
+ },
+ {
+  "id": "compound-type",
+  "def": "A type constructed from other types: arrays, functions, pointers, references, classes, unions, enumerations, pointers to members."
+ },
+ {
+  "id": "signed-integer-type",
+  "def": "The five standard signed integer types (`signed char`, `short`, `int`, `long`, `long long`) and the implementation-defined extended signed integer types; `char` is not included."
+ },
+ {
+  "id": "unsigned-integer-type",
+  "def": "The unsigned type corresponding to each signed integer type, with the same width, whose arithmetic is performed modulo 2^N."
+ },
+ {
+  "id": "integer-width",
+  "def": "The number of bits N in the value representation of an integer type; a signed type has range −2^(N−1)..2^(N−1)−1, an unsigned type 0..2^N−1."
+ },
+ {
+  "id": "extended-integer-type",
+  "def": "Additional implementation-defined signed integer types and their corresponding unsigned types; as opposed to the standard integer types."
+ },
+ {
+  "id": "ordinary-character-type",
+  "def": "Collective name for `char`, `signed char`, `unsigned char`."
+ },
+ {
+  "id": "narrow-character-type",
+  "def": "The ordinary character types plus `char8_t`; every possible bit pattern of their object representation represents a distinct value."
+ },
+ {
+  "id": "character-type",
+  "def": "Collective name for `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`; it does not include `signed char` or `unsigned char`."
+ },
+ {
+  "id": "integral-type",
+  "def": "Character types, `bool`, signed and unsigned integer types, and cv-qualified versions of these; a synonym is integer type. Enumerations are not integral types."
+ },
+ {
+  "id": "floating-point-type",
+  "def": "Collective name for the standard floating-point types (`float`, `double`, `long double`) and the types the implementation defines as extended floating-point types."
+ },
+ {
+  "id": "extended-floating-point-type",
+  "def": "Additional types provided by the implementation and defined as floating-point types, such as `std::float16_t`, `std::bfloat16_t` (C++23); they are distinct types from standard floating-point types with the same format."
+ },
+ {
+  "id": "arithmetic-type",
+  "def": "Collective name for integral and floating-point types."
+ },
+ {
+  "id": "reflection",
+  "def": "A value of type `std::meta::info` (C++26); apart from the null reflection, each reflection represents a construct such as a value, object, variable, type, or namespace."
+ },
+ {
+  "id": "object-pointer-type",
+  "def": "The type of a pointer to cv `void` or to an object type; `void*` is an object pointer type but not a \"pointer to object type\"."
+ },
+ {
+  "id": "pointer-past-the-end",
+  "def": "A pointer value representing the address of the first byte after the storage of an object; it does not point to an unrelated object that happens to be at that address, and cannot be dereferenced."
+ },
+ {
+  "id": "invalid-pointer-value",
+  "def": "One of the four states of a pointer value (the other three being pointer to an object/function, past-the-end, and null pointer value); for example, certain integer-to-pointer conversions may produce one."
+ },
+ {
+  "id": "valid-in-the-context-of",
+  "def": "Function pointers and null pointer values are always valid; a pointer value pointing to or past an object O is valid in evaluations that occur during the storage duration of O. When invalid, indirection is UB, while boolean conversion and comparison are implementation-defined (C++26)."
+ },
+ {
+  "id": "pointer-interconvertible",
+  "def": "The same object, a union and its members, a standard-layout class object and its first non-static data member or base class subobject, and the transitive closure thereof; such objects have the same address, and a pointer to one can be obtained from the other via `reinterpret_cast`."
+ },
+ {
+  "id": "reachable-through",
+  "def": "Through a pointer to x one can reach the bytes occupied by objects pointer-interconvertible with x (if it is an array element, the entire enclosing array); this delimits the preconditions of `std::launder`."
+ },
+ {
+  "id": "const-object",
+  "def": "An object of type `const T`, or a non-mutable subobject of a const object; modifying it is UB."
+ },
+ {
+  "id": "volatile-object",
+  "def": "An object of type `volatile T`, or any subobject of a volatile object."
+ },
+ {
+  "id": "more-cv-qualified",
+  "def": "A partial order on sets of cv-qualifiers: no cv < const, volatile < const volatile; const and volatile are not comparable."
+ },
+ {
+  "id": "top-level-cv-qualifiers",
+  "def": "The qualifiers denoted by cv in a type cv `T`, i.e. qualifiers applying to the type itself rather than to its components. `const int&` has no top-level cv; the top-level cv of `int* const` is const."
+ },
+ {
+  "id": "integer-conversion-rank",
+  "def": "An ordering among integer types: `long long > long > int > short > signed char`; unsigned types have the same rank as the corresponding signed types, character types the same rank as their underlying types, and `bool` the lowest; used for integral promotion and the usual arithmetic conversions."
+ },
+ {
+  "id": "floating-point-conversion-rank",
+  "def": "A partial order among floating-point types (C++23), determined by inclusion of their value sets; when neither value set includes the other, they are unordered and mixed arithmetic is ill-formed."
+ },
+ {
+  "id": "floating-point-conversion-subrank",
+  "def": "A total order among floating-point types of equal rank; `std::floatN_t` is higher than a standard floating-point type of the same rank."
+ }
+]

@@ -1,0 +1,70 @@
+[
+ {
+  "id": "stream-buffer",
+  "def": "An object derived from basic_streambuf that controls an input character sequence and an output character sequence and is responsible for the actual transfer to and from the external representation (a file, a string, a memory block, etc.). The iostream stream objects themselves do no I/O; they only read and write characters through the stream buffer pointed to by rdbuf()."
+ },
+ {
+  "id": "get-area",
+  "def": "The segment of the input sequence of a basic_streambuf currently buffered in memory, described by three pointers: eback() (beginning), gptr() (next character to read), egptr() (end); while gptr() < egptr(), reading need not call a virtual function, and underflow()/uflow() is called only when it is exhausted."
+ },
+ {
+  "id": "put-area",
+  "def": "The in-memory buffer segment of the output sequence of a basic_streambuf, described by pbase(), pptr() (next write position), and epptr(); while pptr() < epptr(), sputc writes directly to memory, overflow() is called only when it is full, and sync() is responsible for handing [pbase(), pptr()) to the external sequence."
+ },
+ {
+  "id": "pending-sequence",
+  "def": "A concept in the streambuf virtual-function protocol: for underflow, the characters remaining in the get area plus the characters to be read from the external source; for overflow, the characters in the put area not yet handed over, [pbase(), pptr()), plus the argument c (if it is not eof)."
+ },
+ {
+  "id": "sentry",
+  "def": "basic_istream::sentry / basic_ostream::sentry: a local object constructed at the start of every formatted and unformatted I/O function, responsible for the preparatory work (checking good(), flushing the output stream associated by tie(), skipping whitespace on input); its bool value indicates whether to proceed. The ostream sentry flushes on destruction under unitbuf."
+ },
+ {
+  "id": "formatted-input-function",
+  "def": "An input function that constructs a sentry with noskipws = false (so by default it first skips leading whitespace) and parses characters according to the locale to obtain a value, such as operator>> for arithmetic types; it sets eofbit on reaching end of stream and failbit when conversion fails, and the state is written back all at once via setstate at the end, which may throw an exception."
+ },
+ {
+  "id": "unformatted-input-function",
+  "def": "An input function that constructs a sentry with noskipws = true, neither skips whitespace nor parses, and extracts characters as-is, such as get, getline, read, ignore; it records the number of characters extracted in gcount()."
+ },
+ {
+  "id": "formatted-output-function",
+  "def": "An output function that, after constructing an ostream::sentry, generates a character sequence according to the format flags, width, and fill character and then inserts it, such as operator<< for arithmetic types and strings; most call width(0) at the end."
+ },
+ {
+  "id": "tied-stream",
+  "def": "The output stream pointer returned by basic_ios::tie(). Before this stream does any input or output, the sentry first flushes the tied stream; the standard specifies that cin and cerr are initially tied to cout, so a prompt always appears before waiting for input."
+ },
+ {
+  "id": "synchronized-standard-stream",
+  "def": "cin/cout/cerr/clog and their wide-character versions in the sync_with_stdio(true) state (the default): each character read or write on them has the same effect as fgetc/fputc/ungetc on the corresponding C stream, they can be freely interleaved with printf etc., and concurrent calls to their formatted/unformatted I/O functions do not constitute data races."
+ },
+ {
+  "id": "manipulator",
+  "def": "A function or object that can be placed in a << or >> chain to change stream state (format flags, width, fill, etc.) or perform an action (such as flushing or skipping whitespace); parameterless ones are function pointers such as ios_base& (*)(ios_base&), and those with parameters (setw, quoted, etc.) return objects of unspecified type."
+ },
+ {
+  "id": "associated-output",
+  "def": "The characters accumulated by basic_syncbuf in its internal buffer; they are transferred to the wrapped stream buffer as a whole, atomically, only on emit() or destruction, so output does not interleave when multiple threads each write to the same stream through their own osyncstream."
+ },
+ {
+  "id": "file-system-race",
+  "def": "The situation in which multiple threads, processes, or computers interleave access to and modification of the same object in a file system. If a call to a function in <filesystem> introduces a file system race, the behavior is undefined; precisely because someone else may insert a modification between check and use, these functions generally have no Preconditions."
+ },
+ {
+  "id": "generic-pathname-format",
+  "def": "The portable path syntax defined by the standard: an optional root-name, an optional root-directory, followed by a sequence of filenames separated by separators; '/' is always a usable separator. A path stores (or can generate) both the generic format and the operating system's native format representation."
+ },
+ {
+  "id": "native-pathname-format",
+  "def": "The path string format accepted by the host operating system (e.g. backslash separators and wide characters on Windows). path::native() and c_str() return this representation; on POSIX it is the same as the generic format."
+ },
+ {
+  "id": "normal-form-path",
+  "def": "The result of a purely lexical normalization of a generic-format pathname: unifying separators, removing '.', eliminating 'x/..', removing '..' above the root directory, etc.; an empty path becomes '.'. lexically_normal() returns it; it does not access the file system and therefore does not resolve symbolic links."
+ },
+ {
+  "id": "detected-format",
+  "def": "The determination of the format of a character sequence when a path is constructed or assigned: it is treated as the generic format only if it conforms to the generic format and is not accepted by the operating system as a native path; otherwise it is treated as the native format. On POSIX there is no difference between the two formats."
+ }
+]

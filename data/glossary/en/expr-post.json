@@ -1,0 +1,26 @@
+[
+ {
+  "id": "subscript-expression",
+  "def": "A postfix expression followed by square brackets enclosing a possibly empty, comma-separated argument list (multiple arguments since C++23). The built-in `E1[E2]` is by definition identical to `*((E1)+(E2))`; the expression before the brackets is sequenced before the arguments inside them."
+ },
+ {
+  "id": "virtual-function-call",
+  "def": "When the selected function is virtual and the name in the class member access is not a qualified name, the final overrider of that function in the dynamic type of the object expression is called; such a call is called a virtual function call."
+ },
+ {
+  "id": "call-compatible",
+  "def": "Function types `Tcall` and `Tfunc` are the same, or \"pointer to `Tfunc`\" can be converted to \"pointer to `Tcall`\" by a function pointer conversion (removing `noexcept`). Calling a function through a function type that is not call-compatible is UB."
+ },
+ {
+  "id": "default-argument-promotions",
+  "def": "For arguments passed to `...`, integral/enumeration types that are subject to integral promotion are integrally promoted, and `float` is promoted to `double`; hence `va_arg` must use the promoted type."
+ },
+ {
+  "id": "object-expression",
+  "def": "The `E1` in a class member access `E1.E2` (the `*(E1)` after `E1->E2` is reduced to `(*(E1)).E2`). It is always evaluated, even if `E2` is a static member."
+ },
+ {
+  "id": "casts-away-constness",
+  "def": "Apply the cv-qualifiers at each level of the target type to the qualification decomposition of the source type; if the resulting type cannot be obtained from the source type by a qualification conversion, the conversion casts away constness; e.g. `const int*` → `int*`, and also `int**` → `const int**`. Only `const_cast` and C-style casts can do this."
+ }
+]

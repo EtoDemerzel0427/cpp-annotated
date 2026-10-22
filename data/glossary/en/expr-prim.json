@@ -1,0 +1,70 @@
+[
+ {
+  "id": "current-class",
+  "def": "At a program point, the class associated with the innermost class scope containing that point. A lambda does not introduce a class scope, whereas a local class does; the type of `this` and implicit member access are both based on it."
+ },
+ {
+  "id": "implicitly-movable-entity",
+  "def": "A non-volatile object variable with automatic storage duration, or a variable of rvalue reference type to a non-volatile object type."
+ },
+ {
+  "id": "move-eligible",
+  "def": "An id-expression or splice-expression that names an implicitly movable entity, is the (possibly parenthesized) operand of `return`/`co_return`/`throw`, and is separated from it only by block scopes; it is an xvalue (since C++23)."
+ },
+ {
+  "id": "component-name",
+  "def": "The individual names in a construct that need to be looked up, such as `N`, `C`, `f` in `N::C<int>::f`; used to describe qualified name lookup uniformly."
+ },
+ {
+  "id": "terminal-name",
+  "def": "The lexically last of the component names of a construct; e.g. the terminal name of `N::C<int>::f` is `f`."
+ },
+ {
+  "id": "declarative-nested-name-specifier",
+  "def": "A *nested-name-specifier* appearing in a class-head-name, enum-head-name, declarator-id, or explicit instantiation (such as `N::` in `void N::f() {}`); it cannot contain `decltype` or a splice, and the declaration must be in a scope that contains the target entity (except for friends)."
+ },
+ {
+  "id": "pseudo-destructor",
+  "def": "A destructor name `~T` written for a non-class type `T` (which must be a scalar type); it may appear only in the call form `p->~T()`/`obj.~T()`, and since C++20 it ends the lifetime of the object."
+ },
+ {
+  "id": "closure-type",
+  "def": "The type of a lambda expression: a unique, unnamed non-union class that is not an aggregate and not final; it contains a function call operator and unnamed data members corresponding to the by-copy captures."
+ },
+ {
+  "id": "closure-object",
+  "def": "The result object of a lambda expression (a prvalue), i.e. an instance of the closure type."
+ },
+ {
+  "id": "generic-lambda",
+  "def": "A lambda with an `auto` placeholder among its parameters (including `this auto`) or with a template parameter list; its call operator is a template."
+ },
+ {
+  "id": "explicitly-captured",
+  "def": "An entity named directly by a *simple-capture* (`x`, `&x`, `this`, `*this`) in the capture list."
+ },
+ {
+  "id": "implicitly-captured",
+  "def": "When an entity is potentially referenced in a scope where it is odr-usable, and (ignoring typeid) is potentially evaluated, it is captured by every intervening lambda that has a capture-default and does not capture it explicitly; this is determined syntactically and does not require an odr-use."
+ },
+ {
+  "id": "captured-by-copy",
+  "def": "A non-`*this` entity implicitly captured by `[=]`, or an entity explicitly captured with a form other than `&` or `this`; an unnamed non-static data member is declared for it in the closure."
+ },
+ {
+  "id": "captured-by-reference",
+  "def": "An entity that is captured but not captured by copy; whether members are declared for it in the closure is unspecified. Bit-fields and anonymous union members cannot be captured by reference."
+ },
+ {
+  "id": "unary-fold",
+  "def": "A fold expression of the form `(... op e)` (unary left fold) or `(e op ...)` (unary right fold); with an empty pack, only `&&`, `||`, and `,` have defined values."
+ },
+ {
+  "id": "binary-fold",
+  "def": "A fold expression of the form `(e1 op ... op e2)`, where both operators are the same and exactly one side contains a pack; with the pack on the right it is a binary left fold, with the pack on the left a binary right fold, and with an empty pack the result is the initial value."
+ },
+ {
+  "id": "requires-expression",
+  "def": "`requires (parameters) { requirements... }`, a `bool` prvalue; substitution failure in the immediate context makes it `false` rather than an error."
+ }
+]

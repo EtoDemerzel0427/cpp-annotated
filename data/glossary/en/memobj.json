@@ -1,0 +1,130 @@
+[
+ {
+  "id": "byte",
+  "def": "The fundamental storage unit of the C++ memory model, consisting of a contiguous sequence of an implementation-defined number of bits (`CHAR_BIT`, at least 8); each byte has a unique address."
+ },
+ {
+  "id": "memory-location",
+  "def": "A non-bit-field scalar object, or the storage occupied by a maximal sequence of adjacent bit-fields all of non-zero width. Different memory locations can be accessed by different threads without interfering with each other; it is the minimal granularity of data races ([[intro.races]])."
+ },
+ {
+  "id": "subobject",
+  "def": "An object contained within another object: a member subobject, a base class subobject, or an array element. An object placed into a byte array by placement new is not a subobject."
+ },
+ {
+  "id": "complete-object",
+  "def": "An object that is not a subobject of any other object. The complete object of an object x is the complete object reached by following the subobject relation all the way up."
+ },
+ {
+  "id": "corresponding-direct-subobjects",
+  "def": "An object of the same type created exactly over the storage of a subobject e (where e is not a potentially-overlapping subobject and the enclosing object is within its lifetime) becomes a subobject of the enclosing object; the two are called corresponding direct subobjects; used to define [[g:transparently-replaceable]]."
+ },
+ {
+  "id": "provides-storage",
+  "def": "When a complete object created within an `unsigned char[N]` or `std::byte[N]` array lies entirely within the array, the array is said to provide storage for that object; reusing the storage then does not end the lifetime of the array."
+ },
+ {
+  "id": "nested-within",
+  "def": "a is nested within b: a is a subobject of b, or b provides storage for a, or this holds transitively through an intermediate object."
+ },
+ {
+  "id": "most-derived-object",
+  "def": "An object whose type is a most derived class, or an object of non-class type — i.e. every object other than a base class subobject. Its type is the dynamic type of a glvalue."
+ },
+ {
+  "id": "potentially-overlapping-subobject",
+  "def": "A base class subobject, or a non-static data member declared with `[[no_unique_address]]`; its storage may overlap with other subobjects, and it may have zero size."
+ },
+ {
+  "id": "potentially-non-unique-object",
+  "def": "A string literal object, the backing array of an initializer list, a template parameter object of array type, and their subobjects; two such objects may have the same address."
+ },
+ {
+  "id": "constituent-values",
+  "def": "The value of a scalar object, or the constituent values of all direct subobjects of an object other than inactive union members; constant expressions use this to check whether the result is fully initialized."
+ },
+ {
+  "id": "implicitly-create-objects",
+  "def": "Operations such as `malloc`, `memcpy`, `operator new`, and starting the lifetime of a byte array create, in the specified storage, and start the lifetimes of those objects of implicit-lifetime types that would give the program defined behavior; if no such set exists, the behavior is UB."
+ },
+ {
+  "id": "suitable-created-object",
+  "def": "After objects are implicitly created, the object pointed to by the pointer returned by certain operations (such as `operator new`, `malloc`): a created object whose address is the start of the region and that gives the program defined behavior."
+ },
+ {
+  "id": "alignment",
+  "def": "An implementation-defined integer (always a power of 2) representing the spacing between successive addresses at which objects of a type can be allocated; creating an object in storage that does not satisfy the alignment is UB."
+ },
+ {
+  "id": "fundamental-alignment",
+  "def": "An alignment no greater than `alignof(std::max_align_t)`, supported in all contexts."
+ },
+ {
+  "id": "extended-alignment",
+  "def": "An alignment greater than `alignof(std::max_align_t)`; whether it is supported is implementation-defined. A type with an extended alignment requirement is called an over-aligned type."
+ },
+ {
+  "id": "new-extended-alignment",
+  "def": "An alignment greater than `__STDCPP_DEFAULT_NEW_ALIGNMENT__`; in this case a new-expression uses an allocation function taking `std::align_val_t` instead."
+ },
+ {
+  "id": "lifetime",
+  "def": "A runtime property of an object or reference: from when storage is obtained and initialization is complete, until the destructor call starts (class types), it is destroyed (non-class types), or its storage is released/reused."
+ },
+ {
+  "id": "vacuous-initialization",
+  "def": "A variable is default-initialized with no other initialization performed, and (for class types) the constructor selected is trivial; e.g. `int x;`."
+ },
+ {
+  "id": "transparently-replaceable",
+  "def": "When a new object is created exactly at the location of an old object with the same type, and conditions such as the old object (or its complete object) not being const are met, pointers, references, and names referring to the old object automatically refer to the new object; otherwise `std::launder` is needed."
+ },
+ {
+  "id": "indeterminate-value",
+  "def": "The value of uninitialized bytes of an object with dynamic storage duration or of a variable marked `[[indeterminate]]`; apart from the exception for copying through `unsigned char`/`std::byte`, producing it is UB."
+ },
+ {
+  "id": "erroneous-value",
+  "def": "In C++26, the value of uninitialized bytes of a variable with automatic storage duration, determined by the implementation independently of the program state; producing it is erroneous behavior rather than UB."
+ },
+ {
+  "id": "storage-duration",
+  "def": "A property of an object that defines the minimum potential lifetime of the storage containing it: static, thread, automatic, or dynamic, determined by the construct used to create the object."
+ },
+ {
+  "id": "static-storage-duration",
+  "def": "The storage duration of namespace-scope variables and of variables first declared with `static`/`extern` (not `thread_local`), lasting for the duration of the program."
+ },
+ {
+  "id": "thread-storage-duration",
+  "def": "The storage duration of `thread_local` variables; there is one distinct object per thread, lasting until that thread ends."
+ },
+ {
+  "id": "automatic-storage-duration",
+  "def": "The storage duration of block-scope variables (not `static`/`thread_local`/`extern`) and of function parameters, lasting until the block exits (parameters: until after they are destroyed)."
+ },
+ {
+  "id": "dynamic-storage-duration",
+  "def": "The storage duration of objects created by a new-expression or created implicitly, lasting until the storage is deallocated."
+ },
+ {
+  "id": "allocation-function",
+  "def": "A function named `operator new` / `operator new[]`: returns `void*` and its first parameter is `std::size_t`; on success it returns storage that is large enough and suitably aligned, on failure it throws `std::bad_alloc` (the `noexcept` versions return null)."
+ },
+ {
+  "id": "destroying-operator-delete",
+  "def": "A class member `operator delete` whose second parameter is `std::destroying_delete_t`; the delete-expression no longer calls the destructor, and this function takes responsibility for both destruction and deallocation (C++20)."
+ },
+ {
+  "id": "usual-deallocation-function",
+  "def": "A non-template deallocation function whose parameters after the first are, in order, only optional `std::destroying_delete_t`, `std::size_t`, and `std::align_val_t` parameters; delete-expressions call only such functions."
+ },
+ {
+  "id": "temporary-object",
+  "def": "An object created when a prvalue is materialized (temporary materialization conversion), or when the implementation passes/returns a trivially copyable object in registers; usually destroyed at the end of the full-expression."
+ },
+ {
+  "id": "lifetime-extension",
+  "def": "When a reference binds directly to a temporary object (or its subobject) through temporary materialization, member access, subscripting, built-in casts, conditional/comma expressions, etc., the temporary persists until the end of the reference's lifetime; binding through a function call does not extend it."
+ }
+]

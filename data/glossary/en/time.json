@@ -1,0 +1,42 @@
+[
+ {
+  "id": "clock-epoch",
+  "def": "The origin measured by a clock's time_point: a time_point stores only a duration, meaning \"how far from the epoch\". The epoch of system_clock is 1970-01-01 00:00:00 UTC; the epochs of steady_clock and file_clock are unspecified. Two clocks have different epochs, so their time_points cannot be directly compared or subtracted."
+ },
+ {
+  "id": "cpp17clock",
+  "def": "What a \"clock\" type must provide: four member types rep, period, duration, time_point; a bool constant is_steady usable in constant expressions; and a static function now() returning the current time_point. The is_clock trait checks at least for the presence of these names."
+ },
+ {
+  "id": "trivial-clock",
+  "def": "On top of Cpp17Clock it additionally requires: rep, duration, and time_point are comparable, swappable, and meet the numeric type requirements (so their operations do not throw), now() does not throw, and time_point::clock recursively meets these requirements. The clocks used by the timeout functions of the standard thread library are all such clocks."
+ },
+ {
+  "id": "tick-period",
+  "def": "The length of time between two adjacent \"counting units\" of a duration, in seconds, represented by a compile-time rational ratio. The tick period of duration<long long, milli> is 1/1000 second; count() returns the number of ticks, not the number of seconds."
+ },
+ {
+  "id": "unix-time",
+  "def": "A time measure counted from 1970-01-01 00:00:00 UTC that does not count leap seconds: every day has exactly 86400 seconds. sys_time is, by the standard's specification, Unix time, so sys_days and civil calendar dates can be converted with pure arithmetic."
+ },
+ {
+  "id": "leap-second",
+  "def": "A second inserted (or deleted) to keep UTC aligned with the Earth's rotation. sys_time does not count leap seconds, while utc_time does; the difference between them is the total number of leap seconds inserted since 1970. The leap second table is provided with the time zone database (tzdb::leap_seconds)."
+ },
+ {
+  "id": "field-based-time-point",
+  "def": "A time point stored as separate fields such as year, month, and day, such as year_month_day. It makes arithmetic by year or month and field access easy, but adding or subtracting days is inconvenient; by contrast, sys_days is a \"serial\" time point (an integer count of days), with fast day arithmetic. The two can be converted into each other."
+ },
+ {
+  "id": "local-time",
+  "def": "The family of time_points local_time<Duration> parameterized by the pseudo-clock local_t: it represents \"the wall-clock time in some time zone not yet specified\". It has full time_point arithmetic but no now(), and cannot be mixed with sys_time; converting it to UTC must go through some time_zone."
+ },
+ {
+  "id": "formatting-locale",
+  "def": "The locale actually used by chrono formatting: when the format spec has no L option, the \"C\" locale is always used; with L, the locale passed to the formatting function is used, or the global locale if none is passed."
+ },
+ {
+  "id": "remote-time-zone-database",
+  "def": "An updated time zone database that the implementation may obtain while the program is running. It does not affect the program automatically: only when reload_tzdb() is called is it pushed to the front of the tzdb_list, and remote_version() can query its version."
+ }
+]

@@ -1,0 +1,98 @@
+[
+ {
+  "id": "core-constant-expression",
+  "def": "An expression whose evaluation, following the rules of the abstract machine, would not evaluate any of the operations on the blacklist in [[expr.const.core#2]] (calls to non-constexpr functions, UB, `reinterpret_cast`, non-transient allocations, etc.). It constrains the evaluation process."
+ },
+ {
+  "id": "constant-expression",
+  "def": "A core constant expression such that (if it is a prvalue) no constituent value of its result object is an invalid pointer value, an indeterminate value, or an erroneous value. It constrains the result."
+ },
+ {
+  "id": "integral-constant-expression",
+  "def": "An expression of integral or unscoped enumeration type that, implicitly converted to a prvalue, is a core constant expression. Used for bit-field widths, enumerator initializers when the underlying type is not fixed, and `alignas`."
+ },
+ {
+  "id": "converted-constant-expression",
+  "def": "An expression that, implicitly converted to the target type T, is a constant expression, where the conversion sequence contains only safe conversions (no narrowing, no integral–floating conversions, references must bind directly). Used for array bounds, `case` labels, constant template arguments, etc."
+ },
+ {
+  "id": "immediate-constant-expression",
+  "def": "A constant expression whose result designates an immediate object or immediate function (glvalue), or whose result object is an immediate object (prvalue). Used in C++26 to determine immediate escalation."
+ },
+ {
+  "id": "consteval-only-value",
+  "def": "A non-null reflection value, or a pointer/pointer-to-member pointing to an immediate function or immediate object. In C++26 such values must not make their way into run-time objects."
+ },
+ {
+  "id": "immediate-object",
+  "def": "An object whose complete object has a consteval-only constituent value, or a constituent reference referring to an immediate object/immediate function. It can only be the object of a constexpr variable, a template parameter object, or an object that comes into and goes out of existence within a single constant evaluation."
+ },
+ {
+  "id": "constexpr-unknown",
+  "def": "During constant evaluation, for an object or reference whose lifetime did not begin within this evaluation and that is not usable in constant expressions, its dynamic type (or the object it is bound to) is treated as unknown: its address can be taken and non-virtual members called, but its value cannot be read, virtual functions cannot be called, and polymorphic `typeid` cannot be applied."
+ },
+ {
+  "id": "constexpr-unknown-representation",
+  "def": "A type whose object representation cannot be determined at translation time: unions, `std::meta::info`, pointers and pointers to members, volatile types, classes with reference members, and types recursively containing these."
+ },
+ {
+  "id": "transient-allocation",
+  "def": "Storage obtained during constant evaluation through a replaceable global allocation function or `std::allocator` and deallocated within the same evaluation. Allowed since C++20; if it is not deallocated (escapes to run time), the expression is not a core constant expression."
+ },
+ {
+  "id": "constexpr-referenceable",
+  "def": "From a program point P, an object that has static storage duration, or is an automatic object in the same function parameter scope as P (the same function invocation). An object with thread storage duration never is. Introduced in C++26."
+ },
+ {
+  "id": "constexpr-representable",
+  "def": "All targets of the constituent pointers and constituent references of an object or reference are constexpr-referenceable from program point P. In C++26 this replaced the rule that \"permitted results of constant expressions must have static storage duration\"."
+ },
+ {
+  "id": "constant-initialized",
+  "def": "The initialization full-expression of a variable is a constant expression (with `is_constant_evaluated()` true in the trial evaluation), its result is constexpr-representable, and the variable has an initializer or its type is const-default-constructible. For variables with static/thread storage duration this implies static initialization."
+ },
+ {
+  "id": "potentially-constant",
+  "def": "A constexpr variable, a variable of reference type, or a non-volatile const variable of integral/enumeration type. It is the type-based threshold for a variable to be usable in constant expressions."
+ },
+ {
+  "id": "usable-in-constant-expressions",
+  "def": "At program point P, a variable that is constant-initialized, is [[g:potentially-constant]], and whose initializing declaration is reachable (subject to TU-local restrictions). Constant evaluation can read such variables."
+ },
+ {
+  "id": "manifestly-constant-evaluated",
+  "def": "Expressions the language requires to be evaluated at translation time: a *constant-expression*, the condition of `if constexpr`, consteval blocks, immediate invocations, constraint substitution, and initializers of variables usable in constant expressions or constant-initialized. This is exactly the property observed by `std::is_constant_evaluated()` and `if consteval`."
+ },
+ {
+  "id": "needed-for-constant-evaluation",
+  "def": "A constexpr function or potentially-constant variable named by a potentially constant evaluated expression; this triggers implicit instantiation of constexpr function templates even if they are not odr-used."
+ },
+ {
+  "id": "constant-destruction",
+  "def": "The object is not of class type, or its class has a constexpr destructor and a hypothetical expression destroying it is a core constant expression (treating the lifetimes of its non-mutable subobjects as beginning within that expression). A constexpr variable must have constant destruction."
+ },
+ {
+  "id": "immediate-function",
+  "def": "A function declared with `consteval`, or an immediate-escalating function escalated because its body contains an immediate-escalating expression. Every immediate invocation of it must be a constant expression."
+ },
+ {
+  "id": "immediate-invocation",
+  "def": "A potentially-evaluated call of an immediate function that is not in an immediate function context; it is manifestly constant-evaluated and must be a constant expression."
+ },
+ {
+  "id": "immediate-function-context",
+  "def": "Inside the body of an immediate function, within a subexpression of a manifestly constant-evaluated expression, or within the compound statement of `if consteval`. Calling an immediate function in this context does not constitute an immediate invocation."
+ },
+ {
+  "id": "immediate-escalating",
+  "def": "An immediate constant expression or a non-constant immediate invocation that is not in an immediate function context is called an immediate-escalating expression; it may appear only in an immediate-escalating function (the call operator of a non-consteval lambda, a defaulted function that is not user-provided, an instantiation of a constexpr template), and makes that function an immediate function. Since C++23."
+ },
+ {
+  "id": "injected-declaration",
+  "def": "A declaration produced by constant evaluation (currently `std::meta::define_aggregate`); it can only be produced by the evaluation of a consteval block, is located at a synthesized point after the end of the translation unit, and is visible only through the evaluation context. C++26."
+ },
+ {
+  "id": "evaluation-context",
+  "def": "The set of program points an evaluation \"can see\" during constant evaluation: the point of evaluation, the synthesized points in its instantiation context, and the synthesized points of injected declarations produced earlier; nested manifestly constant-evaluated expressions recompute it. It determines the results of reflection queries. C++26."
+ }
+]

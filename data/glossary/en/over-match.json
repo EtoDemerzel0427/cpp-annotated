@@ -1,0 +1,86 @@
+[
+ {
+  "id": "overload-resolution",
+  "def": "The process of selecting, based on the types of the arguments at the point of use, the function declaration to be called from an overload set and determining whether the call is valid. It has three steps: building the candidate functions, filtering the viable functions, and selecting the unique best viable function ([[over.match]])."
+ },
+ {
+  "id": "candidate-function",
+  "def": "A member of the set of functions participating in overload resolution in a given call context; built by name lookup, template argument deduction, and context-specific rules ([[over.match.funcs]])."
+ },
+ {
+  "id": "viable-function",
+  "def": "A candidate function whose number of parameters matches the arguments (taking ellipses and default arguments into account), whose associated constraints are satisfied, and for which an implicit conversion sequence exists from each argument to the corresponding parameter."
+ },
+ {
+  "id": "best-viable-function",
+  "def": "The viable function that is better than all other viable functions: the ICS for no argument is worse, and either some argument's ICS is better or some tie-breaker rule applies ([[over.match.best]]). If there is none, or it is not unique, the call is ill-formed."
+ },
+ {
+  "id": "usable-candidate",
+  "def": "Overload resolution succeeds and the selected candidate is either a built-in operator candidate or a function that is not deleted and is accessible in that context. Used to determine whether a defaulted comparison operator is defined as deleted ([[class.compare.default]])."
+ },
+ {
+  "id": "implicit-object-parameter",
+  "def": "An extra first parameter that implicit object member functions (and static member functions, when there is an implied object argument) are considered to have for the purposes of overload resolution, of type `cv X&` or `cv X&&`; user-defined conversions cannot be applied to it."
+ },
+ {
+  "id": "implied-object-argument",
+  "def": "The first argument in the argument list of overload resolution that represents the object being operated on, such as `a` in `a.f(x)` or `(*this)` in an unqualified call inside a class, matched against the candidate's implicit (or explicit) object parameter."
+ },
+ {
+  "id": "permissible-type",
+  "def": "In the contexts where an object or reference is initialized by a conversion function, the set of types to which the conversion function's return type must belong; non-explicit and explicit conversion functions each have their own set."
+ },
+ {
+  "id": "surrogate-call-function",
+  "def": "When function call syntax is used on a class object, a candidate `R call-function(F, P1, …, Pn)` invented for each non-explicit conversion function to a pointer/reference to function; the object argument must match its first parameter via a user-defined conversion."
+ },
+ {
+  "id": "rewritten-candidate",
+  "def": "Since C++20, the fourth kind of candidate for operator expressions: relational operators can be rewritten in terms of `operator<=>`, `!=` in terms of `operator==`, and `==` and `<=>` also have synthesized candidates with reversed parameters. In a tie they lose to non-rewritten candidates."
+ },
+ {
+  "id": "rewrite-target",
+  "def": "An `operator==` that can be used for `!=` rewriting or parameter reversal; if a corresponding `operator!=` can be found by searching the relevant scope, it is not a rewrite target (C++23's P2468)."
+ },
+ {
+  "id": "built-in-candidate",
+  "def": "A hypothetical function representing a built-in operator in operator overload resolution ([[over.built]]), so that built-in operations after user-defined conversions can be compared on the same footing as user-defined operators."
+ },
+ {
+  "id": "deduction-guides-of-class-template",
+  "def": "A set of functions (templates) built during class template argument deduction: one per constructor, the copy deduction candidate, user deduction guides, the aggregate deduction candidate, etc.; overload resolution is performed once over them, and the return type of the winner is the deduced result."
+ },
+ {
+  "id": "copy-deduction-candidate",
+  "def": "The guide generated from a hypothetical constructor `C(C)`, ensuring that initialization from a `C<X>` object deduces `C<X>` rather than `C<C<X>>`; in a tie it is preferred over the other candidates not generated from deduction-guides."
+ },
+ {
+  "id": "aggregate-deduction-candidate",
+  "def": "Since C++20, for an aggregate class template without deduction guides, a guide generated from the types of the aggregate elements corresponding to the elements of the initializer, allowing aggregates to use CTAD too."
+ },
+ {
+  "id": "implicit-conversion-sequence",
+  "def": "The sequence of conversions needed to convert an argument to the corresponding parameter type, modeling \"copy-initializing the parameter from the argument\"; it is concerned only with type, cv-qualification, and value category. It takes three forms: standard, user-defined, and ellipsis."
+ },
+ {
+  "id": "user-defined-conversion-sequence",
+  "def": "An initial standard conversion sequence + one user-defined conversion (constructor or conversion function) + a second standard conversion sequence. Two such sequences are comparable only if they use the same conversion function/constructor."
+ },
+ {
+  "id": "ellipsis-conversion-sequence",
+  "def": "The conversion sequence formed when an argument is matched to an ellipsis parameter; the worst of the three forms."
+ },
+ {
+  "id": "ambiguous-conversion-sequence",
+  "def": "The single designated sequence used when there are multiple well-formed implicit conversion sequences from an argument to a parameter; for ranking it is treated as indistinguishable from any user-defined conversion sequence, and if the function is selected the call is ill-formed."
+ },
+ {
+  "id": "conversion-rank",
+  "def": "The three ranks of standard conversions: Exact Match, Promotion, Conversion. The rank of a standard conversion sequence is the worst rank among its conversions and reference binding."
+ },
+ {
+  "id": "indistinguishable-conversion-sequences",
+  "def": "Two implicit conversion sequences are indistinguishable when neither is better than the other; [[over.ics.rank]] defines only a partial order, and many pairs of sequences are indistinguishable."
+ }
+]

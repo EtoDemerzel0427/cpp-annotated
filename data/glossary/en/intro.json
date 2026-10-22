@@ -1,0 +1,138 @@
+[
+ {
+  "id": "diagnosable-rule",
+  "def": "All syntactic and semantic rules in the standard except those marked \"no diagnostic is required\" or that result in undefined behavior. When one is violated, the implementation must issue at least one diagnostic message."
+ },
+ {
+  "id": "diagnostic-message",
+  "def": "A message belonging to an implementation-defined subset of the implementation's output messages. The standard does not distinguish errors from warnings: a warning can also satisfy the obligation to diagnose."
+ },
+ {
+  "id": "well-formed-program",
+  "def": "A C++ program constructed according to the syntax rules and semantic rules (including the rules for which no diagnostic is required). Well-formedness is a static property; a well-formed program may still have UB for some inputs."
+ },
+ {
+  "id": "ill-formed-program",
+  "def": "A program that is not well-formed. It falls into two categories: diagnosis required (violating a diagnosable rule) and IFNDR."
+ },
+ {
+  "id": "ifndr",
+  "def": "The program violates a rule marked \"no diagnostic is required\": the program is ill-formed, but the implementation need not diagnose it, and the standard places no requirements on that program ([[intro.compliance]] ¶2.2). ODR violations are the typical example."
+ },
+ {
+  "id": "undefined-behavior",
+  "def": "Behavior for which this document imposes no requirements. The compiler may assume it does not occur; explicit core-language UB cannot occur in constant evaluation."
+ },
+ {
+  "id": "unspecified-behavior",
+  "def": "Behavior, for a well-formed construct and correct data, that depends on the implementation, usually choosing any one of a set of possible outcomes given by the standard; the implementation need not document it nor be consistent each time. E.g. the evaluation order of function arguments."
+ },
+ {
+  "id": "implementation-defined-behavior",
+  "def": "Behavior, for a well-formed construct and correct data, that depends on the implementation and that each implementation must document, such as `sizeof(int)` or the signedness of `char`. These form the parameters of the abstract machine."
+ },
+ {
+  "id": "property-of-the-implementation",
+  "def": "Behavior, for a well-formed construct and correct data, that depends on the implementation but need not be documented, such as padding in class types."
+ },
+ {
+  "id": "locale-specific-behavior",
+  "def": "Behavior that depends on local conventions of nationality, culture, and language, and that each implementation must document."
+ },
+ {
+  "id": "conditionally-supported",
+  "def": "A program construct that an implementation is not required to support; if unsupported, a program using it must be diagnosed, and the implementation must document the constructs of this kind it does not support. E.g. `asm` declarations, conversions between function pointers and object pointers."
+ },
+ {
+  "id": "erroneous-behavior",
+  "def": "Introduced in C++26: well-defined behavior that is nonetheless a program error, which implementations are recommended to diagnose. An implementation may diagnose it and terminate the program, but cannot assume it does not occur. Its current source is reading the erroneous value of an uninitialized automatic variable."
+ },
+ {
+  "id": "runtime-undefined-behavior",
+  "def": "Behavior that is undefined except during constant evaluation; during constant evaluation, whether it makes the expression non-constant is implementation-defined. Used for the case of a `[[assume]]` assumption that does not hold."
+ },
+ {
+  "id": "implementation-limit",
+  "def": "A restriction an implementation imposes on programs (nesting depth, template instantiation depth, etc.). When a limit is exceeded, the implementation may reject a program that would otherwise execute correctly; Annex B gives recommended minimums."
+ },
+ {
+  "id": "static-type",
+  "def": "The type of an expression obtained by analyzing the program without considering execution semantics; it does not change during execution."
+ },
+ {
+  "id": "dynamic-type",
+  "def": "For a glvalue, the type of the most derived object it refers to; for a prvalue, simply its static type."
+ },
+ {
+  "id": "access",
+  "def": "(Execution-time action) Reading or modifying the value of an object. Only glvalues of scalar type can access objects; copying a class object calls a constructor or assignment operator and is not itself an access."
+ },
+ {
+  "id": "signature",
+  "def": "The information used to identify a function (or function template, specialization, etc.), which is the basis of name mangling and linkage. The signature of an ordinary function is its name, parameter-type-list, and enclosing namespace, excluding the return type; the signature of a function template includes the return type and the *template-head*."
+ },
+ {
+  "id": "referenceable-type",
+  "def": "An object type, a function type without cv-qualifiers or a *ref-qualifier*, or a reference type; i.e. a type to which a reference can be formed. `void` and `int() const` are not."
+ },
+ {
+  "id": "valid-but-unspecified-state",
+  "def": "(Library) The object's value is unspecified, but its invariants hold and operations on it work as specified for its type. Library objects that have been moved from are usually in this state."
+ },
+ {
+  "id": "expression-equivalent",
+  "def": "(Library) Several expressions that have the same effects and agree on whether they are potentially-throwing and on whether they are constant subexpressions. Used to specify customization point objects such as `ranges::begin`."
+ },
+ {
+  "id": "constant-subexpression",
+  "def": "An expression whose evaluation as a subexpression of a conditional-expression CE would not prevent CE from being a core constant expression."
+ },
+ {
+  "id": "replacement-function",
+  "def": "(Library) A non-reserved function whose definition is provided by a C++ program, such as global `operator new`; the program-provided definition must meet the required behavior, otherwise the behavior is undefined."
+ },
+ {
+  "id": "reserved-function",
+  "def": "(Library) A function, part of the standard library, defined by the implementation; if the program provides a definition for it, the results are undefined."
+ },
+ {
+  "id": "program-defined-type",
+  "def": "(Library) A non-closure class type or enumeration type that is not part of the standard library and not defined by the implementation, the closure type of a lambda in the program, or an instantiation of a program-defined specialization. It determines which templates a program may specialize in `std`."
+ },
+ {
+  "id": "stable-algorithm",
+  "def": "(Library) An algorithm that preserves, as appropriate to the particular algorithm, the order of elements; e.g. `stable_sort` preserves the relative order of equivalent elements."
+ },
+ {
+  "id": "abstract-machine",
+  "def": "The parameterized, nondeterministic machine defined by the standard's semantic descriptions. Implementation-defined behavior gives its parameters and unspecified behavior introduces nondeterminism; an implementation need only emulate its observable behavior."
+ },
+ {
+  "id": "as-if-rule",
+  "def": "An implementation may disregard any requirement of the standard as long as the observable behavior is consistent with some possible execution of the abstract machine (footnote in [intro.abstract]). Nearly all compiler optimizations rely on it."
+ },
+ {
+  "id": "observable-behavior",
+  "def": "The program behavior an implementation must reproduce: accesses through volatile glvalues, data delivered to the host environment to be written into files, and prompts on interactive devices appearing before waiting for input."
+ },
+ {
+  "id": "observable-checkpoint",
+  "def": "Introduced in C++26: certain events during execution (such as a call to `std::observable_checkpoint`, or the return of a stdio call that delivers data to the host environment). It separates earlier observable behavior from later UB, so that the former is unaffected by the UB."
+ },
+ {
+  "id": "defined-prefix",
+  "def": "Introduced in C++26: within an execution, the operations that can be separated by some observable checkpoint from every undefined operation. The implementation must produce the observable behavior of the defined prefix."
+ },
+ {
+  "id": "hosted-implementation",
+  "def": "An implementation that supports all the facilities described by the standard (the full language and the full library). `__STDC_HOSTED__` is 1."
+ },
+ {
+  "id": "freestanding-implementation",
+  "def": "An implementation in which execution may take place without the benefit of an operating system: it supports the full language but need only provide the library subset specified in [[compliance]]. `__STDC_HOSTED__` is 0."
+ },
+ {
+  "id": "hardened-implementation",
+  "def": "Introduced in C++26: whether an implementation is a hardened implementation is implementation-defined. In a hardened implementation, violating a hardened precondition of a library function (such as an out-of-range `span::operator[]`) results in a contract violation and termination rather than undefined behavior."
+ }
+]

@@ -1,0 +1,42 @@
+[
+ {
+  "id": "exception-object",
+  "def": "An object with dynamic storage duration initialized when an exception is thrown; its type determines which handlers can catch it. How it is stored is unspecified (global `operator new` is not called), and it is destroyed at the last potential point of destruction."
+ },
+ {
+  "id": "uncaught-exception",
+  "def": "An exception from the completion of the initialization of the exception object until the completion of the activation of some handler for it; when rethrown it becomes uncaught again. `std::uncaught_exceptions()` returns their number."
+ },
+ {
+  "id": "stack-unwinding",
+  "def": "The process, while control passes from the throw point to a handler, of destroying the automatic objects constructed since the try block was entered, in the reverse order of the completion of their construction."
+ },
+ {
+  "id": "known-to-be-initialized",
+  "def": "A subobject that is not an anonymous union member and whose initialization is arranged by rules such as [[class.base.init]] and [[dcl.init.aggr]]; when the initialization of an object is terminated by an exception, such subobjects that have completed initialization are destroyed."
+ },
+ {
+  "id": "active-handler",
+  "def": "A handler from the completion of the initialization of the catch clause's parameter until the catch clause exits; when `std::terminate` is entered due to a throw, an implicit handler is considered active."
+ },
+ {
+  "id": "currently-handled-exception",
+  "def": "The exception whose handler was most recently activated and is still active; `throw;` rethrows it, and `std::current_exception()` returns it."
+ },
+ {
+  "id": "exception-specification",
+  "def": "A predicate indicating whether a function can exit via an exception, given explicitly by `noexcept`/`noexcept(constant-expression)` or determined implicitly by rules; part of the function type since C++17."
+ },
+ {
+  "id": "potentially-throwing-exception-specification",
+  "def": "The exception specification predicate is false, i.e. the function may exit via an exception. Ordinary functions without a *noexcept-specifier* are so by default."
+ },
+ {
+  "id": "non-throwing-exception-specification",
+  "def": "The exception specification predicate is true. If the search for a handler leaves the body of such a function, `std::terminate` is called."
+ },
+ {
+  "id": "potentially-throwing-expression",
+  "def": "An expression that calls or implicitly calls a potentially-throwing function, a *throw-expression*, a `dynamic_cast` to a reference that requires a runtime check, a `typeid` applied to a dereferenced polymorphic pointer, or an expression with such an evaluated subexpression. The `noexcept` operator evaluates on this basis."
+ }
+]

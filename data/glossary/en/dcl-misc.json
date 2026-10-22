@@ -1,0 +1,110 @@
+[
+ {
+  "id": "structured-binding",
+  "def": "An *sb-identifier* without an ellipsis in a structured binding declaration, or an element of a structured binding pack. It is a name referring to some part of the hidden variable *e*, and is a kind of entity distinct from variables: `decltype` gives the referenced type, and it is not implicitly moved on `return`."
+ },
+ {
+  "id": "structured-binding-pack",
+  "def": "An *sb-identifier* with an ellipsis (such as `rest` in `auto [x, ...rest] = t;`), introducing zero or more structured bindings; a declaration containing one must be a templated entity. Introduced in C++26."
+ },
+ {
+  "id": "structured-binding-size",
+  "def": "The number of structured bindings that a type E needs to introduce: the number of elements for an array, `std::tuple_size<E>::value` for a tuple-like type, and otherwise the number of non-static data members."
+ },
+ {
+  "id": "referenced-type",
+  "def": "The type of the object a structured binding refers to, which is also the result of applying unparenthesized `decltype` to it: the element type for the array protocol, `tuple_element<i, E>::type` for the tuple protocol, and for the data member protocol the declared type of the member (for reference members) or the type of `e.m`."
+ },
+ {
+  "id": "scoped-enumeration",
+  "def": "An enumeration declared with `enum class` or `enum struct`: its enumerators are only in the enumeration's scope, they do not implicitly convert to integers, and the underlying type is fixed as `int` by default."
+ },
+ {
+  "id": "unscoped-enumeration",
+  "def": "An enumeration declared with just `enum`: its enumerators are also bound in the enclosing scope, and they implicitly convert to integers via integral promotion."
+ },
+ {
+  "id": "underlying-type",
+  "def": "The integral type on which an enumeration is based; the enumeration has the same size, alignment, and value representation. It is called **fixed** when specified by an *enum-base* or when it is the default `int` of a scoped enumeration; otherwise the implementation chooses an integral type that can represent all the enumerators."
+ },
+ {
+  "id": "fixed-underlying-type",
+  "def": "An underlying type that is explicitly specified (`enum E : T`) or is the default of a scoped enumeration. When it is fixed, the enumeration can be opaquely declared, its set of values is all values of the underlying type, and it can be direct-list-initialized from an integer (C++17)."
+ },
+ {
+  "id": "enumeration-values",
+  "def": "With a fixed underlying type, all values of the underlying type; otherwise the values representable by the smallest bit-field (of width M) that can hold all the enumerators. A `static_cast` of a value outside this set to an enumeration whose underlying type is not fixed is undefined behavior."
+ },
+ {
+  "id": "opaque-enum-declaration",
+  "def": "An enumeration declaration without an enumerator list, such as `enum class E;`, `enum U : int;`. Afterwards the enumeration is a complete type; an opaque declaration of an unscoped enumeration must specify an *enum-base*."
+ },
+ {
+  "id": "layout-compatible-enumerations",
+  "def": "Two enumeration types with the same underlying type and the same set of values."
+ },
+ {
+  "id": "global-namespace",
+  "def": "The namespace that belongs to the global scope and has no declaration; it is not an unnamed namespace and cannot be found by name lookup."
+ },
+ {
+  "id": "inline-namespace",
+  "def": "A namespace declared with `inline namespace`. Its members behave as members of the enclosing namespace for ADL, unqualified/qualified lookup, template specialization, etc.; commonly used for library ABI versioning (e.g. libc++'s `std::__1`)."
+ },
+ {
+  "id": "inline-namespace-set",
+  "def": "The transitive closure of all inline namespaces (recursively) in a namespace N."
+ },
+ {
+  "id": "unnamed-namespace",
+  "def": "`namespace { ... }`, equivalent to a namespace with a name unique to the TU plus a using-directive; it and the names declared in it have internal linkage ([[basic.link#4]])."
+ },
+ {
+  "id": "namespace-alias",
+  "def": "A name declared by `namespace X = A::B;`, whose underlying entity is the namespace it refers to; it cannot be used to extend the namespace."
+ },
+ {
+  "id": "using-directive",
+  "def": "`using namespace N;`. It introduces no names; during unqualified lookup, the members of N are treated as if declared in the nearest enclosing namespace that contains both the directive and N; it is transitive and cannot appear in class scope."
+ },
+ {
+  "id": "using-declaration",
+  "def": "`using N::name;`: binds to the name `name` the set of declarations found by qualified lookup of `N::name` at the point of declaration (overloads added later are not included); in a class it can introduce base class members and change their access, or inherit constructors."
+ },
+ {
+  "id": "inherited-constructor",
+  "def": "Introduced by a using-declaration that names a constructor (`using Base::Base;`): when looking up derived class constructors and building the overload candidate set, base class constructors are treated as constructors of the derived class; once one is selected, the remaining subobjects are initialized in the default manner."
+ },
+ {
+  "id": "language-linkage",
+  "def": "A property (C++, C, etc.) of functions and variables with external linkage and of all function types, determining the conventions for linking with code in other languages. According to the standard, two function types differing only in language linkage are distinct types, but mainstream compilers do not distinguish them."
+ },
+ {
+  "id": "linkage-specification",
+  "def": "`extern \"C\" { ... }` or `extern \"C\" declaration`: specifies the language linkage for the function types and for the functions and variables with external linkage within it; it can be nested, does not establish a scope, and can only appear at namespace scope."
+ },
+ {
+  "id": "assumption",
+  "def": "An empty statement with `[[assume(expr)]]`. The expression is not evaluated but is potentially evaluated; if it would evaluate to true at that point, it has no effect; otherwise, evaluating the assumption has runtime-undefined behavior."
+ },
+ {
+  "id": "fallthrough-statement",
+  "def": "An empty statement with `[[fallthrough]]`; it may appear only in a switch, and the next statement that would be executed must be a case/default labeled statement of the same switch."
+ },
+ {
+  "id": "nodiscard-type",
+  "def": "A (possibly cv-qualified) class or enumeration type marked `[[nodiscard]]` in some reachable declaration."
+ },
+ {
+  "id": "nodiscard-call",
+  "def": "A function call expression that calls a function marked nodiscard or whose return type is exactly a nodiscard type, or an explicit type conversion that constructs an object through a nodiscard constructor or initializes an object of nodiscard type. A warning is encouraged when it appears as a potentially-evaluated discarded-value expression of non-void type."
+ },
+ {
+  "id": "annotation",
+  "def": "C++26's `[[=constant-expression]]`: a compile-time constant attached to a declaration or base-specifier that can be read through reflection (`std::meta::annotations_of`); each annotation is unique, and substitution into an annotation is not in an immediate context."
+ },
+ {
+  "id": "alignment-specifier",
+  "def": "`alignas(constant-expression)` or `alignas(type)`, applied to variables, data members, and classes; the strictest non-zero alignment among all specifiers is used, and it cannot be weaker than the natural alignment."
+ }
+]

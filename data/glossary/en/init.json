@@ -1,0 +1,106 @@
+[
+ {
+  "id": "zero-initialization",
+  "def": "Initializes a scalar to the value \"integer 0 converted to that type\" (a pointer gets the null pointer value, which need not be all-zero bits); classes and arrays are handled recursively with padding bits zeroed, for a union only the first named member is handled, and for a reference nothing is done. Objects with static storage duration are always zero-initialized first."
+ },
+ {
+  "id": "default-initialization",
+  "def": "For a class type: overload resolution with `()` and the selected default constructor is called; for an array: each element is default-initialized; for other types (except `std::meta::info`): no initialization is performed. An object with no initializer is default-initialized."
+ },
+ {
+  "id": "value-initialization",
+  "def": "For a class type: if the constructor selected by default-initialization is not user-provided, the object is first zero-initialized, and then in all cases default-initialized; arrays are value-initialized element by element; other types are zero-initialized. Triggered by `()` and empty braces `{}`, among others."
+ },
+ {
+  "id": "const-default-constructible",
+  "def": "The condition on a type that permits default-initializing a const object: default-initialization would call a user-provided constructor, or every member has a default member initializer or itself satisfies the condition, etc. `const int x;` does not satisfy it."
+ },
+ {
+  "id": "copy-initialization",
+  "def": "Initialization of the `=` form, as well as in argument passing, function return, throw, exception handling, and non-designated aggregate member initialization. Explicit constructors and explicit conversion functions are not considered."
+ },
+ {
+  "id": "direct-initialization",
+  "def": "Initialization occurring with parenthesized or braced initializers, *new-initializer*s, `static_cast`, and functional type conversions `T(…)`/`T{…}`. Explicit constructors and conversion functions are also candidates."
+ },
+ {
+  "id": "destination-type",
+  "def": "In [[dcl.init]] ¶15, the type of the object or reference being initialized (with top-level cv removed); the corresponding \"source type\" is the type of the initializer expression, defined only when the initializer is a single expression."
+ },
+ {
+  "id": "deemed-construction",
+  "def": "An object is deemed constructed when its initialization completes, even if it is not of class type or no constructor is called; the destruction order of static objects ([[basic.start.term]]) is based on this."
+ },
+ {
+  "id": "initializing-declaration",
+  "def": "The declaration that specifies the initialization of a variable (an explicit initializer or default-initialization). Usually it is the definition; the initializing declaration of a non-inline static data member can be its in-class declaration."
+ },
+ {
+  "id": "aggregate",
+  "def": "An array, or a class with no user-declared or inherited constructors, no private/protected direct non-static data members or direct base classes, and no virtual functions or virtual base classes. Aggregate initialization does not go through constructors; it initializes element by element."
+ },
+ {
+  "id": "aggregate-element",
+  "def": "The elements of an array; for a class, its direct base classes (in declaration order) followed by the direct non-static data members that are not members of anonymous unions (in declaration order). Static members and unnamed bit-fields are not elements."
+ },
+ {
+  "id": "explicitly-initialized-element",
+  "def": "In aggregate initialization, an element initialized by a designator (via its associated element) or by some initializer-clause that appertains to it (or to its subobject); the remaining elements are initialized from their default member initializers or from `{}`."
+ },
+ {
+  "id": "aggregate-base",
+  "def": "The aggregate class D itself, or a direct base class of some aggregate base of D (recursively). In the current draft, designators can name members of an aggregate base."
+ },
+ {
+  "id": "appertain",
+  "def": "The correspondence between the initializer-clauses in a braced list and the aggregate elements (or subaggregate elements); when a clause does not begin with `{` and cannot be converted to the subaggregate type, the appertainment analysis \"drills into\" the subaggregate, and this is brace elision."
+ },
+ {
+  "id": "brace-elision",
+  "def": "Omitting the outer braces of subaggregates in aggregate initialization, as in `int a[2][2] = {1, 2, 3, 4};`. It is implemented by the \"appertain\" rule; there is no brace elision in parenthesized aggregate initialization."
+ },
+ {
+  "id": "reference-related",
+  "def": "\"cv1 T1\" is reference-related to \"cv2 T2\" if T1 is similar to T2 or T1 is a base class of T2. An rvalue reference cannot bind to an lvalue of a reference-related type."
+ },
+ {
+  "id": "reference-compatible",
+  "def": "\"cv1 T1\" is reference-compatible with \"cv2 T2\" if \"pointer to cv2 T2\" can be converted to \"pointer to cv1 T1\" via a standard conversion sequence. It is a prerequisite for a reference to bind directly."
+ },
+ {
+  "id": "bind-directly",
+  "def": "In reference initialization, all cases other than \"implicitly convert the initializer to the referenced type and then materialize\" ([[dcl.init.ref]] ¶5.4.2). Affects the implicit conversion sequence for reference binding in overload resolution."
+ },
+ {
+  "id": "converted-initializer",
+  "def": "When a reference binds to an rvalue or function lvalue ([[dcl.init.ref]] ¶5.3), the initializer expression itself or the result of converting it via a conversion function; if it is a prvalue, it is materialized with the reference's cv-qualification."
+ },
+ {
+  "id": "list-initialization",
+  "def": "Initialization of an object or reference with a *braced-init-list*. Following the order in [[dcl.init.list]] ¶3, it dispatches to aggregate initialization, constructors (initializer-list constructors preferred), single-element initialization, etc., and forbids top-level narrowing."
+ },
+ {
+  "id": "direct-list-initialization",
+  "def": "List-initialization in a direct-initialization context, such as `T x{…}`, `new T{…}`, `T{…}`."
+ },
+ {
+  "id": "copy-list-initialization",
+  "def": "List-initialization in a copy-initialization context, such as `T x = {…}`, `f({…})`, `return {…};`. If overload resolution selects an explicit constructor, the program is ill-formed."
+ },
+ {
+  "id": "direct-non-list-initialization",
+  "def": "Direct-initialization that is not list-initialization, such as `T x(a);`, `static_cast<T>(e)`."
+ },
+ {
+  "id": "initializer-list-constructor",
+  "def": "A constructor whose first parameter is `std::initializer_list<E>` (or a cv reference to it) and whose remaining parameters all have default arguments. In list-initialization from a non-empty list it is preferred over other constructors."
+ },
+ {
+  "id": "backing-array",
+  "def": "The `const E[N]` array generated by the implementation when constructing a `std::initializer_list<E>`, whose elements are copy-initialized from the list elements; its lifetime rules are the same as for a temporary bound to a reference, and since C++26 it is a potentially non-unique object."
+ },
+ {
+  "id": "narrowing-conversion",
+  "def": "These kinds of implicit conversions: floating → integer, floating demotion, integer → floating, integer narrowing, and pointer/pointer-to-member → `bool` (each with exceptions such as for constant expressions). Ill-formed at the top level of list-initialization."
+ }
+]

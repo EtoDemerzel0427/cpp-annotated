@@ -1,0 +1,98 @@
+[
+ {
+  "id": "constraints-element",
+  "def": "An element of a library function specification: the conditions for the function to participate in overload resolution. When not met, the function is silently non-viable, which can be observed by requires-expressions and type traits (SFINAE-friendly)."
+ },
+ {
+  "id": "mandates-element",
+  "def": "An element of a library function specification: conditions whose violation makes the program ill-formed (diagnosis required). Usually implemented with a static_assert in the function body, so it cannot be detected by a requires-expression."
+ },
+ {
+  "id": "preconditions-element",
+  "def": "An element of a library function specification: conditions the function assumes to hold on every call; violating any precondition is undefined behavior. An implementation may, but need not, check them with contract assertions."
+ },
+ {
+  "id": "hardened-precondition",
+  "def": "A condition listed in the Hardened preconditions element of a library function specification. In a hardened implementation, the corresponding contract assertion is evaluated with a terminating semantic at the call; in a non-hardened implementation, a violation is undefined behavior."
+ },
+ {
+  "id": "effects-equivalent-to",
+  "def": "The way library specifications describe a function's semantics with code: the function's own Constraints/Mandates apply first, all specification elements of the calls in the code are carried over, and the function's own Throws/Postconditions/Complexity override them. It specifies observable semantics and does not constrain how it is implemented."
+ },
+ {
+  "id": "cpp17-named-requirement",
+  "def": "A set of valid-expression requirements given in tables and named in italics with a Cpp17 prefix (such as Cpp17CopyConstructible). Unlike library concepts in monospace font, it is only a textual requirement, and failing to meet it is usually undefined behavior."
+ },
+ {
+  "id": "exposition-only",
+  "def": "An entity introduced in the library specification to describe semantics, whose comment ends in exposition only (such as decay-copy, or expository private members). Programs cannot name them, and implementations need not provide them."
+ },
+ {
+  "id": "decay-copy",
+  "def": "An exposition-only function: returns, by copy-initialization, a copy of its argument after decay (decay_t). Close to auto(x), but with a convertible_to constraint and using copy-initialization."
+ },
+ {
+  "id": "bitmask-type",
+  "def": "A library type that can be implemented as an enumeration with overloaded bitwise operators, an integer type, or a bitset (such as ios_base::fmtflags). Only its elements and operations such as &, |, ^, ~ can be relied upon; set/clear/is set have precise definitions."
+ },
+ {
+  "id": "enumerated-type",
+  "def": "A library type that can be implemented as an enumeration or a synonym for an enumeration (such as ios_base::seekdir), whose enumerated elements have distinct values."
+ },
+ {
+  "id": "ntbs",
+  "def": "A character sequence whose highest-addressed element with defined content has the value zero and all of whose other elements are non-zero. A string literal is a static ntbs."
+ },
+ {
+  "id": "ntmbs",
+  "def": "An ntbs that constitutes a sequence of valid multibyte characters, beginning and ending in the initial shift state."
+ },
+ {
+  "id": "algorithm-function-object",
+  "def": "A customization point object specified as a set of overloaded function templates (such as std::ranges::find, colloquially a niebloid). Calling it is expression-equivalent to calling that set of function templates; it is not found by ADL, and suppresses ADL when found by unqualified lookup."
+ },
+ {
+  "id": "freestanding-item",
+  "def": "A declaration, entity, or macro that must be present in both freestanding and hosted implementations; determined by the freestanding comments in the synopses and their inheritance rules."
+ },
+ {
+  "id": "freestanding-deleted-function",
+  "def": "A function declaration whose comment in the synopsis contains freestanding-deleted. Whether it is a deleted function on a freestanding implementation is implementation-defined, to prevent overload resolution from silently changing when migrating to a hosted implementation."
+ },
+ {
+  "id": "hosted-library-facilities",
+  "def": "Library facilities that a hosted implementation must provide and a freestanding implementation need not. A freestanding implementation may provide an implementation-defined subset of them, or provide deleted definitions for functions among them."
+ },
+ {
+  "id": "importable-library-header",
+  "def": "The C++ library headers in Table 24 (for a freestanding implementation, the subset it provides), which can be imported as header units; the C facility headers are not among them."
+ },
+ {
+  "id": "non-constant-library-call",
+  "def": "A call to a library function that prevents the enclosing expression from being a core constant expression. E.g. a call to a C library function that raises a floating-point exception other than FE_INEXACT."
+ },
+ {
+  "id": "swappable-with",
+  "def": "t is swappable with u: in a context where both the swap templates in <utility> and the results of ADL are considered, swap(t, u) and swap(u, t) are both valid and actually exchange the values of the two."
+ },
+ {
+  "id": "program-defined-specialization",
+  "def": "An explicit specialization or partial specialization that is not part of the standard library and not defined by the implementation. Its instantiations are also program-defined types."
+ },
+ {
+  "id": "addressable-function",
+  "def": "A standard library function explicitly designated as one whose address may be taken (such as the iostream manipulators std::endl, std::hex, and the functions in <meta>). Forming a pointer, reference, or pointer to member to any other standard library function has unspecified behavior (possibly ill-formed)."
+ },
+ {
+  "id": "zombie-name",
+  "def": "A name left behind by a facility removed from the standard (auto_ptr, bind1st, <codecvt>, …), still reserved for previous standardization; programs must not use it for other purposes."
+ },
+ {
+  "id": "allocator-completeness-requirements",
+  "def": "Whether or not T is complete, the allocator class X and the member types of allocator_traits<X> other than value_type are complete types. This is the prerequisite for vector/list/forward_list being allowed to be instantiated with incomplete types."
+ },
+ {
+  "id": "equivalently-valued",
+  "def": "Two allocator pointer values (possibly of different types) that compare equal after being converted to const_pointer by a sequence of static_casts only among pointer/const_pointer/void_pointer/const_void_pointer."
+ }
+]

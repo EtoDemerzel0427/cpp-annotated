@@ -1,0 +1,146 @@
+[
+ {
+  "id": "declarator",
+  "def": "The part of a declaration that follows the specifier sequence and declares one entity and (optionally) names it; it uses operators such as `*`, `&`, `[]`, `()` to transform the type given by the specifiers into the type of the entity. See [[dcl.decl]]."
+ },
+ {
+  "id": "abstract-declarator",
+  "def": "A declarator with the name omitted, used in *type-id*s and unnamed parameters, e.g. `(*)[3]` in `int (*)[3]`; the position where the name would appear is uniquely determined."
+ },
+ {
+  "id": "type-id",
+  "def": "A way of writing a type in the form of \"a declaration with the entity's name omitted\", such as `int*`, `int(*)(double)`; used in template arguments, `typeid`, alias declarations, etc."
+ },
+ {
+  "id": "nofun-type-id",
+  "def": "A *type-id* whose outermost declarator cannot be a function declarator; in the current draft it is used by `sizeof`, `alignof`, C-style casts, `new (T)`, and trailing return types, so that `sizeof(int())` is parsed as an expression."
+ },
+ {
+  "id": "trailing-requires-clause",
+  "def": "A `requires` clause appearing after a declarator; it can only be used for templated functions and follows the trailing return type; it is not part of the function type, but affects the correspondence of declarations and overload resolution."
+ },
+ {
+  "id": "lvalue-reference",
+  "def": "A reference type declared with `&`. It is a distinct type from an rvalue reference; a non-const lvalue reference can bind only to lvalues."
+ },
+ {
+  "id": "rvalue-reference",
+  "def": "A reference type declared with `&&`, which can bind only to rvalues (and function lvalues); a named rvalue reference variable is itself an lvalue."
+ },
+ {
+  "id": "reference-collapsing",
+  "def": "The rule for forming a \"reference to reference\" via a typedef, template parameter, or `decltype`: if either is `&` the result is an lvalue reference; only `&& &&` yields an rvalue reference; cv-qualifiers are ignored."
+ },
+ {
+  "id": "array-bound",
+  "def": "The number of elements N of an array, given by a converted constant expression of type `std::size_t`, which must be greater than zero; an array of unknown bound `T[]` is an incomplete type."
+ },
+ {
+  "id": "array-element-type",
+  "def": "The U in the array type \"array of N U\"; it cannot be a reference, a function, an array of unknown bound, or cv `void`. Cv-qualification of an array applies to its element type."
+ },
+ {
+  "id": "parameter-type-list",
+  "def": "A component of a function type: the list of parameter types after adjustment (array/function → pointer, top-level cv deleted), plus whether there is an ellipsis or a function parameter pack."
+ },
+ {
+  "id": "vararg-function",
+  "def": "A function whose parameter-type-list contains an ellipsis `...`, such as `printf`; it cannot be a coroutine. The form `f(int...)` (without a comma) is deprecated in C++26."
+ },
+ {
+  "id": "explicit-object-parameter",
+  "def": "In C++23, the first parameter of a member function declared with the `this` specifier (\"deducing this\"); it cannot be a parameter pack, and the function containing it cannot have cv/ref-qualifiers and cannot be static or virtual."
+ },
+ {
+  "id": "explicit-object-member-function",
+  "def": "A non-static member function with an explicit object parameter; there is no `this` in its body, and its address is an ordinary function pointer."
+ },
+ {
+  "id": "implicit-object-member-function",
+  "def": "A non-static member function without an explicit object parameter, i.e. a traditional member function; its object parameter is the implicit object parameter."
+ },
+ {
+  "id": "object-parameter",
+  "def": "The explicit object parameter or the implicit object parameter of a non-static member function; the non-object-parameter-type-list is the parameter-type-list with it removed."
+ },
+ {
+  "id": "abominable-function-type",
+  "def": "The community's name for a function type with cv- or ref-qualifiers (such as `int(int) const`); it can be used only as a member function type, the pointee type of a pointer to member, in a typedef, as a type template argument, and as an operand of reflection."
+ },
+ {
+  "id": "non-template-function",
+  "def": "A function that is not a function template specialization (member functions of class templates are also non-template functions); it is preferred over function template specializations in overload resolution."
+ },
+ {
+  "id": "abbreviated-function-template",
+  "def": "A function declaration whose parameter types contain `auto` or `C auto` placeholders (C++20), equivalent to a function template that introduces an invented type template parameter for each placeholder."
+ },
+ {
+  "id": "default-argument",
+  "def": "The `= initializer` in a parameter declaration; it is evaluated at the call site each time the corresponding argument is omitted. It is not part of the function type; default arguments accumulate across declarations within the same host scope and cannot be redefined."
+ },
+ {
+  "id": "function-contract-assertion",
+  "def": "A contract assertion associated with a function: a precondition assertion introduced by `pre` or a postcondition assertion introduced by `post` (C++26); introduced by the first declaration of the function."
+ },
+ {
+  "id": "precondition-assertion",
+  "def": "A function contract assertion introduced by `pre(predicate)`, evaluated after parameter initialization and before the function body."
+ },
+ {
+  "id": "postcondition-assertion",
+  "def": "A function contract assertion introduced by `post(predicate)`, evaluated after the function returns normally and the result object has been initialized; not evaluated on exit via an exception."
+ },
+ {
+  "id": "result-binding",
+  "def": "The name introduced in a postcondition `post(r: …)`, denoting the object or reference returned by the function itself; as an expression it is a const lvalue."
+ },
+ {
+  "id": "explicitly-defaulted",
+  "def": "A function whose body is `= default;`; it can only be a special member function, a comparison operator function, or (newly added in the draft) postfix `++`/`--`. When defaulted on its first declaration it is implicitly inline and may be implicitly constexpr."
+ },
+ {
+  "id": "user-provided",
+  "def": "A function that is user-declared and not explicitly defaulted or deleted on its first declaration. A function defaulted with `= default` outside the class is user-provided, and therefore not trivial."
+ },
+ {
+  "id": "deleted-function",
+  "def": "A function with a deleted definition (`= delete;` or C++26's `= delete(\"reason\");`, or a defaulted function defined as deleted); it participates in overload resolution, but any construct that refers to it (including in unevaluated operands) is ill-formed."
+ },
+ {
+  "id": "function-local-predefined-variable",
+  "def": "A variable with static storage duration implicitly defined in a function parameter scope, such as `__func__` (a `static const char[]` with implementation-defined contents)."
+ },
+ {
+  "id": "replaceable-function",
+  "def": "A function whose definition is provided by the implementation and which a program can supplant with a replacement function of the same signature (e.g. global `operator new`); replacement takes effect before program startup, and a replacement function cannot be inline."
+ },
+ {
+  "id": "coroutine",
+  "def": "A function whose body contains `co_await`, `co_yield`, or `co_return` (C++20); it can be suspended and later resumed, with its state kept in the coroutine state."
+ },
+ {
+  "id": "promise-type",
+  "def": "`std::coroutine_traits<R, [object-parameter-type,] P...>::promise_type`, which must be a class type; the coroutine body is rewritten into calls to its members (initial_suspend, final_suspend, return_value, etc.)."
+ },
+ {
+  "id": "promise-object",
+  "def": "The object of the promise type constructed in the coroutine's replacement body, stored in the coroutine state; it can be constructed from the parameter copies."
+ },
+ {
+  "id": "coroutine-state",
+  "def": "The additional storage a coroutine needs (colloquially the coroutine frame), containing the promise, the parameter copies, and local variables that live across suspension points; obtained through an allocation function (which can be customized in the promise), and it may be optimized away."
+ },
+ {
+  "id": "initial-suspend-point",
+  "def": "The suspension point at which a coroutine suspends at `co_await promise.initial_suspend()`."
+ },
+ {
+  "id": "final-suspend-point",
+  "def": "The state of a coroutine when it suspends at `co_await promise.final_suspend()`, or exits because `unhandled_exception()` threw; at this point `done()` is true and only `destroy()` may be called."
+ },
+ {
+  "id": "resumer",
+  "def": "The evaluation that calls the resumption member function (`resume()`) of a coroutine handle to continue execution of a suspended coroutine; control returns to it when the coroutine suspends again."
+ }
+]

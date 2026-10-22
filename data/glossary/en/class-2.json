@@ -1,0 +1,78 @@
+[
+ {
+  "id": "active-member",
+  "def": "The non-static data member of a union whose named object is currently within its lifetime; at most one at any time. Reading an inactive member is UB."
+ },
+ {
+  "id": "anonymous-union",
+  "def": "A union of the form `union { ... };`, which defines both an unnamed type and its single unnamed object; the member names are bound in the enclosing scope, and it may have only public non-static data members."
+ },
+ {
+  "id": "union-like-class",
+  "def": "A union, or a class that has an anonymous union as a direct member."
+ },
+ {
+  "id": "variant-member",
+  "def": "The non-static data members of a union (other than anonymous unions), and the non-static data members of an anonymous union that is a class member; they may be inactive, and the construction/destruction rules treat them specially."
+ },
+ {
+  "id": "local-class",
+  "def": "A class declared within a function definition; it cannot odr-use automatic variables of the enclosing function, its member functions must be defined within the class, and it cannot have static data members or member templates."
+ },
+ {
+  "id": "direct-base-class",
+  "def": "A class written directly in a *base-specifier* of the class definition; a base class of a base class is an indirect base class."
+ },
+ {
+  "id": "base-class-subobject",
+  "def": "The subobject of a derived class object corresponding to a given base class; its allocation order within the most derived object is unspecified, and it may have zero size."
+ },
+ {
+  "id": "virtual-base-class",
+  "def": "A base class specified with `virtual`; no matter how many times it appears in the class lattice, the most derived object contains only one subobject of that type, initialized by the most derived class."
+ },
+ {
+  "id": "virtual-function",
+  "def": "A non-static member function first declared with `virtual`, or that overrides a virtual function of a base class; a call through a pointer/reference calls the final overrider for the dynamic type."
+ },
+ {
+  "id": "polymorphic-class",
+  "def": "A class that declares or inherits a virtual function; downcasting with `dynamic_cast` and the dynamic behavior of `typeid` apply only to polymorphic classes."
+ },
+ {
+  "id": "override",
+  "def": "A member function G in a derived class whose declaration corresponds to a base class virtual function F (same name, same non-object parameter list, same cv/ref-qualifiers, ignoring requires-clauses) overrides F; access is not considered, and F need not be visible."
+ },
+ {
+  "id": "final-overrider",
+  "def": "For a virtual function of a given subobject, the most derived overrider in the most derived class; a virtual function call calls it. Every virtual function of every subobject must have a unique final overrider."
+ },
+ {
+  "id": "covariant-return-type",
+  "def": "The overriding function returns a pointer/reference to a derived class, while the overridden function returns the same kind of pointer/reference to an accessible, unambiguous base class (with no added cv-qualification); the result of the call is converted to the return type of the statically chosen function."
+ },
+ {
+  "id": "pure-virtual-function",
+  "def": "A virtual function declared with `= 0`; a definition is needed only if it is called with a qualified name (or implicitly called as a destructor)."
+ },
+ {
+  "id": "abstract-class",
+  "def": "A class that has at least one pure virtual function whose final overrider is still pure virtual; no complete objects of it can be created, it can only exist as a base class subobject."
+ },
+ {
+  "id": "accessible-base-class",
+  "def": "A base class (transitively) for which, at a given program point, an invented public member of the base would be accessible as a member of the derived class; the implicit derived-to-base conversion requires the base class to be accessible."
+ },
+ {
+  "id": "designating-class",
+  "def": "The reference class for access checking: the class in whose scope name lookup found the member (e.g. `T` in `p->T::m`); when designated by a splice, the class of which the member is a direct member."
+ },
+ {
+  "id": "friend",
+  "def": "A function or class granted permission by a class to name its private and protected members; it is not a member of that class, and friendship is neither inherited nor transitive."
+ },
+ {
+  "id": "hidden-friend",
+  "def": "Informal term: a function declared (and defined) only in an in-class friend declaration. Friend declarations do not bind names, so it can only be found by ADL."
+ }
+]

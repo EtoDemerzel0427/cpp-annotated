@@ -1,0 +1,46 @@
+[
+ {
+  "id": "two-phase-lookup",
+  "def": "Non-standard term for the combined rules whereby non-dependent names in a template are looked up and bound at the point of definition, while lookup of dependent names is deferred to each specialization; at instantiation, dependent calls only add ADL. See [[temp.res]], [[temp.dep.res]]."
+ },
+ {
+  "id": "typename-specifier",
+  "def": "A type specifier of the form `typename N::id` or `typename N::template id<...>`; it tells the parser that a dependent qualified name denotes a type, while lookup remains ordinary qualified name lookup."
+ },
+ {
+  "id": "type-only-context",
+  "def": "A position that can syntactically only be a type (member declarations, the return type in namespace-scope declarations, `using` aliases, trailing return types, the target type of named casts, etc.); there, a qualified name whose terminal name is dependent is treated as a type, and `typename` may be omitted (C++20)."
+ },
+ {
+  "id": "dependent-call",
+  "def": "A function call whose callee expression is an *unqualified-id* and whose arguments include a pack expansion or a type-dependent expression, or whose callee name is a *template-id* with dependent template arguments; its callee name is a dependent name, and ADL is added at instantiation."
+ },
+ {
+  "id": "type-dependent",
+  "def": "An expression whose type may depend on template parameters, such as the name of a variable declared with a dependent type, `this` (in a class template), or a fold expression; `sizeof`, literals, etc. are never type-dependent."
+ },
+ {
+  "id": "value-dependent",
+  "def": "An expression whose value, when evaluated as a constant expression, may depend on template parameters, such as the name of a constant template parameter, `sizeof(T)`, `sizeof...(Ts)`; type-dependent expressions are also value-dependent."
+ },
+ {
+  "id": "current-instantiation",
+  "def": "A name inside the definition of a class template (and its members, nested classes, partial specializations) that refers to \"this very specialization\", such as the injected-class-name or `X<T>`; its members can be looked up at the point of definition without `typename`."
+ },
+ {
+  "id": "dependent-base-class",
+  "def": "A base class that is a dependent type and is not the current instantiation, such as `Base<T>`; it is not searched by name lookup at template definition time, and its members must be accessed via `this->` or a qualified name."
+ },
+ {
+  "id": "member-of-the-current-instantiation",
+  "def": "A name for which (the lookup context of a qualified name being the current instantiation) lookup finds a member of a class that is the current instantiation; if what is found is a member declaration in the current instantiation, it is called a dependent member of the current instantiation."
+ },
+ {
+  "id": "dependent-type",
+  "def": "A type that may vary with template arguments: a template parameter, a type denoted by a dependent name, a compound type constructed from a dependent type, an array with a value-dependent bound, a template specialization with dependent arguments, `decltype` of a type-dependent expression, etc."
+ },
+ {
+  "id": "point-of-instantiation",
+  "def": "The program point at which a specialization is considered instantiated, from which ADL for dependent names proceeds. For function-like specializations it immediately follows the namespace-scope declaration that refers to it (the end of the TU also counts); for class template specializations it immediately precedes it; if multiple POIs give different meanings, the program is IFNDR."
+ }
+]
