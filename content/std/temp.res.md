@@ -523,7 +523,7 @@ template<class T> class X {
 
 `S::f` 的形参属于 ¶4.4.3（成员声明中的形参），处于仅类型语境，`T::type` 被当作类型，良构。
 
-`g` 是命名空间作用域的函数模板，名字 `g` 不是限定名，它的形参不属于 ¶4.4 的任何一项。`T::type` 被当作表达式，`void g(T::type);` 被解析为用 `T::type` 初始化的 `void` 变量模板，不可能有合法特化，按 ¶6.1 是 IFNDR（例 5 第二行就是这个例子）。要写成 `template<class T> void g(typename T::type);`。
+`g` 是命名空间作用域的函数模板，名字 `g` 不是限定名，它的形参不属于 ¶4.4 的任何一项。`T::type` 被当作表达式，`void g(T::type);` 被解析为用 `T::type` 初始化的 `void` 变量模板，不可能有合法特化，按 ¶6.1 是 IFNDR（草案 [temp.res.general] 例 5 的第二行就是这个例子）。要写成 `template<class T> void g(typename T::type);`。
 </details>
 
 !!! question "思考题 2"

@@ -141,7 +141,7 @@ ECMAScript 采用回溯语义，选择第一个成功的分支（leftmost-first�
 
 - ¶3–¶5：字符类中增加 POSIX 风格的 `[[:class:]]`、`[[.collating.]]`、`[[=equiv=]]`。
 - ¶7–¶11：类名通过 `lookup_classname` 解析，至少要识别上面列出的 15 个；`\d`、`\s`、`\w` 分别等价于 `[[:digit:]]`、`[[:space:]]`、`[_[:alnum:]]`。无效的类名使编译抛出 `regex_error`。
-- ¶12：`\uXXXX` 的值超出 `charT` 能表示的范围时抛出 `regex_error`。对 `char` 来说，模式 `中` 不合法。本机 libc++ 用这个模式构造 `std::regex` 并不抛出，与条文不符。
+- ¶12：`\uXXXX` 的值超出 `charT` 能表示的范围时抛出 `regex_error`。对 `char` 来说，模式 `\u4E2D` 不合法。本机 libc++ 用这个模式构造 `std::regex` 并不抛出，与条文不符。
 - ¶14：匹配语义按 ECMA-262，再由匹配标志和 traits 修饰。比较两个字符时，`icase` 下比较 `translate_nocase` 的结果，`collate` 下比较 `translate` 的结果，否则直接用 `==`（¶14.1）。`collate` 模式下，区间 `c1-c2` 用 `transform` 得到的排序键比较（¶14.2）。
 
 ¶14 也说明了本页开头的 code unit 问题。整个库没有 Unicode 的概念：比较的是一个个 `charT`。对 UTF-8 编码的 `std::string`，`.` 匹配一个字节，`\w` 对每个字节调用 `ctype<char>` 分类，`[à-ü]` 是字节区间。处理非 ASCII 文本时，要么接受按字节的语义，要么改用支持 Unicode 的正则引擎。

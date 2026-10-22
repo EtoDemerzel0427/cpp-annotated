@@ -22,7 +22,7 @@ updated: 2026-10-19
 
 ```cpp run title="string-n.cpp" ok
 static_assert(sizeof("abc") == 4);         // a、b、c、空字符
-static_assert(sizeof(u8"é") == 3);    // é 在 UTF-8 中占 2 个 code unit
+static_assert(sizeof(u8"\u00E9") == 3);    // é 在 UTF-8 中占 2 个 code unit
 static_assert(sizeof(u"\U0001F600") == 3 * sizeof(char16_t));  // 代理对
 static_assert(sizeof(U"\U0001F600") == 2 * sizeof(char32_t));
 int main() {}
@@ -69,7 +69,7 @@ int main() {
 原始字符串的内容按原样保留：
 
 - 没有转义序列，`\` 就是反斜杠；
-- 也不识别通用字符名，`A` 就是 6 个字符；
+- 也不识别通用字符名，`\u0041` 就是 6 个字符；
 - 可以跨行，源码里的换行就是内容里的换行（¶4 注 2）；
 - 翻译阶段 2 的行拼接（行末反斜杠加换行被删除）在原始字符串里被撤销（[[lex.pptoken#5]]），所以行末的 `\` 和换行都会保留。
 
@@ -217,7 +217,7 @@ int main() {}
 有些字符串只给编译器看，从不出现在程序的数据里，例如 `static_assert` 的消息。C++26 把这些位置的文法改成了**不求值字符串**（unevaluated string）。它在文法上就是一个字符串字面量，但规则不同：
 
 ```cpp title="uneval.cpp" error
-static_assert(true, "é \n ok");  // OK：通用字符名和简单转义可以用
+static_assert(true, "\u00e9 \n ok");  // OK：通用字符名和简单转义可以用
 static_assert(true, u8"x");           // error: 不能有编码前缀
 static_assert(true, "\x41");          // error: 不能有数值转义
 [[deprecated(L"w")]] void f();        // error: 不能有编码前缀
@@ -253,7 +253,7 @@ C++26 的 `static_assert` 消息还可以是一个常量表达式，只要它有
 ## 思考题
 
 !!! question "思考题 1"
-    `sizeof(u8"a" "é" R"(\n)")` 是多少？
+    `sizeof(u8"a" "\u00e9" R"(\n)")` 是多少？
 
 <details markdown="1">
 <summary>答案</summary>

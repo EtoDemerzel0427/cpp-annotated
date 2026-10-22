@@ -46,7 +46,7 @@ C 中 `'a'` 的类型是 `int`，C++ 改成了 `char`。[[diff.lex]] 给出的�
 
 ## 转义序列
 
-引号里的每一项要么是一个普通字符，要么是一个转义序列，要么是一个通用字符名（`é` 这类，见 [[lex.universal.char]]）。转义序列分三类，含义不同：
+引号里的每一项要么是一个普通字符，要么是一个转义序列，要么是一个通用字符名（`\u00E9` 这类，见 [[lex.universal.char]]）。转义序列分三类，含义不同：
 
 | 类别 | 例子 | 表示什么 |
 |---|---|---|
@@ -190,14 +190,14 @@ int main() {}
     在 x86-64 Linux 上（`char` 有符号，普通字面量编码为 UTF-8），下列字面量的类型和值是什么？如果非良构，原因是什么？
 
     ```cpp
-    '\377'    'ÿ'    u8'\377'    L'\xFFFFFFFFF'
+    '\377'    '\u00FF'    u8'\377'    L'\xFFFFFFFFF'
     ```
 
 <details markdown="1">
 <summary>答案</summary>
 
 - `'\377'`：八进制数值转义，v = 255，超出 `char` 范围但在 `unsigned char` 范围内，且没有前缀，按 ¶3.2.3 回绕为 −1，类型 `char`。
-- `'ÿ'`：通用字符名，表示字符 ÿ，UTF-8 编码为 C3 BF 两个 code unit，按 ¶3.1 非良构。`'\N{LATIN SMALL LETTER Y WITH DIAERESIS}'` 是同一个字符，同样非良构。
+- `'\u00FF'`：通用字符名，表示字符 ÿ，UTF-8 编码为 C3 BF 两个 code unit，按 ¶3.1 非良构。`'\N{LATIN SMALL LETTER Y WITH DIAERESIS}'` 是同一个字符，同样非良构。
 - `u8'\377'`：数值转义，v = 255 在 `char8_t` 范围内，值为 255，类型 `char8_t`。它表示一个值为 0xFF 的 code unit，不是字符 ÿ；单独的 0xFF 在 UTF-8 中也不是合法的字节。
 - `L'\xFFFFFFFFF'`：v 需要 36 位，超出 32 位 `wchar_t` 对应的无符号类型，按 ¶3.2.4 非良构。
 </details>

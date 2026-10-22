@@ -596,7 +596,7 @@ C++26 的反射主要用于读取程序结构，能生成的东西很有限，�
 - Erwin Unruh，*Primzahlen* 个人网页（erwin-unruh.de），含 1994 年原版程序；委员会文档 N462（1994）。
 - Todd Veldhuizen，*Using C++ Template Metaprograms*，C++ Report，1995；*C++ Templates are Turing Complete*，2003。
 - Nathan C. Myers，*Traits: a new and useful template technique*，C++ Report，1995。
-- David Vandevoorde、Nicolai M. Josuttis，*C++ Templates: The Complete Guide*，2002。
+- Daveed Vandevoorde、Nicolai M. Josuttis，*C++ Templates: The Complete Guide*，2002。
 - Peter Dimov，*Simple C++11 metaprogramming*，2015（收录于 Boost.Mp11 文档）。
 - Andrew Pardoe，*Two-phase name lookup support comes to MSVC*，Microsoft C++ Team Blog，2017。
 - GCC 16.1 发布说明，2026。

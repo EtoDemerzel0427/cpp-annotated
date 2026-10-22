@@ -77,7 +77,7 @@ misc.cpp:29:13: warning: use of old-style cast [-Wold-style-cast]
 
 ## 标准要求诊断什么
 
-¶1 标准把规则分成两类。**可诊断规则**（diagnosable rule）是除了明确写着 no diagnostic is required 的规则和导致 UB 的规则之外的全部语法和语义规则（[[intro.compliance.general#1]]）。¶2.3 规定，程序违反了任何一条可诊断规则，符合标准的实现就必须发出至少一条**诊断信息**（diagnostic message）。
+标准把规则分成两类。**可诊断规则**（diagnosable rule）是除了明确写着 no diagnostic is required 的规则和导致 UB 的规则之外的全部语法和语义规则（[[intro.compliance.general#1]]）。¶2.3 规定，程序违反了任何一条可诊断规则，符合标准的实现就必须发出至少一条**诊断信息**（diagnostic message）。
 
 !!! std
     If a program contains a violation of a rule for which no diagnostic is required, this document places no requirement on implementations with respect to that program.

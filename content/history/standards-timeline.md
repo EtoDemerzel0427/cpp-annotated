@@ -7,6 +7,7 @@ papers: P1000R8, N1836, N2800, P2739R0, P2687R0, P3081R2, P3390R0, P3543R0, P358
 related: topics/how-to-read-the-standard, intro.scope, cpp.predefined, history/stl-and-early-library, history/modern-library, history/concepts, history/move-semantics, history/threads-and-memory-model, history/modules, history/coroutines, history/contracts, history/constexpr
 tags: 沿革, 标准化, WG21, 委员会
 updated: 2026-10-19
+video: bilibili=BV12ynC69EWS, youtube=18YW4QLPOgg
 ---
 
 !!! tldr

@@ -18,7 +18,7 @@ updated: 2026-10-19
 
 ```cpp run title="unicode-ident.cpp" ok
 int 变量 = 1;               // 汉字有 XID_Start 属性
-double π = 3.14159;    // π，用通用字符名写也一样
+double \u03C0 = 3.14159;    // π，用通用字符名写也一样
 int naïve = 2;              // ï 是一个预组合字符 U+00EF
 int main() { return 变量 + naïve - 3; }
 ```
@@ -78,8 +78,8 @@ C++23 中这些字符不能出现在标识符里。本机 Clang 23 接受上例�
 标准要求输入本身就是 NFC，而不是让编译器先规范化再比较。编译器只需检查、不必改写，字节不同的标识符就一定是不同的标识符。
 
 ```cpp title="nfc.cpp" error
-int à = 1;   // error: a 加组合重音符 U+0300 不是 NFC，NFC 形式是 U+00E0 à
-int Å = 2;    // error: U+212B ANGSTROM SIGN 规范化后是 U+00C5，自身不是 NFC
+int a\u0300 = 1;   // error: a 加组合重音符 U+0300 不是 NFC，NFC 形式是 U+00E0 à
+int \u212B = 2;    // error: U+212B ANGSTROM SIGN 规范化后是 U+00C5，自身不是 NFC
 ```
 
 本机 Clang 23 不检查 NFC，上例以 `-std=c++2c -pedantic` 编译没有任何诊断。这偏离了标准，因为这条规则要求诊断。不要指望编译器替你发现规范化形式的差异，可以在编辑器或 CI 中统一做 NFC 规范化。

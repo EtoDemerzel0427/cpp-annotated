@@ -6,6 +6,10 @@
   var PAGE = body.dataset.page || "";
   var NAV = window.NAV || { clauses: [], collections: {}, groups: {} };
   var EEL = "https://eel.is/c++draft/";
+  var EN = document.documentElement.lang === "en";   // English edition: en/<kind>/<slug>.html
+  var NAV_EN = window.NAV_EN || {};
+  var CLAUSES = (EN ? NAV_EN.clauses : NAV.clauses) || [];   // English clause tree only exists once a note is translated
+  var STD = EN ? "en/std/" : "std/";
 
   function store(k, v) {
     try { if (v === undefined) return localStorage.getItem("cppstd." + k); localStorage.setItem("cppstd." + k, v); } catch (e) { return null; }
@@ -51,13 +55,13 @@
     }
     return null;
   }
-  var curPath = findPath(NAV.clauses, PAGE, []) || [];
+  var curPath = findPath(CLAUSES, PAGE, []) || [];
   var openSet = {};
   curPath.forEach(function (n) { openSet[n.i] = true; });
 
   function nodeHref(n, depth) {
     if (n.u) return { href: ROOT + n.u, local: true };
-    if (depth === 0 || n.p) return { href: ROOT + "std/" + n.i + ".html", local: true };
+    if (depth === 0 || n.p) return { href: ROOT + STD + n.i + ".html", local: true };
     return { href: EEL + n.i, local: false };
   }
   function renderTree(nodes, depth) {
@@ -67,14 +71,14 @@
       if (!subtreeHasPage(n) && depth > 0) li.className = "empty";
       if (openSet[n.i]) li.classList.add("open");
       var row = el("div", { class: "sb-row" });
-      var caret = el("button", { class: "sb-caret" + (n.c ? "" : " spacer"), type: "button", "aria-label": "展开" }, "▶");
+      var caret = el("button", { class: "sb-caret" + (n.c ? "" : " spacer"), type: "button", "aria-label": EN ? "Expand" : "展开" }, "▶");
       var h = nodeHref(n, depth);
       var cls = "sb-link " + (h.local ? "has-page" : "no-page") + (n.p ? " st-" + n.p : "");
       if (depth === 0) cls = "sb-link" + (subtreeHasPage(n) ? " has-page" : "") ;
       if (n.i === PAGE) { cls += " current"; row.classList.add("current"); }
-      var tip = n.t + "  [" + n.i + "]" + (n.h ? "\n在 [" + n.h + "] 页中讲解" : h.local ? "" : "  ↗ eel.is");
+      var tip = n.t + "  [" + n.i + "]" + (n.h ? (EN ? "\nexplained on the [" + n.h + "] page" : "\n在 [" + n.h + "] 页中讲解") : h.local ? "" : "  ↗ eel.is");
       var a = el("a", { class: cls, href: h.href, title: tip },
-        '<span class="n">' + esc(n.n) + '</span><span class="l">' + esc(n.z || n.t) + "</span>");
+        '<span class="n">' + esc(n.n) + '</span><span class="l">' + esc(EN ? n.t : n.z || n.t) + "</span>");
       if (!h.local) { a.target = "_blank"; a.rel = "noopener"; }
       row.appendChild(caret); row.appendChild(a); li.appendChild(row);
       if (n.c) {
@@ -94,8 +98,15 @@
     { k: "toolchain", label: "工程" }, { k: "history", label: "沿革" }, { k: "papers", label: "提案" },
     { k: "exams", label: "考卷" }
   ];
+  if (EN) {
+    var EN_LABEL = { topics: "Topics", patterns: "Patterns", perf: "Performance", toolchain: "Engineering", history: "History", papers: "Papers", exams: "Quizzes" };
+    TABS = (NAV_EN.clauses ? [{ k: "lang", label: "Core" }, { k: "lib", label: "Library" }, { k: "annex", label: "Annexes" }] : [])
+      .concat(Object.keys(NAV_EN).filter(function (k) { return k !== "clauses"; }).map(function (k) { return { k: k, label: EN_LABEL[k] || k }; }));
+  }
   function defaultTab() {
     var act = body.dataset.active;
+    if (EN && curPath.length) return NAV.groups[curPath[0].i] || "lang";
+    if (EN) return NAV_EN[act] && act !== "clauses" ? act : (TABS[0] && TABS[0].k);
     if (curPath.length) return NAV.groups[curPath[0].i] || "lang";
     if (act === "topics" || act === "patterns" || act === "perf" || act === "toolchain" || act === "history" || act === "papers" || act === "exams") return act;
     return store("tab") || "lang";
@@ -113,13 +124,14 @@
     if (tab === "lang" || tab === "lib" || tab === "annex") {
       sidebar.classList.remove("sb-hide-empty");
       sidebar.appendChild(el("div", { class: "sb-legend" },
-        '<span><i class="dot"></i>独立成页</span><span><i class="dot hollow"></i>在上级条款页中讲解</span>'));
-      var nodes = NAV.clauses.filter(function (c) { return NAV.groups[c.i] === tab; });
+        EN ? '<span><i class="dot"></i>own page</span><span><i class="dot hollow"></i>explained on a parent page</span>'
+           : '<span><i class="dot"></i>独立成页</span><span><i class="dot hollow"></i>在上级条款页中讲解</span>'));
+      var nodes = CLAUSES.filter(function (c) { return NAV.groups[c.i] === tab; });
       sidebar.appendChild(renderTree(nodes, 0));
     } else {
       sidebar.classList.remove("sb-hide-empty");
-      var items = (NAV.collections && NAV.collections[tab]) || [];
-      if (!items.length) { sidebar.appendChild(el("div", { class: "sb-empty" }, "还没有内容。")); return; }
+      var items = (EN ? NAV_EN[tab] : NAV.collections && NAV.collections[tab]) || [];
+      if (!items.length) { sidebar.appendChild(el("div", { class: "sb-empty" }, EN ? "Nothing here yet." : "还没有内容。")); return; }
       var ul = el("ul", { class: "sb-plain" });
       var lastG = "";
       items.forEach(function (it) {
@@ -143,12 +155,25 @@
     if (DATA) return cb();
     var sc = document.createElement("script");
     sc.src = ROOT + "static/js/search-data.js";
-    sc.onload = function () { DATA = window.SEARCH || []; cb(); };
+    sc.onload = function () {
+      DATA = (window.SEARCH || []).filter(function (it) { return EN ? it.l === "en" || !!it.s : it.l !== "en"; });
+      // the English edition has no clause notes: every stable name goes to the draft itself, under its English title
+      if (EN) {
+        var have = {};
+        DATA.forEach(function (it) { if (it.l === "en" && it.s) have[it.s] = true; });
+        DATA = DATA.filter(function (it) { return it.l === "en" || !have[it.s]; });
+      }
+      if (EN) DATA = DATA.map(function (it) {
+        return it.l === "en" ? it : { t: it.e || it.t, s: it.s, n: it.n, u: EEL + it.s, k: it.k === "clause" ? "clause" : "eel" };
+      });
+      cb();
+    };
     sc.onerror = function () { DATA = []; cb(); };
     document.head.appendChild(sc);
   }
   var sel = 0, results = [];
-  var KIND = { std: "笔记", clause: "章", topics: "专题", patterns: "模式", perf: "性能", toolchain: "工程", history: "沿革", papers: "提案", term: "术语", eel: "原文 ↗" };
+  var KIND = EN ? { clause: "clause ↗", topics: "topic", patterns: "pattern", perf: "performance", toolchain: "engineering", history: "history", papers: "paper", std: "note", exams: "quiz", term: "term", eel: "draft ↗" }
+               : { std: "笔记", clause: "章", topics: "专题", patterns: "模式", perf: "性能", toolchain: "工程", history: "沿革", papers: "提案", term: "术语", eel: "原文 ↗" };
 
   function openSearch() {
     if (!modal) return;
@@ -205,7 +230,8 @@
         .slice(0, 50).map(function (r) { return r.it; });
     }
     sel = 0;
-    list.innerHTML = results.length ? "" : '<li class="search-empty">没有找到。试试 stable name，比如 <code>temp.deduct</code>。</li>';
+    list.innerHTML = results.length ? "" : EN ? '<li class="search-empty">Nothing found. Try a stable name such as <code>temp.deduct</code>.</li>'
+      : '<li class="search-empty">没有找到。试试 stable name，比如 <code>temp.deduct</code>。</li>';
     results.forEach(function (it, i) {
       var href = /^https?:/.test(it.u) ? it.u : ROOT + it.u;
       var ext = /^https?:/.test(it.u);
@@ -266,7 +292,7 @@
     var b = e.target.closest && e.target.closest(".code-btn.copy");
     if (!b) return;
     var code = b.closest("figure").querySelector("pre").innerText;
-    var done = function () { b.textContent = "已复制"; setTimeout(function () { b.textContent = "复制"; }, 1200); };
+    var done = function () { b.textContent = EN ? "Copied" : "已复制"; setTimeout(function () { b.textContent = EN ? "Copy" : "复制"; }, 1200); };
     if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, function () {});
     else { var t = el("textarea"); t.value = code; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); done(); } catch (x) {} t.remove(); }
   });
@@ -296,8 +322,10 @@
   /* ---------------- exams: <div class="quiz" data-kind="verdict|choice|open" data-answer="…"> ---------------- */
   var quizzes = Array.prototype.slice.call(document.querySelectorAll(".prose .quiz"));
   if (quizzes.length) (function () {
-    var VERDICT = [["ok", "良构"], ["error", "非良构"], ["ub", "未定义行为"], ["ifndr", "IFNDR"],
-                   ["unspecified", "未指明"], ["impl", "实现定义"], ["eb", "错误行为"]];
+    var VERDICT = EN ? [["ok", "well-formed"], ["error", "ill-formed"], ["ub", "undefined behavior"], ["ifndr", "IFNDR"],
+                        ["unspecified", "unspecified"], ["impl", "implementation-defined"], ["eb", "erroneous behavior"]]
+                     : [["ok", "良构"], ["error", "非良构"], ["ub", "未定义行为"], ["ifndr", "IFNDR"],
+                        ["unspecified", "未指明"], ["impl", "实现定义"], ["eb", "错误行为"]];
     var KEY = "exam." + PAGE;
     var state = {};
     try { state = JSON.parse(store(KEY) || "{}") || {}; } catch (e) { state = {}; }
@@ -309,12 +337,12 @@
       var done = 0, right = 0;
       quizzes.forEach(function (q, i) { var s = state[i]; if (s) { done++; if (s.ok) right++; } });
       var pct = done ? Math.round(100 * right / quizzes.length) : 0;
-      bar.innerHTML = '<span class="qb-prog"><b>' + done + "</b> / " + quizzes.length + " 已答</span>" +
-        '<span class="qb-score">答对 <b>' + right + "</b></span>" +
-        (done === quizzes.length ? '<span class="qb-final">得分 ' + pct + "</span>" : "") +
-        '<button type="button" class="qb-reset">重做</button>';
+      bar.innerHTML = '<span class="qb-prog"><b>' + done + "</b> / " + quizzes.length + (EN ? " answered" : " 已答") + "</span>" +
+        '<span class="qb-score">' + (EN ? "Correct " : "答对 ") + "<b>" + right + "</b></span>" +
+        (done === quizzes.length ? '<span class="qb-final">' + (EN ? "Score " : "得分 ") + pct + "</span>" : "") +
+        '<button type="button" class="qb-reset">' + (EN ? "Start over" : "重做") + "</button>";
       bar.querySelector(".qb-reset").addEventListener("click", function () {
-        if (!confirm("清除本卷的全部作答记录？")) return;
+        if (!confirm(EN ? "Clear all your answers on this quiz?" : "清除本卷的全部作答记录？")) return;
         state = {}; save(); location.reload();
       });
     }
@@ -323,7 +351,7 @@
       var kind = q.dataset.kind || "verdict";
       var answer = (q.dataset.answer || "").trim();
       var key = q.querySelector("details.quiz-key");
-      var num = el("span", { class: "quiz-num" }, "第 " + (i + 1) + " 题");
+      var num = el("span", { class: "quiz-num" }, EN ? "Question " + (i + 1) : "第 " + (i + 1) + " 题");
       q.insertBefore(num, q.firstChild);
       q.id = q.id || "q" + (i + 1);
       var opts = el("div", { class: "quiz-opts" });
@@ -336,7 +364,7 @@
         state[i] = { p: pick, ok: ok };
         if (!restoring) save();
         q.classList.add("answered", ok ? "right" : "wrong");
-        if (kind === "open") opts.innerHTML = '<span class="quiz-self ' + (ok ? "ok" : "no") + '">自评：' + (ok ? "答对" : "没答对") + "</span>";
+        if (kind === "open") opts.innerHTML = '<span class="quiz-self ' + (ok ? "ok" : "no") + '">' + (EN ? (ok ? "Self-graded: correct" : "Self-graded: not correct") : "自评：" + (ok ? "答对" : "没答对")) + "</span>";
         opts.querySelectorAll("button").forEach(function (b) {
           b.disabled = true;
           if (b.dataset.v === answer) b.classList.add("is-answer");
@@ -354,9 +382,9 @@
         });
         if (state[i]) finish(state[i].p, state[i].ok, true);
       } else {  // open question: reveal, then grade yourself
-        var reveal = el("button", { type: "button", class: "quiz-opt" }, "想好了，看答案");
-        var yes = el("button", { type: "button", class: "quiz-opt self", "data-v": "y", hidden: "" }, "我答对了");
-        var no = el("button", { type: "button", class: "quiz-opt self", "data-v": "n", hidden: "" }, "没答对");
+        var reveal = el("button", { type: "button", class: "quiz-opt" }, EN ? "Show the answer" : "想好了，看答案");
+        var yes = el("button", { type: "button", class: "quiz-opt self", "data-v": "y", hidden: "" }, EN ? "I got it right" : "我答对了");
+        var no = el("button", { type: "button", class: "quiz-opt self", "data-v": "n", hidden: "" }, EN ? "I got it wrong" : "没答对");
         answer = "y";
         reveal.addEventListener("click", function () { reveal.hidden = true; yes.hidden = no.hidden = false; if (key) key.open = true; });
         yes.addEventListener("click", function () { finish("y", true); });
@@ -367,6 +395,14 @@
     });
     refresh();
   })();
+
+  /* ---------------- "also in English" banner, for readers whose browser's first language isn't Chinese ---------------- */
+  var banner = document.querySelector(".lang-banner");
+  if (banner && store("langBanner") !== "off") {
+    var lang = (navigator.languages && navigator.languages[0]) || navigator.language || "";
+    if (!/^zh\b/i.test(lang)) banner.hidden = false;
+    banner.querySelector(".lang-banner-close").addEventListener("click", function () { banner.hidden = true; store("langBanner", "off"); });
+  }
 
   /* ---------------- embedded video: platform tabs ---------------- */
   document.querySelectorAll("figure.video").forEach(function (fig) {

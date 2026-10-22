@@ -273,3 +273,15 @@ clang++ -std=c++2c -O0 -fsanitize=address,undefined q.cpp -o q && ./q
 - 难度从基础到刁钻递增；最后几题可以是综合题。不要出只靠记忆的题（"某特性是哪年引入的"）。
 - 页首 `!!! tldr` 写本卷考查范围和建议用时；frontmatter 用 `order` 排序，`tags` 写主题。
 - 页尾用一张表列出每题考查的条款，方便读者回查。
+
+## 11. 英文版（English edition）
+
+英文版是逐页翻译，不是另写一套。`content/en/<栏目>/<slug>.md` 是 `content/<栏目>/<slug>.md` 的译文，生成到 `en/<栏目>/<slug>.html`。栏目页和条款笔记都可以有英文版：条款笔记写在 `content/en/std/<stable-name>.md`，生成到 `en/std/`，英文版的章节总览、侧栏条款树和面包屑会自动生成（尚未翻译的条款链接到 eel.is）。习题页仍只有中文。优先翻译已经做了视频的页面：英文视频的片尾和简介链接到这里。
+
+- **frontmatter**：只写 `title`、`summary`（必填）、`tags`、`updated`，可选 `status`、`group`。`papers`、`related`、`since`、`order`、`video` 从中文页继承，不要重复写。
+- **正文**：结构、代码块、判定标记、`[[...]]`、`{{...}}`、`¶N` 与中文版保持一致；代码里的中文注释和输出字符串译成英文。中文页修改了论断或例子，英文页要同步。
+- **链接的渲染方式**：英文页里的条款链接 `[[basic.life]]` 有英文笔记就链接英文笔记，否则指向 eel.is 原文（中文笔记对英文读者没用）；`[[topics/foo]]` 有英文版就链接英文版，否则链接中文页并加一个小"中"字标记，所以链接文字最好自己写英文（`[[topics/foo|the topic page on …]]`）；`[[g:term]]` 只显示文字，不链接中文术语表。
+- **语言切换**：每页顶栏有 `EN` / `中文` 按钮；有英文版的中文页，在浏览器首选语言不是中文时顶部显示 "Read in English" 横幅。
+- 英文首页的说明文字在 `content/en/_home.md`。英文文风同样按第 0、6 节：平实、准确，不写元评论；用 "Clang 23" 这样具体的说法代替"本机"。
+- **术语表**：英文释义写在 `data/glossary/en/<与中文同名>.json`，格式是 `[{"id": "词条 id", "def": "English definition"}]`，英文术语名沿用中文文件里的 `en` 字段。有英文释义的词条出现在 `en/glossary.html`，英文页里的 `[[g:…]]` 才会链接过去并显示悬停释义。
+- **考卷**：`content/en/exams/` 下的译文沿用同样的 quiz 组件，页面脚本会自动换成英文按钮。

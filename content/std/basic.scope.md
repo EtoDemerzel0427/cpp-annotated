@@ -45,7 +45,7 @@ C++ 一共有八种作用域，后文逐一说明：
 | 块作用域 | 复合语句；`if`、`switch`、循环语句及其子语句；`catch` 子句 | [[basic.scope.block]] |
 | 函数形参作用域 | 形参列表 | [[basic.scope.param]] |
 | lambda 作用域 | lambda 表达式 | [[basic.scope.lambda]] |
-| 命名空间作用域 | 命名空间定义；全局作用域也属于这一种 | [[basic.scope.namespace]]、[[basic.scope.class]] |
+| 命名空间作用域 | 命名空间定义；全局作用域也属于这一种 | [[basic.scope.namespace]] |
 | 类作用域 | 类定义 | [[basic.scope.class]] |
 | 枚举作用域 | 枚举定义 | [[basic.scope.enum]] |
 | 模板形参作用域 | 模板声明 | [[basic.scope.temp]] |

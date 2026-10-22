@@ -611,7 +611,7 @@ int total(int c) const {
 ## 思考题
 
 !!! question "1"
-    `sum_virtual` 的循环里，Clang 每次迭代都重新读 `p` 的 vptr。`p` 是 `const Pricing&`，循环里也没有修改它，为什么不能把这两次读提到循环外？
+    上面“循环里的调用”一节的虚函数版本，是在循环里反复调用 `p.price(prices[i])` 求和。Clang 每次迭代都重新读 `p` 的 vptr。`p` 是 `const Pricing&`，循环里也没有修改它，为什么不能把这两次读提到循环外？
 
 <details markdown="1">
 <summary>答案</summary>

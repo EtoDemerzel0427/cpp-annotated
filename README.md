@@ -26,6 +26,7 @@ content/std/             标准条款笔记，文件名 = stable name（如 basi
 content/topics/          专题
 content/toolchain/       工具链
 content/papers/          提案解读
+content/en/<栏目>/        英文版：与中文页同名的译文（见 AUTHORING.md 第 11 节）
 content/_home.md         首页正文
 data/toc.json            草案完整目录（tools/fetch_toc.py 生成）
 data/zh-titles.json      条款中文标题

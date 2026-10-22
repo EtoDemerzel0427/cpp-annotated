@@ -87,6 +87,41 @@ ADMONITION_TITLES = {
     "lawyer": "Language Lawyer",
 }
 
+# English edition: content/en/<kind>/<slug>.md translates content/<kind>/<slug>.md and renders to en/<kind>/<slug>.html.
+# Rendering helpers read LANG; it is "en" only while an English page is being rendered.
+LANG = "zh"
+EN_FONTS = "family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400&family=Inter:wght@400..700&"  # Google Fonts query, English pages only
+EN_GLOSSARY = []  # glossary entries that have an English definition
+EN_STD = False  # whether any clause note has an English version
+EN_KINDS = []  # collections that have at least one English page, in COLLECTIONS order
+EN = {
+    "site": "The Annotated C++ Standard", "sub": "C++ 标准注疏",
+    "collections": {
+        "topics": ("Topics", "Themes that cut across many clauses of the standard."),
+        "patterns": ("Idioms & Patterns", "Common C++ idioms and design patterns, and the language rules they rest on."),
+        "perf": ("Performance", "Measuring and tuning C++ performance."),
+        "toolchain": ("Toolchain & Engineering", "Compilers, linkers, ABI, build systems and project engineering."),
+        "history": ("History", "How a feature or a library got to where it is today: early attempts, committee debates and compromises, rejected designs, and the work still in progress."),
+        "papers": ("Papers", "WG21 proposals explained: motivation, design trade-offs and the final wording."),
+        "exams": ("Quizzes", "Language-lawyer quizzes by topic."),
+    },
+    "admonitions": {
+        "tldr": "Key points", "std": "The standard says", "note": "Note", "tip": "Tip", "warning": "Warning",
+        "ub": "Undefined behavior", "example": "Example", "history": "History", "impl": "Implementation notes",
+        "pitfall": "Pitfall", "question": "Question", "summary": "Summary", "lawyer": "Language Lawyer",
+    },
+    "badges": {
+        "ub": "undefined behavior", "ifndr": "ill-formed, no diagnostic required", "ill-formed": "ill-formed: a diagnostic is required",
+        "well-formed": "well-formed", "impl": "implementation-defined: the implementation must document it",
+        "unspecified": "unspecified: the implementation need not document it", "erroneous": "erroneous behavior (C++26)",
+        "deprecated": "deprecated", "removed": "removed", "dr": "defect report: applies retroactively to earlier standards",
+    },
+    "verdicts": {
+        "ok": "✓ well-formed", "error": "✗ ill-formed", "ub": "☠ undefined behavior", "ifndr": "☠ IFNDR",
+        "unspecified": "? unspecified", "impl": "? implementation-defined", "eb": "⚠ erroneous behavior",
+    },
+}
+
 WARNINGS = []
 ASSET_VERSION = dt.datetime.now().strftime("%Y%m%d%H%M%S")  # cache-busting query for CSS/JS
 
@@ -135,7 +170,7 @@ def parse_frontmatter(text):
                     k, v = line.split(":", 1)
                     v = v.strip()
                     if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-                        v = v[1:-1]
+                        v = v[1:-1].replace("\\" + v[0], v[0])  # "a \"b\"" -> a "b"
                     meta[k.strip()] = v
             text = text[end + 4:].lstrip("\n")
     return meta, text
@@ -299,14 +334,17 @@ def render_code(code, info):
             verdict = f
     if verdict:
         label, tone = VERDICTS[verdict]
+        if LANG == "en":
+            label = EN["verdicts"][verdict]
         head.append(f'<span class="verdict tone-{tone}">{label}</span>')
     tools = []
     if lang in ("cpp", "c") and ("godbolt" in flags or "run" in flags):
         tools.append(
             f'<a class="code-btn" href="{html.escape(godbolt_url(code, lang, opts))}" target="_blank" rel="noopener" '
-            f'title="在 Compiler Explorer 中打开">godbolt ↗</a>'
+            f'title="{"Open in Compiler Explorer" if LANG == "en" else "在 Compiler Explorer 中打开"}">godbolt ↗</a>'
         )
-    tools.append('<button class="code-btn copy" type="button" title="复制代码">复制</button>')
+    tools.append('<button class="code-btn copy" type="button" title="Copy code">Copy</button>' if LANG == "en" else
+                 '<button class="code-btn copy" type="button" title="复制代码">复制</button>')
     cls = f"code lang-{lang}" + (f" verdict-{verdict}" if verdict else "") + (" numbered" if numbered else "")
     return (
         f'<figure class="{cls}"><figcaption>{"".join(head)}<span class="code-tools">{"".join(tools)}</span></figcaption>'
@@ -324,6 +362,13 @@ def xref_html(target, text, ctx, page_key):
             warn(f"{page_key}: unknown glossary term [[{target}]]")
             return html.escape(text or slug)
         label = text or g["en"]
+        if LANG == "en":
+            if not g.get("def_en"):
+                return html.escape(label)
+            tip = re.sub(r"\[\[([^|\]]+)(?:\|([^\]]+))?\]\]", lambda m: m.group(2) or m.group(1), g["def_en"])
+            tip = re.sub(r"`|\*", "", tip)[:240]
+            return (f'<a class="xref gloss" href="{{ROOT}}en/glossary.html#{slug}" '
+                    f'data-tip="{html.escape(g["en"] + " — " + tip)}">{html.escape(label)}</a>')
         tip = re.sub(r"<[^>]+>", "", g.get("zh", "")) + " — " + re.sub(r"\[\[|\]\]|`|\*", "", g.get("def", ""))[:220]
         return (f'<a class="xref gloss" href="{{ROOT}}glossary.html#{slug}" '
                 f'data-tip="{html.escape(tip)}">{html.escape(label)}</a>')
@@ -339,6 +384,12 @@ def xref_html(target, text, ctx, page_key):
         if not p:
             warn(f"{page_key}: link to missing page [[{target}]]")
             return html.escape(text or target)
+        if LANG == "en":
+            en = ctx.en_pages.get(key)
+            if not en:
+                return (f'<a class="xref page zh-only" href="{{ROOT}}{p["url"]}{("#" + frag) if frag else ""}" hreflang="zh" '
+                        f'data-tip="In Chinese; no English version yet">{html.escape(text or p["title"])}</a>')
+            p = en
         href = "{ROOT}" + p["url"] + (("#" + frag) if frag else "")
         return f'<a class="xref page" href="{href}">{html.escape(text or p["title"])}</a>'
     # stable names: basic.life, basic.life#5, basic.life/5
@@ -351,7 +402,7 @@ def xref_html(target, text, ctx, page_key):
     entry = ctx.by_id.get(sid)
     title = ""
     if entry:
-        zh = ctx.zh.get(sid)
+        zh = ctx.zh.get(sid) if LANG == "zh" else None
         title = f'{entry["num"]} {entry["title"]}' + (f" · {zh}" if zh else "")
     if sid in ctx.std_pages:
         p = ctx.std_pages[sid]
@@ -364,7 +415,7 @@ def xref_html(target, text, ctx, page_key):
         return f'<a class="xref std local" href="{href}" data-tip="{html.escape(tip)}">{html.escape(label)}</a>'
     if sid in ctx.covered:
         p = ctx.covered[sid]
-        tip = title + f" — 见本站 [{p['id']}] {p['title']}"
+        tip = title + (f" — explained on [{p['id']}] {p['title']}" if LANG == "en" else f" — 见本站 [{p['id']}] {p['title']}")
         frag = (f"#{sid}-p" + para.split(".")[0] if para and re.match(r"^\d+(\.\d+)*$", para)
                 else f"#{ctx.section_of(sid)}" if ctx.section_of(sid) else "")
         return f'<a class="xref std local" href="{{ROOT}}{p["url"]}{frag}" data-tip="{html.escape(tip)}">{html.escape(label)}</a>'
@@ -382,9 +433,11 @@ def badge_html(name, arg, page_key):
     m = VERSION_RE.match(n)
     if m:
         v = m.group(1)
-        return f'<span class="badge ver" title="自 C++{v} 起">C++{v}</span>'
+        return f'<span class="badge ver" title="{"Since" if LANG == "en" else "自"} C++{v}{"" if LANG == "en" else " 起"}">C++{v}</span>'
     if n in BADGES:
         label, tip, tone = BADGES[n]
+        if LANG == "en":
+            tip = EN["badges"].get(n, n)
         if arg:
             label = f"{label} {arg}"
         return f'<span class="badge tone-{tone}" title="{html.escape(tip)}">{html.escape(label)}</span>'
@@ -448,7 +501,7 @@ def render_markdown(src, ctx, page_key):
         return f"{indent}XCODEBLOCKX{len(blocks) - 1}X"
 
     src = FENCE_RE.sub(stash, src)
-    page = ctx.pages.get(page_key)
+    page = ctx.pages.get(page_key[3:] if page_key.startswith("en/") else page_key)
     covers = {sid for sid, p in ctx.covered.items() if p is page} if page else set()
     for pos, sid in reversed(section_heads(src, covers)):
         src = src[:pos] + f'<a class="sec-anchor" id="{sid}"></a>\n\n' + src[pos:]
@@ -463,7 +516,8 @@ def render_markdown(src, ctx, page_key):
     md = markdown.Markdown(
         extensions=["extra", "admonition", "sane_lists", "toc"],
         extension_configs={"toc": {"slugify": slugify_unicode, "toc_depth": "2-3", "permalink": "#",
-                                   "permalink_class": "anchor", "permalink_title": "链接到此处"}},
+                                   "permalink_class": "anchor",
+                                   "permalink_title": "Link to this section" if LANG == "en" else "链接到此处"}},
     )
     out = md.convert(src)
     # `\|` is the way to write a pipe inside inline code in a table cell; drop the escape in the output
@@ -474,6 +528,8 @@ def render_markdown(src, ctx, page_key):
 
 
 def admonition_title(kind):
+    if LANG == "en":
+        return EN["admonitions"].get(kind, kind.capitalize())
     return ADMONITION_TITLES.get(kind, kind.capitalize())
 
 
@@ -495,31 +551,28 @@ def toc_html(tokens):
             items.append(f'<li><a href="#{t["id"]}">{esc(name)}</a>{sub}</li>')
         return "<ul>" + "".join(items) + "</ul>"
 
-    return f'<nav class="page-toc" aria-label="本页目录"><div class="page-toc-title">本页目录</div>{walk(tokens)}</nav>'
+    t = "On this page" if LANG == "en" else "本页目录"
+    return f'<nav class="page-toc" aria-label="{t}"><div class="page-toc-title">{t}</div>{walk(tokens)}</nav>'
 
 
-def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_class=""):
-    full_title = f"{title} · {SITE_NAME}" if title != SITE_NAME else f"{SITE_NAME} · {SITE_SUB}"
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{esc(full_title)}</title>
-<meta name="description" content="{esc(desc or SITE_SUB)}">
-<link rel="icon" href="{root}static/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
-<link rel="stylesheet" href="{root}static/css/site.css?v={ASSET_VERSION}">
-<script>try{{var t=localStorage.getItem('cppstd.theme');if(t)document.documentElement.dataset.theme=t;}}catch(e){{}}</script>
-</head>
-<body class="{body_class}" data-root="{root}" data-page="{esc(page_id)}" data-active="{esc(active)}">
-<header class="topbar">
-  <button class="icon-btn nav-toggle" type="button" aria-label="打开导航" aria-controls="sidebar">☰</button>
-  <a class="brand" href="{root}index.html"><span class="brand-mark">§</span><span class="brand-name">{SITE_NAME}</span><span class="brand-sub">{SITE_SUB}</span></a>
-  <nav class="topnav">
-    <a href="{root}std/index.html" data-nav="std">标准</a>
+def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_class="", url="", alt=""):
+    """url, alt: site-relative URLs of this page and of its version in the other language, if there is one."""
+    en = LANG == "en"
+    name, sub = (EN["site"], EN["sub"]) if en else (SITE_NAME, SITE_SUB)
+    full_title = f"{title} · {name}" if title != name else f"{name} · {sub}"
+    zh_url, en_url = (alt, url) if en else (url, alt)
+    alternates = "".join(f'\n<link rel="alternate" hreflang="{l}" href="{root}{u}">'
+                         for l, u in (("zh", zh_url), ("en", en_url)) if u and alt)
+    if en:
+        nav = ([("en/index.html", "home", "Home")] + ([("en/std/index.html", "std", "Standard")] if EN_STD else []) + [(f"en/{k}/index.html", k, EN["collections"][k][0]) for k in EN_KINDS]
+               + ([("en/glossary.html", "glossary", "Glossary")] if EN_GLOSSARY else []))
+        nav_html = "\n    ".join(f'<a href="{root}{u}" data-nav="{k}">{esc(l)}</a>' for u, k, l in nav)
+        switch = (f'<a class="lang-switch" href="{root}{alt or "index.html"}" hreflang="zh" lang="zh" '
+                  f'title="{"阅读本页中文版" if alt else "中文站"}">中文</a>')
+        search_label, search_ph = "Search", "Search English pages, or a stable name such as basic.life…"
+        foot = '<span><kbd>↑</kbd><kbd>↓</kbd> select</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span>'
+    else:
+        nav_html = """<a href="{root}std/index.html" data-nav="std">标准</a>
     <a href="{root}topics/index.html" data-nav="topics">专题</a>
     <a href="{root}patterns/index.html" data-nav="patterns">模式</a>
     <a href="{root}perf/index.html" data-nav="perf">性能</a>
@@ -528,25 +581,55 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
     <a href="{root}papers/index.html" data-nav="papers">提案</a>
     <a href="{root}exercises.html" data-nav="exercises">习题</a>
     <a href="{root}exams/index.html" data-nav="exams">考卷</a>
-    <a href="{root}glossary.html" data-nav="glossary">术语</a>
+    <a href="{root}glossary.html" data-nav="glossary">术语</a>""".replace("{root}", root)
+        switch = (f'<a class="lang-switch" href="{root}{alt or "en/index.html"}" hreflang="en" lang="en" '
+                  f'title="{"Read this page in English" if alt else "English edition"}">EN</a>')
+        search_label, search_ph = "搜索 stable name / 关键词", "输入 stable name（如 basic.life）、标题或关键词…"
+        foot = '<span><kbd>↑</kbd><kbd>↓</kbd> 选择</span><span><kbd>↵</kbd> 打开</span><span><kbd>esc</kbd> 关闭</span>'
+    banner = ""
+    if alt and not en:  # the English videos link here; offer the translation to readers whose browser isn't Chinese
+        banner = (f'<div class="lang-banner" lang="en" hidden><span>This page is also available in English.</span>'
+                  f'<a href="{root}{alt}" hreflang="en">Read in English →</a>'
+                  f'<button type="button" class="lang-banner-close" aria-label="Dismiss">×</button></div>')
+    return f"""<!doctype html>
+<html lang="{"en" if en else "zh-CN"}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{esc(full_title)}</title>
+<meta name="description" content="{esc(desc or sub)}">{alternates}
+<link rel="icon" href="{root}static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?{EN_FONTS if en else ""}family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
+<link rel="stylesheet" href="{root}static/css/site.css?v={ASSET_VERSION}">
+<script>try{{var t=localStorage.getItem('cppstd.theme');if(t)document.documentElement.dataset.theme=t;}}catch(e){{}}</script>
+</head>
+<body class="{body_class}" data-root="{root}" data-page="{esc(page_id)}" data-active="{esc(active)}">
+<header class="topbar">
+  <button class="icon-btn nav-toggle" type="button" aria-label="{"Open navigation" if en else "打开导航"}" aria-controls="sidebar">☰</button>
+  <a class="brand" href="{root}{"en/" if en else ""}index.html"><span class="brand-mark">§</span><span class="brand-name">{name}</span><span class="brand-sub">{sub}</span></a>
+  <nav class="topnav">
+    {nav_html}
   </nav>
-  <button class="search-btn" type="button" aria-label="搜索"><span>搜索 stable name / 关键词</span><kbd>/</kbd></button>
-  <button class="icon-btn theme-toggle" type="button" aria-label="切换明暗主题">◐</button>
+  <button class="search-btn" type="button" aria-label="{"Search" if en else "搜索"}"><span>{search_label}</span><kbd>/</kbd></button>
+  {switch}
+  <button class="icon-btn theme-toggle" type="button" aria-label="{"Toggle dark mode" if en else "切换明暗主题"}">◐</button>
 </header>
 <div class="shell">
-  <aside class="sidebar" id="sidebar" aria-label="导航"></aside>
+  <aside class="sidebar" id="sidebar" aria-label="{"Navigation" if en else "导航"}"></aside>
   <main class="main">
     <article class="content">
-{body}
+{banner}{body}
     </article>
     {toc}
   </main>
 </div>
 <div class="search-modal" hidden>
-  <div class="search-panel" role="dialog" aria-label="搜索">
-    <input class="search-input" type="search" placeholder="输入 stable name（如 basic.life）、标题或关键词…" autocomplete="off" spellcheck="false">
+  <div class="search-panel" role="dialog" aria-label="{"Search" if en else "搜索"}">
+    <input class="search-input" type="search" placeholder="{search_ph}" autocomplete="off" spellcheck="false">
     <ul class="search-results"></ul>
-    <div class="search-foot"><span><kbd>↑</kbd><kbd>↓</kbd> 选择</span><span><kbd>↵</kbd> 打开</span><span><kbd>esc</kbd> 关闭</span></div>
+    <div class="search-foot">{foot}</div>
   </div>
 </div>
 <div class="tip" hidden></div>
@@ -559,6 +642,8 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
 
 def status_badge(status):
     label, cls = STATUS.get(status, STATUS["draft"])
+    if LANG == "en":
+        label = cls
     return f'<span class="status status-{cls}">{label}</span>'
 
 
@@ -569,15 +654,17 @@ def breadcrumbs(entry, by_id, zh, root, pages_std):
         chain.append(e)
         e = by_id.get(e["parent"]) if e["parent"] else None
     chain.reverse()
-    parts = [f'<a href="{root}std/index.html">标准</a>']
+    std = "en/std/" if LANG == "en" else "std/"
+    parts = [f'<a href="{root}{std}index.html">{"Standard" if LANG == "en" else "标准"}</a>']
     for c in chain[:-1]:
-        href = f"{root}std/{c['id']}.html" if (c["level"] == 1 or c["id"] in pages_std) else EEL + c["id"]
-        parts.append(f'<a href="{href}">{esc(c["num"])} {esc(zh.get(c["id"]) or c["title"])}</a>')
+        href = f"{root}{std}{c['id']}.html" if (c["level"] == 1 or c["id"] in pages_std) else EEL + c["id"]
+        label = c["title"] if LANG == "en" else zh.get(c["id"]) or c["title"]
+        parts.append(f'<a href="{href}">{esc(c["num"])} {esc(label)}</a>')
     return '<nav class="crumbs">' + '<span class="sep">/</span>'.join(parts) + "</nav>"
 
 
 def entry_link(e, root, ctx, show_num=True):
-    zh = ctx.zh.get(e["id"])
+    zh = ctx.zh.get(e["id"]) if LANG == "zh" else None
     label = f'{esc(e["title"])}' + (f' <span class="zh">{esc(zh)}</span>' if zh else "")
     num = f'<span class="num">{esc(e["num"])}</span>' if show_num else ""
     sn = f'<span class="sn">[{esc(e["id"])}]</span>'
@@ -587,14 +674,15 @@ def entry_link(e, root, ctx, show_num=True):
                 f'{status_badge(p.get("status", "draft"))}</a>')
     if e["id"] in ctx.covered:
         p = ctx.covered[e["id"]]
-        return (f'<a class="sec has-page covered" href="{root}{p["url"]}" title="在 [{esc(p["id"])}] 页中讲解">{num}<span class="t">{label}</span>{sn}</a>')
+        return (f'<a class="sec has-page covered" href="{root}{p["url"]}" title="{"Explained on the page for" if LANG == "en" else "在"} [{esc(p["id"])}]{"" if LANG == "en" else " 页中讲解"}">{num}<span class="t">{label}</span>{sn}</a>')
     return (f'<a class="sec no-page" href="{EEL}{e["id"]}" target="_blank" rel="noopener">{num}'
             f'<span class="t">{label}</span>{sn}<span class="ext-mark">↗</span></a>')
 
 
-def children_block(entry, root, ctx, title="本节结构"):
+def children_block(entry, root, ctx, title=None):
     if not entry["children"]:
         return ""
+    title = title or ("In this clause" if LANG == "en" else "本节结构")
 
     def walk(ids):
         lis = []
@@ -609,22 +697,24 @@ def children_block(entry, root, ctx, title="本节结构"):
 # --------------------------------------------------------------------------- build
 
 VIDEO_SOURCES = (  # (key, tab label, embed URL template)
-    ("bilibili", "B站 · 中文", "https://player.bilibili.com/player.html?bvid={}&page=1&autoplay=0&high_quality=1&danmaku=0"),
+    ("bilibili", "Bilibili · 中文", "https://player.bilibili.com/player.html?bvid={}&page=1&autoplay=0&high_quality=1&danmaku=0"),
     ("youtube", "YouTube · English", "https://www.youtube-nocookie.com/embed/{}"),
 )
 
 
 def video_html(video):
     """Embedded episode of the page's video version, one tab per platform."""
-    srcs = [(label, url.format(video[key])) for key, label, url in VIDEO_SOURCES if video.get(key)]
+    sources = VIDEO_SOURCES[::-1] if LANG == "en" else VIDEO_SOURCES  # each edition opens on its own language
+    srcs = [(label, url.format(video[key])) for key, label, url in sources if video.get(key)]
     if not srcs:
         return ""
     tabs = "".join(f'<button type="button" role="tab" aria-selected="{"true" if i == 0 else "false"}" data-src="{esc(u)}">{esc(l)}</button>'
                    for i, (l, u) in enumerate(srcs)) if len(srcs) > 1 else ""
     return (f'<figure class="video">' + (f'<div class="video-tabs" role="tablist">{tabs}</div>' if tabs else "")
-            + f'<div class="video-frame"><iframe src="{esc(srcs[0][1])}" title="本页的视频版" loading="lazy" '
+            + f'<div class="video-frame"><iframe src="{esc(srcs[0][1])}" title="{"Video version of this page" if LANG == "en" else "本页的视频版"}" loading="lazy" '
             'allow="fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>'
-            '<figcaption>本页的视频版：中文《C++ 拆解室》，英文 <i>ill-formed C++</i>。</figcaption></figure>')
+            + ('<figcaption>The video version of this page: <i>ill-formed C++</i> in English, 《C++ 拆解室》 in Chinese.</figcaption></figure>'
+               if LANG == "en" else '<figcaption>本页的视频版：中文《C++ 拆解室》，英文 <i>ill-formed C++</i>。</figcaption></figure>'))
 
 
 def collect_pages(by_id):
@@ -653,6 +743,32 @@ def collect_pages(by_id):
             warn(f"{rel}: unknown status '{p['status']}'")
         pages[key] = p
     return pages
+
+
+def collect_en_pages(pages):
+    """content/en/<kind>/<slug>.md: the English version of pages["<kind>/<slug>"]."""
+    en_pages = {}
+    for path in sorted((CONTENT / "en").rglob("*.md")):
+        rel = path.relative_to(CONTENT / "en")
+        if rel.name.startswith("_"):
+            continue
+        zh_key = f"{rel.parts[0]}/{rel.stem}"
+        if len(rel.parts) != 2 or zh_key not in pages:
+            warn(f"en/{rel}: no Chinese page '{zh_key}' to translate")
+            continue
+        zh = pages[zh_key]
+        meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
+        en = dict(zh)
+        en.update({
+            "key": "en/" + zh_key, "src": body, "path": "en/" + str(rel), "url": "en/" + zh["url"], "zh": zh,
+            "title": meta.get("title") or zh["title"], "summary": meta.get("summary", ""),
+            "status": meta.get("status", zh["status"]), "tags": split_list(meta.get("tags")),
+            "group": meta.get("group", ""), "updated": meta.get("updated", zh["updated"]),
+        })
+        if not meta.get("title") or not meta.get("summary"):
+            warn(f"en/{rel}: missing title or summary")
+        en_pages[zh_key] = en
+    return en_pages
 
 
 def extract_questions(html_s):
@@ -700,7 +816,7 @@ def rel_root(url):
 
 
 def build():
-    global OUT
+    global OUT, LANG, EN_STD
     final = None
     if "--check" in sys.argv:
         import tempfile
@@ -727,84 +843,34 @@ def build():
         if slug in glossary:
             warn(f"glossary: duplicate term {slug}")
         glossary[slug] = g
+    # data/glossary/en/*.json: [{"id": slug, "def": English definition}] for the English glossary
+    for gp in sorted((DATA / "glossary" / "en").glob("*.json")):
+        try:
+            for d in json.loads(gp.read_text(encoding="utf-8")):
+                if d.get("id") in glossary and d.get("def"):
+                    glossary[d["id"]]["def_en"] = d["def"]
+                else:
+                    warn(f"{gp.relative_to(ROOT)}: unknown glossary id or empty def: {d.get('id')}")
+        except json.JSONDecodeError as ex:
+            warn(f"{gp.relative_to(ROOT)}: invalid JSON ({ex})")
+    EN_GLOSSARY[:] = [g for g in gloss_list if g.get("def_en")]
 
     pages = collect_pages(by_id)
+    en_pages = collect_en_pages(pages)
+    EN_KINDS[:] = [k for k in COLLECTIONS if any(e["kind"] == k for e in en_pages.values())]
     ctx = Ctx(by_id, pages, glossary, zh)
+    ctx.en_pages = en_pages
+    # the English view: clause notes are the English ones (links to untranslated clauses go to eel.is);
+    # collection pages stay Chinese here, xref_html swaps in their English versions through en_pages
+    EN_STD = any(k.startswith("std/") for k in en_pages)
+    ctx_en = Ctx(by_id, {k: (en_pages.get(k) if v["kind"] == "std" else v) for k, v in pages.items()
+                         if v["kind"] != "std" or k in en_pages}, glossary, zh)
+    ctx_en.en_pages = en_pages
     clauses = [e for e in entries if e["level"] == 1]
     search = []
     exercises = []
 
-    # ---- std pages
-    std_sorted = sorted((p for p in pages.values() if p["kind"] == "std"),
-                        key=lambda p: by_id[p["id"]]["order"] if p["id"] in by_id else 10**9)
-    clause_ids = {c["id"] for c in clauses}
-    for i, p in enumerate(std_sorted):
-        if p["id"] in clause_ids:
-            continue  # rendered as clause overview below
-        root = rel_root(p["url"])
-        body_html, toks = render_markdown(p["src"], ctx, p["key"])
-        e = by_id.get(p["id"])
-        qs = extract_questions(body_html)
-        if qs:
-            top = p["id"]
-            while ctx.parent.get(top):
-                top = ctx.parent[top]
-            sec = {"lang": "核心语言", "lib": "标准库", "annex": "附录"}.get(clause_group(by_id[top]) if top in by_id else "", "标准")
-            exercises.append({"section": "标准 · " + sec, "key": p["key"], "url": p["url"], "title": f'{p["title"]} [{p["id"]}]', "qs": qs})
-        body_html = body_html.replace("{ROOT}", root)
-        head = []
-        if e:
-            head.append(breadcrumbs(e, by_id, zh, root, ctx.std_pages))
-        num = esc(e["num"]) if e else ""
-        en = esc(e["title"]) if e else ""
-        meta_bits = [f'<a class="sn-chip" href="{EEL}{p["id"]}" target="_blank" rel="noopener" title="在 eel.is 阅读标准原文">[{esc(p["id"])}] ↗</a>',
-                     status_badge(p["status"])]
-        if p["since"]:
-            meta_bits.append(badge_html(p["since"], None, p["key"]) if VERSION_RE.match(p["since"]) else esc(p["since"]))
-        for pp in p["papers"]:
-            meta_bits.append(xref_html(pp, None, ctx, p["key"]))
-        head.append(f'<header class="page-head"><div class="page-num">{num}</div><h1>{esc(p["title"])}</h1>'
-                    f'<div class="page-en">{en}</div>'
-                    + (f'<p class="page-summary">{esc(p["summary"])}</p>' if p["summary"] else "")
-                    + f'<div class="page-meta">{"".join(meta_bits)}</div></header>')
-        tail = []
-        if e:
-            tail.append(children_block(e, root, ctx))
-        if p["related"]:
-            tail.append(related_block(p["related"], ctx, p["key"], root))
-        prev_p = next((q for q in reversed(std_sorted[:i]) if q["id"] not in clause_ids), None)
-        next_p = next((q for q in std_sorted[i + 1:] if q["id"] not in clause_ids), None)
-        tail.append(pager(prev_p, next_p, root, ctx))
-        tail.append(source_note(p, toc_meta))
-        page = layout(title=f'{p["title"]} [{p["id"]}]', body="".join(head) + f'<div class="prose">{body_html}</div>' + "".join(tail),
-                      root=root, active="std", toc=toc_html(toks), desc=p["summary"], page_id=p["id"])
-        write(p["url"], page)
-        search.append(search_item(p, body_html, toks, e, zh))
-
-    # ---- clause overview pages
-    for c in clauses:
-        url = f"std/{c['id']}.html"
-        root = rel_root(url)
-        intro, toks = "", []
-        cp = ctx.std_pages.get(c["id"])
-        if cp:
-            intro, toks = render_markdown(cp["src"], ctx, cp["key"])
-            intro = f'<div class="prose">{intro.replace("{ROOT}", root)}</div>'
-        covered, total = coverage(c, by_id, ctx)
-        title_zh = zh.get(c["id"]) or c["title"]
-        head = (f'<nav class="crumbs"><a href="{root}std/index.html">标准</a></nav>'
-                f'<header class="page-head"><div class="page-num">{"第 " + c["num"] + " 章" if c["num"].isdigit() else "附录 " + c["num"]}</div>'
-                f'<h1>{esc(title_zh)}</h1><div class="page-en">{esc(c["title"])}</div>'
-                + (f'<p class="page-summary">{esc(cp["summary"])}</p>' if cp and cp["summary"] else "")
-                + f'<div class="page-meta"><a class="sn-chip" href="{EEL}{c["id"]}" target="_blank" rel="noopener">[{esc(c["id"])}] ↗</a>'
-                  f'{progress_bar(covered, total)}</div></header>')
-        body = head + intro + children_block(c, root, ctx, title="条款一览")
-        write(url, layout(title=f'{title_zh} [{c["id"]}]', body=body, root=root, active="std",
-                          toc=toc_html(toks), page_id=c["id"]))
-        search.append({"t": title_zh, "e": c["title"], "s": c["id"], "n": c["num"], "u": url, "k": "clause", "x": cp["summary"] if cp else ""})
-
-    # ---- std index
-    write("std/index.html", std_index(clauses, by_id, ctx, toc_meta))
+    render_std(ctx, clauses, by_id, zh, toc_meta, search, exercises)
 
     # ---- collections
     for kind, (label, blurb) in COLLECTIONS.items():
@@ -831,20 +897,65 @@ def build():
             if p["related"]:
                 tail.append(related_block(p["related"], ctx, p["key"], root))
             tail.append(pager(items[i - 1] if i else None, items[i + 1] if i + 1 < len(items) else None, root, ctx))
+            en = en_pages.get(p["key"])
             write(p["url"], layout(title=p["title"], body=head + f'<div class="prose">{body_html}</div>' + "".join(tail),
-                                   root=root, active=kind, toc=toc_html(toks), desc=p["summary"], page_id=p["key"]))
+                                   root=root, active=kind, toc=toc_html(toks), desc=p["summary"], page_id=p["key"],
+                                   url=p["url"], alt=en["url"] if en else ""))
             search.append(search_item(p, body_html, toks, None, zh))
         write(f"{kind}/index.html", collection_index(kind, label, blurb, items))
 
+    # ---- English edition
+    LANG = "en"
+    try:
+        if EN_STD:
+            render_std(ctx_en, clauses, by_id, zh, toc_meta, search, exercises)
+        for kind in EN_KINDS:
+            label, blurb = EN["collections"][kind]
+            items = sorted((p for p in en_pages.values() if p["kind"] == kind), key=lambda p: (p["order"], p["title"]))
+            for i, p in enumerate(items):
+                root = rel_root(p["url"])
+                body_html, toks = render_markdown(p["src"], ctx_en, p["key"])
+                body_html = body_html.replace("{ROOT}", root)
+                meta_bits = [f'<span class="tag">{esc(t)}</span>' for t in p["tags"]]
+                if p["since"]:
+                    meta_bits.insert(0, badge_html(p["since"], None, p["key"]) if VERSION_RE.match(p["since"]) else esc(p["since"]))
+                meta_bits[1:1] = [xref_html(pp, None, ctx_en, p["key"]) for pp in p["papers"]]
+                head = (f'<nav class="crumbs"><a href="{root}en/{kind}/index.html">{label}</a></nav>'
+                        f'<header class="page-head"><h1>{esc(p["title"])}</h1>'
+                        + (f'<p class="page-summary">{esc(p["summary"])}</p>' if p["summary"] else "")
+                        + f'<div class="page-meta">{"".join(meta_bits)}</div></header>' + video_html(p["video"]))
+                tail = []
+                if p["related"]:
+                    tail.append(related_block(p["related"], ctx_en, p["key"], root))
+                tail.append(pager(items[i - 1] if i else None, items[i + 1] if i + 1 < len(items) else None, root, ctx_en))
+                tail.append(f'<footer class="page-foot">Translated from the <a href="{root}{p["zh"]["url"]}" hreflang="zh">Chinese original</a>'
+                            + (f', last updated {esc(p["updated"])}.' if p["updated"] else ".") + '</footer>')
+                write(p["url"], layout(title=p["title"], body=head + f'<div class="prose">{body_html}</div>' + "".join(tail),
+                                       root=root, active=kind, toc=toc_html(toks), desc=p["summary"], page_id=p["key"],
+                                       url=p["url"], alt=p["zh"]["url"]))
+                item = search_item(p, body_html, toks, None, zh)
+                item["l"] = "en"
+                search.append(item)
+            write(f"en/{kind}/index.html", collection_index(kind, label, blurb, items, prefix="en/",
+                                                                     untranslated=sum(1 for p in pages.values() if p["kind"] == kind) - len(items)))
+        write("en/index.html", en_home(en_pages))
+        if EN_GLOSSARY:
+            write("en/glossary.html", en_glossary_page(ctx_en))
+            for g in EN_GLOSSARY:
+                search.append({"t": g["en"], "s": "", "u": f"en/glossary.html#{g['id']}", "k": "term", "l": "en",
+                               "x": re.sub(r"\[\[([^|\]]+)(?:\|([^\]]+))?\]\]", lambda m: m.group(2) or m.group(1), g["def_en"])[:160]})
+    finally:
+        LANG = "zh"
+
     # ---- glossary, home
-    write("glossary.html", glossary_page(gloss_list, ctx))
+    write("glossary.html", glossary_page(gloss_list, ctx))  # its EN switch: en/glossary.html when there is one
     exercises.sort(key=lambda e: 0 if e["section"].startswith("标准") else 1 + list(COLLECTIONS.values()).index(
         next(v for v in COLLECTIONS.values() if v[0] == e["section"])))
     write("exercises.html", exercises_page(exercises))
     for g in gloss_list:
         search.append({"t": g["en"], "e": g.get("zh", ""), "s": "", "u": f"glossary.html#{g['id']}", "k": "term",
                        "x": re.sub(r"\[\[([^|\]]+)(?:\|([^\]]+))?\]\]", lambda m: m.group(2) or m.group(1), g.get("def", ""))[:160]})
-    write("index.html", home_page(clauses, by_id, ctx, pages, toc_meta))
+    write("index.html", home_page(clauses, by_id, ctx, pages, toc_meta))  # after the English pages: EN_KINDS is set
 
     # ---- uncovered stable names are searchable too (link to eel.is)
     have = {s["s"] for s in search if s.get("s")}
@@ -862,8 +973,14 @@ def build():
                         for k in COLLECTIONS},
         "groups": {c["id"]: clause_group(c) for c in clauses},
     }
+    nav_en = {k: [{"t": p["title"], "u": p["url"], "st": p["status"], "g": p.get("group", "")}
+                  for p in sorted((p for p in en_pages.values() if p["kind"] == k), key=lambda p: (p["order"], p["title"]))]
+              for k in EN_KINDS}
+    if EN_STD:
+        nav_en["clauses"] = [nav_node(c, by_id, ctx_en) for c in clauses]
     (OUT / "static/js/nav-data.js").write_text(
-        "window.NAV=" + json.dumps(nav, ensure_ascii=False, separators=(",", ":")) + ";\n", encoding="utf-8")
+        "window.NAV=" + json.dumps(nav, ensure_ascii=False, separators=(",", ":")) + ";\n"
+        + "window.NAV_EN=" + json.dumps(nav_en, ensure_ascii=False, separators=(",", ":")) + ";\n", encoding="utf-8")
     (OUT / "static/js/search-data.js").write_text(
         "window.SEARCH=" + json.dumps(search, ensure_ascii=False, separators=(",", ":")) + ";\n", encoding="utf-8")
     (OUT / ".nojekyll").write_text("")
@@ -872,7 +989,7 @@ def build():
     n_std = len(ctx.std_pages)
     print(f"built {len(pages)} pages ({n_std} std, " +
           ", ".join(f"{sum(1 for p in pages.values() if p['kind'] == k)} {k}" for k in COLLECTIONS) +
-          f"), {len(gloss_list)} glossary terms -> {OUT}")
+          f"), {len(en_pages)} English, {len(gloss_list)} glossary terms -> {OUT}")
     for w in WARNINGS:
         print("  warning:", w)
     if "--check" in sys.argv:
@@ -885,6 +1002,90 @@ def build():
         OUT = final
         shutil.rmtree(old_site, ignore_errors=True)
     return 1 if "--strict" in sys.argv and WARNINGS else 0
+
+
+def render_std(ctx, clauses, by_id, zh, toc_meta, search, exercises):
+    """Clause notes, clause overviews and the std index; in English when LANG == "en" (ctx is then the English view)."""
+    en = LANG == "en"
+    std = "en/std/" if en else "std/"
+    std_sorted = sorted(ctx.std_pages.values(), key=lambda p: by_id[p["id"]]["order"] if p["id"] in by_id else 10**9)
+    clause_ids = {c["id"] for c in clauses}
+    for i, p in enumerate(std_sorted):
+        if p["id"] in clause_ids:
+            continue  # rendered as clause overview below
+        root = rel_root(p["url"])
+        body_html, toks = render_markdown(p["src"], ctx, p["key"])
+        e = by_id.get(p["id"])
+        qs = extract_questions(body_html)
+        if qs and not en:
+            top = p["id"]
+            while ctx.parent.get(top):
+                top = ctx.parent[top]
+            sec = {"lang": "核心语言", "lib": "标准库", "annex": "附录"}.get(clause_group(by_id[top]) if top in by_id else "", "标准")
+            exercises.append({"section": "标准 · " + sec, "key": p["key"], "url": p["url"], "title": f'{p["title"]} [{p["id"]}]', "qs": qs})
+        body_html = body_html.replace("{ROOT}", root)
+        head = []
+        if e:
+            head.append(breadcrumbs(e, by_id, zh, root, ctx.std_pages))
+        num = esc(e["num"]) if e else ""
+        en_title = esc(e["title"]) if e else ""
+        meta_bits = [f'<a class="sn-chip" href="{EEL}{p["id"]}" target="_blank" rel="noopener" '
+                     f'title="{"Read the draft at eel.is" if en else "在 eel.is 阅读标准原文"}">[{esc(p["id"])}] ↗</a>',
+                     status_badge(p["status"])]
+        if p["since"]:
+            meta_bits.append(badge_html(p["since"], None, p["key"]) if VERSION_RE.match(p["since"]) else esc(p["since"]))
+        for pp in p["papers"]:
+            meta_bits.append(xref_html(pp, None, ctx, p["key"]))
+        head.append(f'<header class="page-head"><div class="page-num">{num}</div><h1>{esc(p["title"])}</h1>'
+                    + (f'<div class="page-en">{en_title}</div>' if en_title != esc(p["title"]) else "")
+                    + (f'<p class="page-summary">{esc(p["summary"])}</p>' if p["summary"] else "")
+                    + f'<div class="page-meta">{"".join(meta_bits)}</div></header>')
+        tail = []
+        if e:
+            tail.append(children_block(e, root, ctx))
+        if p["related"]:
+            tail.append(related_block(p["related"], ctx, p["key"], root))
+        prev_p = next((q for q in reversed(std_sorted[:i]) if q["id"] not in clause_ids), None)
+        next_p = next((q for q in std_sorted[i + 1:] if q["id"] not in clause_ids), None)
+        tail.append(pager(prev_p, next_p, root, ctx))
+        tail.append(source_note(p, toc_meta).replace("{ROOT}", root))
+        other = p["zh"]["url"] if en else (ctx.en_pages[p["key"]]["url"] if p["key"] in ctx.en_pages else "")
+        page = layout(title=f'{p["title"]} [{p["id"]}]', body="".join(head) + f'<div class="prose">{body_html}</div>' + "".join(tail),
+                      root=root, active="std", toc=toc_html(toks), desc=p["summary"], page_id=p["id"], url=p["url"], alt=other)
+        write(p["url"], page)
+        item = search_item(p, body_html, toks, e, zh)
+        if en:
+            item["l"] = "en"
+        search.append(item)
+
+    # ---- clause overview pages
+    for c in clauses:
+        url = f"{std}{c['id']}.html"
+        root = rel_root(url)
+        intro, toks = "", []
+        cp = ctx.std_pages.get(c["id"])
+        if cp:
+            intro, toks = render_markdown(cp["src"], ctx, cp["key"])
+            intro = f'<div class="prose">{intro.replace("{ROOT}", root)}</div>'
+        covered, total = coverage(c, by_id, ctx)
+        title = c["title"] if en else zh.get(c["id"]) or c["title"]
+        label = ((f"Clause {c['num']}" if c["num"].isdigit() else f"Annex {c['num']}") if en
+                 else ("第 " + c["num"] + " 章" if c["num"].isdigit() else "附录 " + c["num"]))
+        head = (f'<nav class="crumbs"><a href="{root}{std}index.html">{"Standard" if en else "标准"}</a></nav>'
+                f'<header class="page-head"><div class="page-num">{label}</div>'
+                f'<h1>{esc(title)}</h1>' + ("" if en else f'<div class="page-en">{esc(c["title"])}</div>')
+                + (f'<p class="page-summary">{esc(cp["summary"])}</p>' if cp and cp["summary"] else "")
+                + f'<div class="page-meta"><a class="sn-chip" href="{EEL}{c["id"]}" target="_blank" rel="noopener">[{esc(c["id"])}] ↗</a>'
+                  f'{progress_bar(covered, total)}</div></header>')
+        body = head + intro + children_block(c, root, ctx, title="Contents" if en else "条款一览")
+        write(url, layout(title=f'{title} [{c["id"]}]', body=body, root=root, active="std",
+                          toc=toc_html(toks), page_id=c["id"], url=url,
+                          alt=f"std/{c['id']}.html" if en else (f"en/std/{c['id']}.html" if EN_STD else "")))
+        if not en:
+            search.append({"t": title, "e": c["title"], "s": c["id"], "n": c["num"], "u": url, "k": "clause", "x": cp["summary"] if cp else ""})
+
+    # ---- std index
+    write(f"{std}index.html", std_index(clauses, by_id, ctx, toc_meta))
 
 
 def nav_node(e, by_id, ctx):
@@ -933,13 +1134,14 @@ def coverage(e, by_id, ctx):
 
 def progress_bar(covered, total):
     pct = 0 if not total else round(100 * covered / total)
-    return (f'<span class="progress" title="{covered}/{total} 个条款已有笔记"><span class="bar"><span style="width:{pct}%"></span></span>'
+    tip = f"{covered}/{total} subclauses have English notes" if LANG == "en" else f"{covered}/{total} 个条款已有笔记"
+    return (f'<span class="progress" title="{tip}"><span class="bar"><span style="width:{pct}%"></span></span>'
             f'<span class="pct">{covered}/{total}</span></span>')
 
 
 def related_block(rel, ctx, key, root):
     items = "".join(f"<li>{xref_html(r, None, ctx, key)}</li>" for r in rel).replace("{ROOT}", root)
-    return f'<section class="related"><h2 id="related">相关阅读</h2><ul>{items}</ul></section>'
+    return f'<section class="related"><h2 id="related">{"Related" if LANG == "en" else "相关阅读"}</h2><ul>{items}</ul></section>'
 
 
 def pager(prev_p, next_p, root, ctx):
@@ -948,11 +1150,18 @@ def pager(prev_p, next_p, root, ctx):
             return f'<span class="pager-{cls}"></span>'
         sn = f' <span class="sn">[{esc(p["id"])}]</span>' if p["kind"] == "std" else ""
         return f'<a class="pager-{cls}" href="{root}{p["url"]}"><span class="pager-label">{label}</span><span class="pager-title">{esc(p["title"])}{sn}</span></a>'
-    return f'<nav class="pager">{card(prev_p, "prev", "← 上一篇")}{card(next_p, "next", "下一篇 →")}</nav>'
+    prev_l, next_l = ("← Previous", "Next →") if LANG == "en" else ("← 上一篇", "下一篇 →")
+    return f'<nav class="pager">{card(prev_p, "prev", prev_l)}{card(next_p, "next", next_l)}</nav>'
 
 
 def source_note(p, toc_meta):
     commit = toc_meta.get("draft_commit") or ""
+    if LANG == "en":
+        return (f'<footer class="page-foot">The authoritative text is <a href="{EEL}{p["id"]}" target="_blank" rel="noopener">eel.is/c++draft/{esc(p["id"])}</a>'
+                f' (working draft {esc(toc_meta.get("generated") or "")}, commit <code>{esc(commit[:10])}</code>). '
+                f'These are study notes that explain rather than quote; ¶ numbers follow the draft. '
+                f'Translated from the <a href="{{ROOT}}{p["zh"]["url"]}" hreflang="zh">Chinese original</a>.'
+                + (f' Last updated {esc(p["updated"])}.' if p["updated"] else "") + '</footer>')
     return (f'<footer class="page-foot">标准原文以 <a href="{EEL}{p["id"]}" target="_blank" rel="noopener">eel.is/c++draft/{esc(p["id"])}</a> 为准'
             f'（工作草案 {esc(toc_meta.get("generated") or "")}，commit <code>{esc(commit[:10])}</code>）。'
             f'本页为学习笔记，叙述以释义为主，段落号 ¶ 对应草案段落。'
@@ -975,6 +1184,8 @@ def search_item(p, body_html, toks, e, zh):
 
 
 def std_index(clauses, by_id, ctx, toc_meta):
+    if LANG == "en":
+        return en_std_index(clauses, by_id, ctx, toc_meta)
     root = "../"
     groups = {"lang": ("核心语言", "Core language · 第 1–15 章"), "lib": ("标准库", "Library · 第 16–33 章"),
               "annex": ("附录", "Annexes A–G")}
@@ -992,11 +1203,34 @@ def std_index(clauses, by_id, ctx, toc_meta):
                          f'<span class="t">{esc(title)}</span><span class="en">{esc(c["title"])} <span class="sn">[{esc(c["id"])}]</span></span>'
                          f'{progress_bar(cov, tot)}</a>')
         out.append(f'<section class="clause-group"><h2 id="{g}">{name} <small>{sub}</small></h2><div class="clause-grid">{"".join(cards)}</div></section>')
-    return layout(title="标准逐节", body="".join(out), root=root, active="std", page_id="std-index")
+    return layout(title="标准逐节", body="".join(out), root=root, active="std", page_id="std-index",
+                  url="std/index.html", alt="en/std/index.html" if EN_STD else "")
 
 
-def collection_index(kind, label, blurb, items):
-    root = "../"
+def en_std_index(clauses, by_id, ctx, toc_meta):
+    root = "../../"
+    groups = {"lang": ("Core language", "Clauses 1–15"), "lib": ("Library", "Clauses 16–33"), "annex": ("Annexes", "A–G")}
+    commit = toc_meta.get("draft_commit") or ""
+    out = [f'<header class="page-head"><h1>The standard, clause by clause</h1>'
+           f'<p class="page-summary">Organized by the standard\'s own structure. Entries in bold have English notes; grey entries (↗) '
+           f'link straight to the draft at eel.is. '
+           f'Draft: {esc(toc_meta.get("generated") or "")} (<a href="https://github.com/Eelis/draft/commit/{esc(commit)}" target="_blank" rel="noopener">{esc(commit[:10])}</a>).</p></header>']
+    for g, (name, sub) in groups.items():
+        cards = []
+        for c in clauses:
+            if clause_group(c) != g:
+                continue
+            cov, tot = coverage(c, by_id, ctx)
+            cards.append(f'<a class="clause-card" href="{root}en/std/{c["id"]}.html"><span class="num">{esc(c["num"])}</span>'
+                         f'<span class="t">{esc(c["title"])}</span><span class="en"><span class="sn">[{esc(c["id"])}]</span></span>'
+                         f'{progress_bar(cov, tot)}</a>')
+        out.append(f'<section class="clause-group"><h2 id="{g}">{name} <small>{sub}</small></h2><div class="clause-grid">{"".join(cards)}</div></section>')
+    return layout(title="The standard", body="".join(out), root=root, active="std", page_id="en-std-index",
+                  url="en/std/index.html", alt="std/index.html")
+
+
+def collection_index(kind, label, blurb, items, prefix="", untranslated=0):
+    root = "../" * (1 + prefix.count("/"))
     if items:
         def card(p):
             return (f'<a class="topic-card" href="{root}{p["url"]}"><span class="t">{esc(p["title"])}</span>'
@@ -1009,7 +1243,11 @@ def collection_index(kind, label, blurb, items):
                        + f'<div class="topic-grid">{"".join(card(p) for p in ps)}</div>' for g, ps in groups.items())
     else:
         body = '<p class="empty">这一栏还在准备中。</p>'
-    return layout(title=label, root=root, active=kind, page_id=f"{kind}-index",
+    if prefix and untranslated:  # English edition: say where the rest of the section is
+        body += (f'<p class="more">More pages in this section are available <a href="{root}{kind}/index.html" hreflang="zh">in Chinese</a>; '
+                 'English versions are being added over time.</p>')
+    return layout(title=label, root=root, active=kind, page_id=f"{prefix}{kind}-index", url=f"{prefix}{kind}/index.html",
+                  alt=f"{kind}/index.html" if prefix else (f"en/{kind}/index.html" if kind in EN_KINDS else ""),
                   body=f'<header class="page-head"><h1>{label}</h1><p class="page-summary">{esc(blurb)}</p></header>{body}')
 
 
@@ -1026,7 +1264,25 @@ def glossary_page(gloss_list, ctx):
             f'<p class="page-summary">标准术语的中英对照与释义。正文中带虚线下划线的术语可悬停查看定义。</p>'
             f'<div class="page-meta"><input class="gloss-filter" type="search" placeholder="筛选术语…"></div></header>'
             f'<dl class="glossary">{"".join(rows)}</dl>')
-    return layout(title="术语表", body=body, root=root, active="glossary", page_id="glossary")
+    return layout(title="术语表", body=body, root=root, active="glossary", page_id="glossary",
+                  url="glossary.html", alt="en/glossary.html" if EN_GLOSSARY else "")
+
+
+def en_glossary_page(ctx):
+    root = "../"
+    rows = []
+    for g in sorted(EN_GLOSSARY, key=lambda g: g["en"].lower()):
+        d, _ = render_markdown(g["def_en"], ctx, "en/glossary")
+        ref = xref_html(g["ref"], None, ctx, "en/glossary") if g.get("ref") else ""
+        rows.append(f'<div class="term" id="{esc(g["id"])}"><dt><span class="en">{esc(g["en"])}</span>'
+                    f'<span class="zh" lang="zh">{esc(g.get("zh", ""))}</span>{ref}</dt><dd>{d}</dd></div>')
+    body = (f'<header class="page-head"><h1>Glossary</h1>'
+            f'<p class="page-summary">Terms of the standard with short definitions and the Chinese term used on the Chinese edition. '
+            f'Terms with a dotted underline in the text show their definition on hover.</p>'
+            f'<div class="page-meta"><input class="gloss-filter" type="search" placeholder="Filter terms…"></div></header>'
+            f'<dl class="glossary">{"".join(rows)}</dl>').replace("{ROOT}", root)
+    return layout(title="Glossary", body=body, root=root, active="glossary", page_id="en-glossary",
+                  url="en/glossary.html", alt="glossary.html")
 
 
 def home_page(clauses, by_id, ctx, pages, toc_meta):
@@ -1071,7 +1327,37 @@ def home_page(clauses, by_id, ctx, pages, toc_meta):
 <section class="home-cov"><h2 id="coverage">核心语言覆盖进度</h2><div class="cov-list">{''.join(rows)}</div>
 <p class="more"><a href="std/index.html">全部章节（含标准库与附录）→</a></p></section>
 """
-    return layout(title=SITE_NAME, body=body, root=root, active="home", page_id="home", body_class="home")
+    return layout(title=SITE_NAME, body=body, root=root, active="home", page_id="home", body_class="home",
+                  url="index.html", alt="en/index.html")
+
+
+def en_home(en_pages):
+    """en/index.html: what the English edition has so far."""
+    root = "../"
+    home_md = CONTENT / "en" / "_home.md"
+    intro = ""
+    if home_md.exists():
+        intro = markdown.markdown(parse_frontmatter(home_md.read_text(encoding="utf-8"))[1], extensions=["extra"])
+    groups = []
+    for kind in EN_KINDS:
+        items = sorted((p for p in en_pages.values() if p["kind"] == kind), key=lambda p: (p["order"], p["title"]))
+        cards = "".join(f'<a class="topic-card" href="{root}{p["url"]}"><span class="t">{esc(p["title"])}</span>'
+                        f'<span class="s">{esc(p["summary"])}</span></a>' for p in items)
+        groups.append(f'<h2 class="coll-group"><a href="{root}en/{kind}/index.html">{EN["collections"][kind][0]}</a></h2>'
+                      f'<div class="topic-grid">{cards}</div>')
+    std_link = (f'<h2 class="coll-group"><a href="{root}en/std/index.html">The standard, clause by clause →</a></h2>' if EN_STD else "")
+    body = f"""
+<section class="hero">
+  <div class="hero-mark">§</div>
+  <h1>{EN["site"]}</h1>
+  <p class="hero-en">{EN["sub"]}</p>
+  <p class="hero-lede">Notes on the C++ working draft at eel.is: what the rules say, why they are written that way, how they interact, and how they got here, with examples you can run.</p>
+</section>
+<div class="prose home-intro">{intro}</div>
+{std_link}{"".join(groups)}
+"""
+    return layout(title=EN["site"], body=body, root=root, active="home", page_id="en-home", body_class="home",
+                  url="en/index.html", alt="index.html")
 
 
 def write(rel, text):

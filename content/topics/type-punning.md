@@ -361,7 +361,7 @@ int main() {
 这里涉及对象模型的两条规则：
 
 - 只有 `unsigned char` 和 `std::byte` 数组能为新建的完整对象**提供存储**（provide storage），数组自身的生命周期不受影响（[[intro.object#3]]）。`char` 数组不在其列：在 `char` 数组里建对象是复用存储，被覆盖的 `char` 元素的生命周期随之结束。
-- `unsigned char` 或 `std::byte` 数组的生命周期开始时，会在其中隐式创建对象（[[intro.object#16]]）。所以 `alignas(Header) unsigned char buf[64]; recv(fd, buf, 64, 0);` 之后，`buf` 里可以已经有一个 `Header`。但从 `buf` 退化来的指针不指向它，需要 `std::launder`（见 [[topics/object-model]] 谜题 3）。
+- `unsigned char` 或 `std::byte` 数组的生命周期开始时，会在其中隐式创建对象（[[intro.object#16]]）。所以 `alignas(Header) unsigned char buf[64]; recv(fd, buf, 64, 0);` 之后，`buf` 里可以已经有一个 `Header`。但从 `buf` 退化来的指针不指向它，需要 `std::launder`（见 [[topics/object-model]] 谜题 5）。
 
 ## 常量求值中的双关
 
