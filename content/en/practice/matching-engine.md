@@ -11,6 +11,7 @@ updated: 2026-11-03
     - The standard structure is a price-sorted table of levels per side, a FIFO queue per level, and a hash table from order id to the order's position, which makes a cancel O(1).
     - On our test machine, replacing `std::map` plus `std::list` with a sorted `vector`, an object pool and an open-addressing hash table took the cost per message from 94 ns to 71 ns with a shallow book and from 178 ns to 94 ns with a deep one. The problem requires rejecting any id ever used, and the table that remembers all of them costs another 20-odd nanoseconds on its own.
     - The difference in maximum latency is far larger than in the average: without reserved capacity, one hash-table rehash makes a single message take 70 to 100 ms.
+    - In real systems, too, one book is matched by one thread with no lock on it. Threads are used around the book: gateways, a sequencer, matching threads sharded by symbol and output threads, handing messages over through single-producer single-consumer queues.
     - These interviews usually spend an hour discussing the design and an hour writing code against tests. In the design phase, pin down the semantics first; while coding, be able to say why each data structure was chosen and what would change if a requirement changed.
 
 ## Interview format
@@ -1235,6 +1236,95 @@ Without reserved capacity, the duplicate-check table keeps doubling as ids accum
 
 With capacity reserved, the optimized version still has millisecond-scale maxima. We did not track down every cause; with the shallow book, removing the duplicate-check table (requiring ids to increase) brings the maximum under 0.1 ms, so it is related to that table of several hundred MB. One possible cause is page faults on the first touch of each of its pages.
 
+## How real systems use threads
+
+Both implementations above are single-threaded, and real matching engines are the same in this respect: one book is matched by one thread, with no lock on the book. Threads are used around the book, to receive and send messages, write logs and run risk checks.
+
+### Why one book gets one thread
+
+- **The matching order is itself a rule.** Time priority requires every message to have a definite place in sequence. If two threads modify one book under a lock, nothing breaks, but which one gets the lock first is chance, and the same input can produce different trades.
+- **Determinism is what recovery and failover rest on.** The same input sequence must produce the same output; only then can a log be replayed after a crash, or a standby follow the primary live (follow-up 23).
+- **A lock costs more than the matching.** A message takes tens of nanoseconds; when the lock and the book's data move back and forth between cores, every cache-line transfer costs tens to a hundred-odd nanoseconds, and more threads make it slower.
+
+The most detailed public example is the LMAX exchange. Martin Fowler's 2011 article "The LMAX Architecture" describes its core: all business logic runs on one thread with all data in memory, handling about 6 million orders per second on that single thread; input and output each pass through a ring buffer to and from other threads.
+
+### Overall structure
+
+<figure class="diagram">
+<svg viewBox="0 0 760 330" role="img" aria-label="Gateway threads, a sequencer thread, matching threads sharded by symbol and output threads, connected by queues" style="width:100%;height:auto;font-family:var(--font-sans);font-size:13px">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ink)" opacity=".55"/></marker></defs>
+<g fill="var(--ink)" opacity=".6" text-anchor="middle" font-size="12"><text x="55" y="22">Clients</text><text x="205" y="22">Gateway threads</text><text x="375" y="22">Sequencer</text><text x="540" y="22">Matching threads</text><text x="695" y="22">Output</text></g>
+<g fill="var(--surface)" stroke="var(--line)" stroke-width="1.2">
+<rect x="15" y="45" width="80" height="30" rx="6"/><rect x="15" y="90" width="80" height="30" rx="6"/><rect x="15" y="160" width="80" height="30" rx="6"/><rect x="15" y="205" width="80" height="30" rx="6"/>
+<rect x="140" y="55" width="130" height="56" rx="8"/><rect x="140" y="170" width="130" height="56" rx="8"/>
+<rect x="320" y="70" width="110" height="140" rx="8" stroke="var(--accent)"/>
+<rect x="320" y="255" width="110" height="44" rx="8"/>
+<rect x="470" y="45" width="140" height="48" rx="8" stroke="var(--accent)"/><rect x="470" y="116" width="140" height="48" rx="8" stroke="var(--accent)"/><rect x="470" y="187" width="140" height="48" rx="8" stroke="var(--accent)"/>
+<rect x="645" y="45" width="100" height="190" rx="8"/>
+</g>
+<g fill="var(--ink)" text-anchor="middle">
+<text x="55" y="65">Client A</text><text x="55" y="110">Client B</text><text x="55" y="180">Client C</text><text x="55" y="225">Client D</text>
+<text x="205" y="78">Gateway 1</text><text x="205" y="98" font-size="11.5" opacity=".7">parse · session · risk</text>
+<text x="205" y="193">Gateway 2</text><text x="205" y="213" font-size="11.5" opacity=".7">parse · session · risk</text>
+<text x="375" y="100">Sequencer</text><text x="375" y="128" font-size="11.5" opacity=".7">total order</text><text x="375" y="148" font-size="11.5" opacity=".7">sequence numbers</text><text x="375" y="168" font-size="11.5" opacity=".7">route by symbol</text>
+<text x="375" y="275">Log · standby</text><text x="375" y="291" font-size="11" opacity=".7">persist, replicate</text>
+<text x="540" y="66">Matcher 0</text><text x="540" y="83" font-size="11.5" opacity=".7">books S0 S3 S6</text>
+<text x="540" y="137">Matcher 1</text><text x="540" y="154" font-size="11.5" opacity=".7">books S1 S4 S7</text>
+<text x="540" y="208">Matcher 2</text><text x="540" y="225" font-size="11.5" opacity=".7">books S2 S5</text>
+<text x="695" y="110">Publish</text><text x="695" y="135" font-size="11.5" opacity=".7">exec reports</text><text x="695" y="155" font-size="11.5" opacity=".7">market data</text><text x="695" y="175" font-size="11.5" opacity=".7">output log</text>
+</g>
+<g stroke="var(--ink)" stroke-opacity=".45" stroke-width="1.2" fill="none" marker-end="url(#ah)">
+<path d="M95 60L138 76"/><path d="M95 105L138 92"/><path d="M95 175L138 191"/><path d="M95 220L138 207"/>
+<path d="M270 83L318 115"/><path d="M270 198L318 165"/>
+<path d="M375 210L375 253"/>
+<path d="M430 110L468 72"/><path d="M430 140L468 140"/><path d="M430 170L468 208"/>
+<path d="M610 69L643 100"/><path d="M610 140L643 140"/><path d="M610 211L643 180"/>
+</g>
+<text x="380" y="322" text-anchor="middle" fill="var(--ink)" opacity=".6" font-size="12">Every arrow between threads is a single-producer single-consumer queue; each book is touched by one matching thread only</text>
+</svg>
+</figure>
+
+A message passes through four kinds of thread, left to right:
+
+- **Gateway threads**: each handles a subset of client connections, parses the protocol, maintains sessions (logon, heartbeats, message sequence numbers and resends) and runs pre-trade risk checks (follow-up 29). Parsing and validation are the most expensive part of the path, and the number of gateway threads can grow with the number of connections.
+- **Sequencer thread**: puts the messages from all gateways into one total order and numbers them. That order is the "time" in time priority (follow-up 24) and the order in which the log is replayed (follow-up 23). A message reaches matching only after it has been written to the log and replicated to the standby. LMAX makes these steps several consumers of one input ring buffer: logging and replication read the same messages in parallel, and the matching thread only processes messages that are already persisted and replicated. The sequencer is the system's only serial point, so it does nothing beyond numbering and routing.
+- **Matching threads**: sharded by symbol, each thread owns some books outright, and inside it is the single-threaded engine from this page. It reads only its own input queue, writes events to its output queue, and makes no system calls.
+- **Output threads**: encode events into execution reports for clients and public order-by-order market data, and write the output log. String formatting, system calls and network sends are all far slower than matching and vary in duration, so they stay off the matching thread (follow-up 21).
+
+### Handing messages between threads
+
+Between each pair of adjacent threads is a **single-producer single-consumer** ring buffer: a fixed-size array in which the producer writes only the tail index and the consumer writes only the head index, with no lock and no compare-and-swap. For the code and the memory order of each atomic operation, see the ring buffer section of [[topics/concurrency-in-practice|concurrency in practice]]. Used here, a few things matter:
+
+- **Keep the two indices on different cache lines.** Otherwise each write of the tail by the producer invalidates the consumer's cache line, and two threads that share nothing slow each other down. The cache line on our test machine is 128 bytes; see [[perf/false-sharing|false sharing]].
+- **Each side caches a copy of the other side's index.** The producer reads the consumer's head only when the queue looks full, and the consumer reads the tail only when it looks empty; otherwise neither touches the other's cache line.
+- **Messages are fixed-size values with no pointers into the heap.** Slots are preallocated and a handoff is a copy. Who frees the object behind a pointer, and when, is hard to manage across threads.
+- **Several gateways feeding one sequencer use several single-producer queues, not one multi-producer queue.** The sequencer reads each gateway's queue in turn, and the order in which it reads them is the total order. A multi-producer queue needs a compare-and-swap on the tail index, and gateways writing at the same time contend on that one variable.
+
+### Spin or sleep
+
+When a matching thread's input queue is empty, there are two ways to wait:
+
+- **Spin**: keep polling the queue. A new message can be seen within tens of nanoseconds, at the cost of a core that is always fully busy, idle or not. Latency-sensitive systems usually do this and pin the matching thread to a fixed core, so the scheduler neither puts other threads there nor migrates it elsewhere. On Linux you pin with `sched_setaffinity` and take those cores out of normal scheduling with boot parameters such as `isolcpus`; macOS has no interface for pinning threads, only a QoS hint that asks for performance cores (see [[perf/measuring|measuring]]).
+- **Sleep**: put the thread to sleep on a condition variable or `std::atomic::wait`, and have the producer wake it after pushing a message. This saves CPU, but getting from wake-up to running again takes several microseconds, two orders of magnitude slower than matching one message.
+
+C++20's `std::atomic::wait` does not necessarily sleep right away. The libc++ on our test machine (`<__atomic/atomic_sync.h>`) checks 64 times, then keeps spinning until 4 µs have passed with no change, and only then calls the operating system's wait. With messages less than 4 µs apart it behaves much like spinning; with longer gaps every message pays for a wake-up.
+
+### Why not put a lock on the engine
+
+Asked "how would you make this multithreaded?", a common wrong answer is to put one lock around `insert`, `cancel` and `amend`. You can lay out the options in order:
+
+1. **One global lock.** Simple and correct, but messages still execute one at a time, with the added cost of the lock and of moving the book's data between cores. More threads make each message slower.
+2. **One lock per symbol.** Different symbols can now run in parallel. But `CANCEL` and `AMEND` carry no symbol, so the id must first be looked up to find its symbol, and that id table becomes a structure shared by all threads that needs protection of its own; the `live_` and `used_` tables in this page's optimized implementation are shared across symbols too.
+3. **Shard by symbol and pass messages between threads through queues.** Each book is touched by one thread, so no lock is needed and determinism is kept. This is what real systems do.
+
+### What sharding brings with it
+
+- **Cancels must find their shard.** This problem's cancels carry no symbol, so the routing thread has to keep a table from id to shard and delete entries when orders fill or are cancelled. Real protocols usually require the symbol on a cancel; in FIX, for example, the symbol is a required field of the cancel request, and the problem goes away.
+- **Cross-symbol orders cannot simply be sharded.** A combination order (say, a spread that buys one month and sells another) has to match against two books at once, so both books must be on the same thread. Shards are therefore usually groups of related symbols, such as the futures on one underlying together with the spreads between them, rather than a hash of the symbol name.
+- **Uneven load.** A few popular symbols carry far more messages than the rest, and one symbol cannot be split across two threads. Shards should be assigned by actual message volume and be adjustable while the market is closed.
+- **A client's reports no longer have a global order.** Events within one symbol are still ordered; the order in which reports from different shards reach a client depends on how fast each shard runs. The protocol has to say within what scope ordering is guaranteed.
+- **Risk across symbols.** An account's total position and funds involve every symbol, so they cannot live in any one matching thread. A common approach is for the gateway to reserve limits for the worst case before an order is sent, and release them after fills or cancels.
+
 ## Verbal follow-ups
 
 The questions below are grouped by theme. They can come up during the design discussion or after the code is written. When answering, give the conclusion first, then the reason and the cost.
@@ -1325,7 +1415,7 @@ In this problem's interface every call passes a string, and the engine hashes an
 
 #### 20. How do you use multiple cores?
 
-Books for different symbols are independent, so shard by symbol: each thread owns a group of symbols and their books, with no locks at all. A gateway thread dispatches messages by symbol into a single-producer single-consumer queue for each matching thread. The queue's read and write indices must sit on different cache lines, or false sharing results (see [[perf/false-sharing|false sharing]]). In this problem `CANCEL` and `AMEND` carry no symbol, so after sharding the gateway does not know which thread to send them to and needs a global table from id to symbol; this is one reason real protocols require cancels to carry the symbol. One book should never be matched by several threads at once: the matching order is itself part of the rules.
+Books for different symbols are independent, so shard by symbol: each thread owns a group of symbols and their books, with no locks at all. A gateway thread dispatches messages by symbol into a single-producer single-consumer queue for each matching thread. The queue's read and write indices must sit on different cache lines, or false sharing results (see [[perf/false-sharing|false sharing]]). In this problem `CANCEL` and `AMEND` carry no symbol, so after sharding the gateway does not know which thread to send them to and needs a global table from id to symbol; this is one reason real protocols require cancels to carry the symbol. One book should never be matched by several threads at once: the matching order is itself part of the rules. The overall structure is in "How real systems use threads".
 
 #### 21. Which thread does logging and execution reports?
 
@@ -1391,4 +1481,5 @@ While coding, get it right before getting it fast. A clearly structured referenc
 | Structure | sorted table of levels + one FIFO queue per level + hash table from id to position |
 | Correctness | stored positions must stay valid across other operations; callbacks must not re-enter; five invariants; differential testing |
 | Performance | with a shallow book, the cache hides pointer chasing; with a deep book, contiguous storage is nearly twice as fast; remembering every id is expensive in itself; reserve capacity to avoid rehash stalls |
+| Concurrency | one thread per book, no locks; shard by symbol; single-producer single-consumer queues between threads; matching threads spin and are pinned to cores |
 | Discussion | ask about semantics first; state the cost of each choice; be able to say what changes when a requirement changes |
