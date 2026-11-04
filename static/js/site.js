@@ -96,10 +96,10 @@
     { k: "lang", label: "核心语言" }, { k: "lib", label: "标准库" }, { k: "annex", label: "附录" },
     { k: "topics", label: "专题" }, { k: "patterns", label: "模式" }, { k: "perf", label: "性能" },
     { k: "toolchain", label: "工程" }, { k: "history", label: "沿革" }, { k: "papers", label: "提案" },
-    { k: "exams", label: "考卷" }
+    { k: "exams", label: "考卷" }, { k: "practice", label: "实战" }
   ];
   if (EN) {
-    var EN_LABEL = { topics: "Topics", patterns: "Patterns", perf: "Performance", toolchain: "Engineering", history: "History", papers: "Papers", exams: "Quizzes" };
+    var EN_LABEL = { topics: "Topics", patterns: "Patterns", perf: "Performance", toolchain: "Engineering", history: "History", papers: "Papers", exams: "Quizzes", practice: "Practice" };
     TABS = (NAV_EN.clauses ? [{ k: "lang", label: "Core" }, { k: "lib", label: "Library" }, { k: "annex", label: "Annexes" }] : [])
       .concat(Object.keys(NAV_EN).filter(function (k) { return k !== "clauses"; }).map(function (k) { return { k: k, label: EN_LABEL[k] || k }; }));
   }
@@ -108,7 +108,7 @@
     if (EN && curPath.length) return NAV.groups[curPath[0].i] || "lang";
     if (EN) return NAV_EN[act] && act !== "clauses" ? act : (TABS[0] && TABS[0].k);
     if (curPath.length) return NAV.groups[curPath[0].i] || "lang";
-    if (act === "topics" || act === "patterns" || act === "perf" || act === "toolchain" || act === "history" || act === "papers" || act === "exams") return act;
+    if (act === "topics" || act === "patterns" || act === "perf" || act === "toolchain" || act === "history" || act === "papers" || act === "exams" || act === "practice") return act;
     return store("tab") || "lang";
   }
   function renderSidebar(tab) {
@@ -172,8 +172,8 @@
     document.head.appendChild(sc);
   }
   var sel = 0, results = [];
-  var KIND = EN ? { clause: "clause ↗", topics: "topic", patterns: "pattern", perf: "performance", toolchain: "engineering", history: "history", papers: "paper", std: "note", exams: "quiz", term: "term", eel: "draft ↗" }
-               : { std: "笔记", clause: "章", topics: "专题", patterns: "模式", perf: "性能", toolchain: "工程", history: "沿革", papers: "提案", term: "术语", eel: "原文 ↗" };
+  var KIND = EN ? { clause: "clause ↗", topics: "topic", patterns: "pattern", perf: "performance", toolchain: "engineering", history: "history", papers: "paper", std: "note", exams: "quiz", practice: "practice", term: "term", eel: "draft ↗" }
+               : { std: "笔记", clause: "章", topics: "专题", patterns: "模式", perf: "性能", toolchain: "工程", history: "沿革", papers: "提案", exams: "考卷", practice: "实战", term: "术语", eel: "原文 ↗" };
 
   function openSearch() {
     if (!modal) return;

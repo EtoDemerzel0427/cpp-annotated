@@ -42,6 +42,7 @@ COLLECTIONS = {
     "history": ("沿革", "一个特性或一个库是怎么走到今天的：早期的尝试、委员会里的争论与妥协、被否决的方案、后来的转机，以及还在进行中的工作。"),
     "papers": ("提案", "WG21 提案解读：一个特性从动机、设计取舍到最终措辞的来龙去脉。"),
     "exams": ("考卷", "按主题组卷的 language lawyer 测验：每题先作答再看解析，解析给出判定和标准出处。判分只保存在你自己的浏览器里。"),
+    "practice": ("实战", "完整的工程题：题面、分阶段的要求和测试用例、参考实现与优化版本的实测对比，以及面试里常见的口头追问和回答要点。"),
 }
 
 STATUS = {
@@ -104,6 +105,7 @@ EN = {
         "history": ("History", "How a feature or a library got to where it is today: early attempts, committee debates and compromises, rejected designs, and the work still in progress."),
         "papers": ("Papers", "WG21 proposals explained: motivation, design trade-offs and the final wording."),
         "exams": ("Quizzes", "Language-lawyer quizzes by topic."),
+        "practice": ("Practice", "Complete engineering problems with tests, reference solutions, measurements and follow-up questions."),
     },
     "admonitions": {
         "tldr": "Key points", "std": "The standard says", "note": "Note", "tip": "Tip", "warning": "Warning",
@@ -581,6 +583,7 @@ def layout(*, title, body, root, active="", toc="", desc="", page_id="", body_cl
     <a href="{root}papers/index.html" data-nav="papers">提案</a>
     <a href="{root}exercises.html" data-nav="exercises">习题</a>
     <a href="{root}exams/index.html" data-nav="exams">考卷</a>
+    <a href="{root}practice/index.html" data-nav="practice">实战</a>
     <a href="{root}glossary.html" data-nav="glossary">术语</a>""".replace("{root}", root)
         switch = (f'<a class="lang-switch" href="{root}{alt or "en/index.html"}" hreflang="en" lang="en" '
                   f'title="{"Read this page in English" if alt else "English edition"}">EN</a>')

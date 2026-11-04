@@ -191,6 +191,7 @@ body[data-active="patterns"] .topnav a[data-nav="patterns"],
 body[data-active="perf"] .topnav a[data-nav="perf"],
 body[data-active="exercises"] .topnav a[data-nav="exercises"],
 body[data-active="exams"] .topnav a[data-nav="exams"],
+body[data-active="practice"] .topnav a[data-nav="practice"],
 body[data-active="glossary"] .topnav a[data-nav="glossary"] { color: var(--accent); background: var(--accent-bg); }
 .search-btn {
   margin-left: auto; display: flex; align-items: center; gap: 18px;
